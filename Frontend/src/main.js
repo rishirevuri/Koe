@@ -1,10 +1,3 @@
-const navItems = [
-  { label: "Product", href: "#product", arrow: true },
-  { label: "Solutions", href: "#solutions", arrow: true },
-  { label: "Pricing", href: "#pricing" },
-  { label: "About", href: "#about" },
-];
-
 const benefits = [
   {
     icon: "clock",
@@ -81,24 +74,11 @@ function BenefitItem({ icon, title, detail }) {
 }
 
 function Navbar() {
-  const links = navItems
-    .map(
-      (item) => `
-        <a href="${item.href}" class="nav-link">
-          ${item.label}
-          ${item.arrow ? '<span class="nav-chevron" aria-hidden="true"></span>' : ""}
-        </a>
-      `,
-    )
-    .join("");
-
   return `
     <header class="navbar" aria-label="Main navigation">
       <a class="brand" href="#" aria-label="Koe home">Koe</a>
-      <nav class="nav-center" aria-label="Primary links">${links}</nav>
       <div class="nav-actions">
-        <a class="login-link" href="#login">Login</a>
-        ${CTAButton({ label: "Start Free Trial", href: "#trial", variant: "nav" })}
+        ${CTAButton({ label: "Try the Product", href: "./product.html", variant: "nav" })}
       </div>
     </header>
   `;
@@ -132,7 +112,7 @@ function HeroSection() {
         </p>
 
         <div class="hero-actions">
-          ${CTAButton({ label: "Start Free Trial", href: "#trial" })}
+          ${CTAButton({ label: "Try the Product", href: "./product.html" })}
           ${CTAButton({ label: "Book a Demo", href: "#demo", variant: "secondary" })}
         </div>
 
