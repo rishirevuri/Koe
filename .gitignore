@@ -1,0 +1,16 @@
+.env
+.env.local
+**/.env
+**/.env.local
+**/.venv/
+**/**pycache**/
+**/__pycache__/
+**/*.pyc
+**/.pytest_cache/
+**/node_modules/
+Frontend/dist/
+Frontend/build/
+Frontend/.next/
+Backend/data/*.db
+.DS_Store
+*.log
