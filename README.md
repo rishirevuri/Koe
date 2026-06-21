@@ -1,4 +1,5 @@
 # Koe
+<<<<<<< HEAD
 
 Koe is an AI inventory data-cleaning and counting system for restaurants. It helps staff count inventory faster with voice, uploads, photos, and manual input, while preserving messy raw inputs and turning them into clean, consistent, analyzable inventory records.
 
@@ -65,3 +66,6 @@ ENABLE_EXTERNAL_AI=true
 - No authentication, payments, production database, or cloud deployment yet.
 - No real external AI, speech-to-text, vision, Google Sheets, Supabase, Stripe, Toast, or Square calls yet.
 - Parsing is deterministic and intentionally scoped to common local prototype cases.
+=======
+An AI inventory assistant that lets restaurant staff count inventory by voice and photo, then standardizes the data into clean, consistent records for spreadsheets or existing inventory systems.
+>>>>>>> b097e1661c3f7e351b66c2210b903e765135dc10
