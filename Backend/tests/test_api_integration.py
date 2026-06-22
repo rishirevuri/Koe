@@ -1,7 +1,10 @@
 from fastapi.testclient import TestClient
 
+from app.config import Settings
 from app.main import app
+from app.routes import integrations
 from app.seed import seed
+from app.services import external_ai_service, google_sheets_service, speech_to_text_service
 
 
 client = TestClient(app)
@@ -9,6 +12,58 @@ client = TestClient(app)
 
 def setup_function() -> None:
     seed(reset=True)
+
+
+class DisabledIntegrationSettings:
+    environment = "test"
+    database_url = "sqlite:///./data/koe.db"
+    enable_external_ai = False
+    speech_provider = "elevenlabs"
+    text_ai_provider = "claude"
+    payments_enabled = False
+
+    supabase_url = None
+    supabase_anon_key = None
+    supabase_service_role_key = None
+    elevenlabs_api_key = "test-elevenlabs-key"
+    gemini_api_key = None
+    google_api_key = None
+    anthropic_api_key = "test-anthropic-key"
+    google_sheets_client_id = None
+    google_sheets_client_secret = None
+    google_sheets_redirect_uri = "http://localhost:8000/integrations/google/callback"
+
+    @staticmethod
+    def _has_real_value(value: str | None) -> bool:
+        return bool(value and value.strip() and not value.strip().startswith("your_"))
+
+    @property
+    def is_supabase_configured(self) -> bool:
+        return False
+
+    @property
+    def is_gemini_configured(self) -> bool:
+        return False
+
+    @property
+    def is_elevenlabs_configured(self) -> bool:
+        return True
+
+    @property
+    def is_claude_configured(self) -> bool:
+        return True
+
+    @property
+    def is_google_sheets_configured(self) -> bool:
+        return False
+
+
+def use_disabled_integration_settings(monkeypatch) -> None:
+    settings = DisabledIntegrationSettings()
+    monkeypatch.setattr(integrations, "get_settings", lambda: settings)
+    monkeypatch.setattr(speech_to_text_service, "get_settings", lambda: settings)
+    monkeypatch.setattr(external_ai_service, "get_settings", lambda: settings)
+    monkeypatch.setattr(google_sheets_service, "get_settings", lambda: settings)
 
 
 def test_health() -> None:
@@ -95,7 +150,69 @@ def test_vague_partial_phrase_creates_review_flag() -> None:
     assert entry["review_reason"] == "Vague partial quantity: almost empty"
 
 
-def test_integrations_disabled_without_keys() -> None:
+def test_backend_settings_default_without_env(monkeypatch) -> None:
+    for key in (
+        "ENABLE_EXTERNAL_AI",
+        "ELEVENLABS_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "SPEECH_PROVIDER",
+        "TEXT_AI_PROVIDER",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    settings = Settings(_env_file=None)
+    assert settings.enable_external_ai is False
+    assert settings.speech_provider == "elevenlabs"
+    assert settings.text_ai_provider == "claude"
+
+
+def test_integrations_disabled_without_external_calls(monkeypatch) -> None:
+    use_disabled_integration_settings(monkeypatch)
     response = client.post("/integrations/transcribe-audio", json={"filename": "count.m4a"})
     assert response.status_code == 200
-    assert response.json()["configured"] is False
+    payload = response.json()
+    assert payload["configured"] is False
+    assert payload["provider"] == "elevenlabs"
+    assert "ELEVENLABS_API_KEY" in payload["message"]
+    assert "ENABLE_EXTERNAL_AI=true" in payload["message"]
+
+
+def test_integrations_status_is_robust_to_local_keys(monkeypatch) -> None:
+    use_disabled_integration_settings(monkeypatch)
+    response = client.get("/integrations/status")
+    assert response.status_code == 200
+    payload = response.json()
+    for key in (
+        "external_ai_enabled",
+        "supabase_configured",
+        "elevenlabs_configured",
+        "gemini_configured",
+        "claude_configured",
+        "google_sheets_configured",
+        "payments_enabled",
+    ):
+        assert key in payload
+    assert payload["external_ai_enabled"] is False
+    assert payload["payments_enabled"] is False
+
+
+def test_claude_placeholder_disabled_without_external_calls(monkeypatch) -> None:
+    use_disabled_integration_settings(monkeypatch)
+    response = client.post("/integrations/parse-with-claude", json={"transcript": "3 bottles olive oil"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is False
+    assert payload["provider"] == "claude"
+    assert "ANTHROPIC_API_KEY" in payload["message"]
+    assert "ENABLE_EXTERNAL_AI=true" in payload["message"]
+
+
+def test_google_sheets_placeholder_disabled_without_external_calls(monkeypatch) -> None:
+    use_disabled_integration_settings(monkeypatch)
+    response = client.post("/integrations/export-google-sheets", json={"count_id": 1})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["configured"] is False
+    assert payload["provider"] == "google_sheets"
+    assert "Google Sheets OAuth credentials" in payload["message"]
+    assert "ENABLE_EXTERNAL_AI=true" in payload["message"]

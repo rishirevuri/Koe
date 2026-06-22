@@ -2,6 +2,11 @@
 .env.local
 **/.env
 **/.env.local
+Backend/.env
+Frontend/.env
+*.key
+*.pem
+*.p12
 **/.venv/
 **/**pycache**/
 **/__pycache__/
