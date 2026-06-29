@@ -1,17 +1,37 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from app import auth as auth_deps
 from app.config import Settings
+from app.database import SessionLocal
 from app.main import app
-from app.routes import integrations
+from app.models import CountSession, Restaurant
+from app.routes import ai, integrations
+from app.routes import auth as auth_routes
 from app.seed import seed
 from app.services import external_ai_service, google_sheets_service, speech_to_text_service
 
 
 client = TestClient(app)
+TEST_USER = auth_deps.SupabaseUser(user_id="test-supabase-user", email="tester@example.com")
+
+
+def override_current_user() -> auth_deps.SupabaseUser:
+    return TEST_USER
 
 
 def setup_function() -> None:
     seed(reset=True)
+    app.dependency_overrides.clear()
+    app.dependency_overrides[auth_deps.get_current_supabase_user] = override_current_user
+    db = SessionLocal()
+    try:
+        restaurant = db.query(Restaurant).filter(Restaurant.name == "Smoking Pig BBQ").one()
+        restaurant.owner_user_id = TEST_USER.user_id
+        db.add(restaurant)
+        db.commit()
+    finally:
+        db.close()
 
 
 class DisabledIntegrationSettings:
@@ -60,10 +80,16 @@ class DisabledIntegrationSettings:
 
 def use_disabled_integration_settings(monkeypatch) -> None:
     settings = DisabledIntegrationSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
     monkeypatch.setattr(integrations, "get_settings", lambda: settings)
     monkeypatch.setattr(speech_to_text_service, "get_settings", lambda: settings)
     monkeypatch.setattr(external_ai_service, "get_settings", lambda: settings)
     monkeypatch.setattr(google_sheets_service, "get_settings", lambda: settings)
+
+
+@pytest.fixture(autouse=True)
+def isolate_external_integrations(monkeypatch) -> None:
+    use_disabled_integration_settings(monkeypatch)
 
 
 def test_health() -> None:
@@ -72,15 +98,47 @@ def test_health() -> None:
     assert response.json() == {"status": "ok", "service": "Koe Backend"}
 
 
-def test_seed_demo_data_available() -> None:
-    response = client.get("/inventory/items", params={"restaurant_id": 1})
+def test_protected_route_without_token_returns_401() -> None:
+    app.dependency_overrides.pop(auth_deps.get_current_supabase_user, None)
+    response = client.get("/inventory/items")
+    assert response.status_code == 401
+
+
+def test_auth_me_without_token_returns_401() -> None:
+    app.dependency_overrides.pop(auth_deps.get_current_supabase_user, None)
+    response = client.get("/auth/me")
+    assert response.status_code == 401
+
+
+def test_seed_tester_data_available() -> None:
+    response = client.get("/inventory/items")
     assert response.status_code == 200
     names = {item["name"] for item in response.json()}
     assert {"Olive oil", "Lettuce", "Tomatoes", "Cheese"}.issubset(names)
 
 
+def test_auth_me_returns_current_workspace() -> None:
+    response = client.get("/auth/me")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["user_id"] == TEST_USER.user_id
+    assert payload["email"] == TEST_USER.email
+    assert payload["restaurant"]["name"] == "Smoking Pig BBQ"
+
+
+def test_dev_link_route_disabled_outside_development(monkeypatch) -> None:
+    settings = DisabledIntegrationSettings()
+    settings.environment = "production"
+    monkeypatch.setattr(auth_routes, "get_settings", lambda: settings)
+    response = client.post(
+        "/auth/dev-link-restaurant",
+        json={"email": TEST_USER.email, "restaurant_name": "Massimo’s"},
+    )
+    assert response.status_code == 403
+
+
 def test_voice_parse_save_report_and_csv() -> None:
-    count_response = client.post("/counts", json={"restaurant_id": 1, "area": "Dry Storage", "notes": "Sunday night count"})
+    count_response = client.post("/counts", json={"area": "Dry Storage", "notes": "Sunday night count"})
     assert count_response.status_code == 200
     count_id = count_response.json()["id"]
 
@@ -90,7 +148,7 @@ def test_voice_parse_save_report_and_csv() -> None:
     )
     parse_response = client.post(
         "/ai/parse-voice",
-        json={"restaurant_id": 1, "count_session_id": count_id, "text": text, "area": "Dry Storage", "save": True},
+        json={"count_session_id": count_id, "text": text, "area": "Dry Storage", "save": True},
     )
     assert parse_response.status_code == 200
     entries = parse_response.json()["entries"]
@@ -122,22 +180,21 @@ def test_voice_parse_save_report_and_csv() -> None:
 
 
 def test_unknown_item_creates_issue() -> None:
-    count_id = client.post("/counts", json={"restaurant_id": 1, "area": "Walk-in"}).json()["id"]
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
     response = client.post(
         "/ai/parse-upload",
-        json={"restaurant_id": 1, "count_session_id": count_id, "text": "Mystery sauce 4 boxes", "area": "Walk-in", "save": True},
+        json={"count_session_id": count_id, "text": "Mystery sauce 4 boxes", "area": "Walk-in", "save": True},
     )
     assert response.status_code == 200
-    issues = client.get("/issues", params={"restaurant_id": 1}).json()
+    issues = client.get("/issues").json()
     assert any(issue["issue_type"] == "unknown_item" for issue in issues)
 
 
 def test_vague_partial_phrase_creates_review_flag() -> None:
-    count_id = client.post("/counts", json={"restaurant_id": 1, "area": "Dry Storage"}).json()["id"]
+    count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
     response = client.post(
         "/ai/parse-voice",
         json={
-            "restaurant_id": 1,
             "count_session_id": count_id,
             "text": "We have 5 bottles of olive oil, one almost empty.",
             "area": "Dry Storage",
@@ -148,6 +205,28 @@ def test_vague_partial_phrase_creates_review_flag() -> None:
     entry = response.json()["entries"][0]
     assert entry["needs_review"] is True
     assert entry["review_reason"] == "Vague partial quantity: almost empty"
+
+
+def test_ownership_checks_prevent_other_restaurant_count_and_report() -> None:
+    db = SessionLocal()
+    try:
+        massimo = db.query(Restaurant).filter(Restaurant.name == "Massimo’s").one()
+        massimo.owner_user_id = "other-user"
+        count = CountSession(restaurant_id=massimo.id, area="Walk-in")
+        db.add_all([massimo, count])
+        db.commit()
+        db.refresh(count)
+        count_id = count.id
+    finally:
+        db.close()
+
+    count_response = client.get(f"/counts/{count_id}")
+    report_response = client.get(f"/reports/{count_id}")
+    csv_response = client.get(f"/reports/{count_id}/csv")
+
+    assert count_response.status_code == 404
+    assert report_response.status_code == 404
+    assert csv_response.status_code == 404
 
 
 def test_backend_settings_default_without_env(monkeypatch) -> None:

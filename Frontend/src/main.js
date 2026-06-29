@@ -52,9 +52,9 @@ function iconMarkup(name) {
   return icons[name] || "";
 }
 
-function CTAButton({ label, href, variant = "primary" }) {
+function CTAButton({ label, href, variant = "primary", extraClass = "" }) {
   return `
-    <a class="cta-button cta-button--${variant}" href="${href}">
+    <a class="cta-button cta-button--${variant} ${extraClass}" href="${href}">
       <span>${label}</span>
       <span class="cta-arrow" aria-hidden="true">→</span>
     </a>
@@ -78,7 +78,7 @@ function Navbar() {
     <header class="navbar" aria-label="Main navigation">
       <a class="brand" href="#" aria-label="Koe home">Koe</a>
       <div class="nav-actions">
-        ${CTAButton({ label: "Try the Product", href: "./product.html", variant: "nav" })}
+        ${CTAButton({ label: "Sign In/Up", href: "/product.html", variant: "nav" })}
       </div>
     </header>
   `;
@@ -112,8 +112,8 @@ function HeroSection() {
         </p>
 
         <div class="hero-actions">
-          ${CTAButton({ label: "Try the Product", href: "./product.html" })}
-          ${CTAButton({ label: "Book a Demo", href: "#demo", variant: "secondary" })}
+          ${CTAButton({ label: "Use Koe", href: "/product.html" })}
+          ${CTAButton({ label: "Sign In/Up", href: "/product.html", variant: "secondary" })}
         </div>
 
         <ul class="benefit-row" aria-label="Koe benefits">${benefitMarkup}</ul>

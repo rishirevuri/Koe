@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class RestaurantCreate(BaseModel):
     name: str
     location: str | None = None
+    owner_user_id: str | None = None
 
 
 class RestaurantRead(RestaurantCreate):
@@ -16,7 +17,7 @@ class RestaurantRead(RestaurantCreate):
 
 
 class InventoryItemBase(BaseModel):
-    restaurant_id: int
+    restaurant_id: int | None = None
     name: str
     category: str | None = None
     default_unit: str
@@ -44,13 +45,14 @@ class InventoryItemRead(InventoryItemBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    restaurant_id: int
     normalized_name: str
     created_at: datetime
     updated_at: datetime
 
 
 class CountSessionCreate(BaseModel):
-    restaurant_id: int
+    restaurant_id: int | None = None
     area: str | None = None
     notes: str | None = None
 
@@ -101,7 +103,7 @@ class CountEntryRead(BaseModel):
 
 
 class ParseVoiceRequest(BaseModel):
-    restaurant_id: int
+    restaurant_id: int | None = None
     count_session_id: int
     text: str
     area: str | None = None
@@ -116,6 +118,7 @@ class ParsedEntry(BaseModel):
     raw_phrase: str
     item_name: str
     normalized_item_name: str
+    category: str | None = None
     quantity: float
     unit: str
     area: str | None = None
@@ -136,8 +139,24 @@ class ParseResponse(BaseModel):
 
 
 class NormalizeItemRequest(BaseModel):
-    restaurant_id: int
+    restaurant_id: int | None = None
     item_name: str
+
+
+class AuthRestaurant(BaseModel):
+    id: int
+    name: str
+
+
+class AuthMeResponse(BaseModel):
+    user_id: str
+    email: str | None
+    restaurant: AuthRestaurant
+
+
+class DevLinkRestaurantRequest(BaseModel):
+    email: str | None = None
+    restaurant_name: str
 
 
 class MatchResponse(BaseModel):
@@ -173,6 +192,7 @@ class IssueResolveRequest(BaseModel):
 
 class ReportEntry(BaseModel):
     name: str
+    category: str | None = None
     quantity: float
     unit: str
     area: str | None

@@ -4,8 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import ensure_restaurant_id_matches, get_current_restaurant
 from app.database import get_db
-from app.models import InventoryItem
+from app.models import InventoryItem, Restaurant
 from app.schemas import InventoryItemCreate, InventoryItemRead, InventoryItemUpdate
 from app.services.normalization_service import normalize_text
 from app.utils.units import normalize_unit
@@ -32,9 +33,9 @@ def _serialize_item(item: InventoryItem) -> dict:
     return data
 
 
-def _create_item(payload: InventoryItemCreate) -> InventoryItem:
+def _create_item(payload: InventoryItemCreate, restaurant_id: int) -> InventoryItem:
     return InventoryItem(
-        restaurant_id=payload.restaurant_id,
+        restaurant_id=restaurant_id,
         name=payload.name,
         normalized_name=normalize_text(payload.name),
         category=payload.category,
@@ -47,8 +48,13 @@ def _create_item(payload: InventoryItemCreate) -> InventoryItem:
 
 
 @router.post("", response_model=InventoryItemRead)
-def create_inventory_item(payload: InventoryItemCreate, db: Session = Depends(get_db)) -> dict:
-    item = _create_item(payload)
+def create_inventory_item(
+    payload: InventoryItemCreate,
+    db: Session = Depends(get_db),
+    current_restaurant: Restaurant = Depends(get_current_restaurant),
+) -> dict:
+    ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
+    item = _create_item(payload, current_restaurant.id)
     db.add(item)
     db.commit()
     db.refresh(item)
@@ -56,14 +62,25 @@ def create_inventory_item(payload: InventoryItemCreate, db: Session = Depends(ge
 
 
 @router.get("", response_model=list[InventoryItemRead])
-def list_inventory_items(restaurant_id: int = Query(...), db: Session = Depends(get_db)) -> list[dict]:
-    items = db.scalars(select(InventoryItem).where(InventoryItem.restaurant_id == restaurant_id).order_by(InventoryItem.name))
+def list_inventory_items(
+    restaurant_id: int | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_restaurant: Restaurant = Depends(get_current_restaurant),
+) -> list[dict]:
+    ensure_restaurant_id_matches(restaurant_id, current_restaurant)
+    items = db.scalars(select(InventoryItem).where(InventoryItem.restaurant_id == current_restaurant.id).order_by(InventoryItem.name))
     return [_serialize_item(item) for item in items]
 
 
 @router.post("/bulk", response_model=list[InventoryItemRead])
-def bulk_create_inventory_items(payload: list[InventoryItemCreate], db: Session = Depends(get_db)) -> list[dict]:
-    items = [_create_item(item_payload) for item_payload in payload]
+def bulk_create_inventory_items(
+    payload: list[InventoryItemCreate],
+    db: Session = Depends(get_db),
+    current_restaurant: Restaurant = Depends(get_current_restaurant),
+) -> list[dict]:
+    for item_payload in payload:
+        ensure_restaurant_id_matches(item_payload.restaurant_id, current_restaurant)
+    items = [_create_item(item_payload, current_restaurant.id) for item_payload in payload]
     db.add_all(items)
     db.commit()
     for item in items:
@@ -72,17 +89,26 @@ def bulk_create_inventory_items(payload: list[InventoryItemCreate], db: Session 
 
 
 @router.get("/{item_id}", response_model=InventoryItemRead)
-def get_inventory_item(item_id: int, db: Session = Depends(get_db)) -> dict:
+def get_inventory_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_restaurant: Restaurant = Depends(get_current_restaurant),
+) -> dict:
     item = db.get(InventoryItem, item_id)
-    if not item:
+    if not item or item.restaurant_id != current_restaurant.id:
         raise HTTPException(status_code=404, detail="Inventory item not found")
     return _serialize_item(item)
 
 
 @router.put("/{item_id}", response_model=InventoryItemRead)
-def update_inventory_item(item_id: int, payload: InventoryItemUpdate, db: Session = Depends(get_db)) -> dict:
+def update_inventory_item(
+    item_id: int,
+    payload: InventoryItemUpdate,
+    db: Session = Depends(get_db),
+    current_restaurant: Restaurant = Depends(get_current_restaurant),
+) -> dict:
     item = db.get(InventoryItem, item_id)
-    if not item:
+    if not item or item.restaurant_id != current_restaurant.id:
         raise HTTPException(status_code=404, detail="Inventory item not found")
     data = payload.model_dump(exclude_unset=True)
     if "name" in data and data["name"] is not None:
@@ -102,11 +128,14 @@ def update_inventory_item(item_id: int, payload: InventoryItemUpdate, db: Sessio
 
 
 @router.delete("/{item_id}")
-def delete_inventory_item(item_id: int, db: Session = Depends(get_db)) -> dict[str, str]:
+def delete_inventory_item(
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_restaurant: Restaurant = Depends(get_current_restaurant),
+) -> dict[str, str]:
     item = db.get(InventoryItem, item_id)
-    if not item:
+    if not item or item.restaurant_id != current_restaurant.id:
         raise HTTPException(status_code=404, detail="Inventory item not found")
     db.delete(item)
     db.commit()
     return {"status": "deleted"}
-

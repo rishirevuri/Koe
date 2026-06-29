@@ -63,7 +63,10 @@ def parse_partial_quantity(phrase: str, quantity: float | None = None, unit: str
     fraction_label: str | None = None
     fraction_value: float | None = None
     for label, value in FRACTIONS.items():
-        if re.search(rf"\bone\s+(?:is\s+|of which is\s+)?{re.escape(label)}\s+(?:empty|full)?\b", text):
+        if re.search(
+            rf"\bone\s+(?:(?:of\s+)?(?:which|them)\s+)?(?:is\s+)?{re.escape(label)}\s+(?:empty|full)?\b",
+            text,
+        ):
             fraction_label = label
             fraction_value = value
             break

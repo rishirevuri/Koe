@@ -2,7 +2,7 @@ import re
 from dataclasses import dataclass
 
 from app.services.partial_quantity_service import parse_partial_quantity
-from app.utils.units import UNITS_PATTERN, normalize_unit
+from app.utils.units import UNIT_ALIASES, UNITS_PATTERN, normalize_unit
 
 
 @dataclass
@@ -16,18 +16,56 @@ class ParsedCandidate:
     review_reason: str | None
 
 
+NUMBER_WORDS = {
+    "one": "1",
+    "two": "2",
+    "three": "3",
+    "four": "4",
+    "five": "5",
+    "six": "6",
+    "seven": "7",
+    "eight": "8",
+    "nine": "9",
+    "ten": "10",
+    "eleven": "11",
+    "twelve": "12",
+}
+NUMBER_WORDS_PATTERN = "|".join(NUMBER_WORDS.keys())
+
 START_PATTERN = re.compile(rf"(?P<qty>\d+(?:\.\d+)?)\s+(?P<unit>{UNITS_PATTERN})\b(?:\s+of)?\s+", re.IGNORECASE)
-LEADING_NOISE = re.compile(r"^(?:we have|there are|there is|have|and)\s+", re.IGNORECASE)
+NUMBER_WORD_START_PATTERN = re.compile(
+    rf"\b(?P<num>{NUMBER_WORDS_PATTERN})\s+(?!(?:of|is|half|quarter|fourth|three|almost|mostly|partially)\b)(?P<next>[A-Za-z][A-Za-z-]*)\b",
+    re.IGNORECASE,
+)
+QUANTITY_START_PATTERN = re.compile(r"\b(?P<qty>\d+(?:\.\d+)?)\s+(?P<first>[A-Za-z][A-Za-z-]*)\b", re.IGNORECASE)
+LEADING_NOISE = re.compile(r"^(?:we have|we've got|we got|i have|there are|there is|have|and)\s+", re.IGNORECASE)
+TRAILING_CONNECTOR = re.compile(
+    r"\s+(?:,?\s*)?(?:and\s+)?(?:then\s+)?(?:(?:i|we)\s+)?(?:said\s+)?(?:(?:i|we)\s+)?(?:also\s+)?(?:have|got)$",
+    re.IGNORECASE,
+)
+TRAILING_CONNECTOR_FRAGMENT = re.compile(
+    r"\s+(?:and|andn|then|also|and\s+then|andn\s+then|then\s+i|then\s+we|and\s+i|and\s+we|andn\s+i|andn\s+we)(?:\s+said)?(?:\s+also)?$",
+    re.IGNORECASE,
+)
 PARTIAL_TAIL = re.compile(
-    r"\b(?:one\s+(?:of which\s+)?(?:is\s+)?(?:half|quarter|fourth|three quarters|three fourths)\s+(?:empty|full)?|one\s+(?:almost empty|mostly full|partially full))\b",
+    r"\b(?:one\s+(?:(?:of\s+)?(?:which|them)\s+)?(?:is\s+)?(?:half|quarter|fourth|three quarters|three fourths)\s+(?:empty|full)?|one\s+(?:almost empty|mostly full|partially full))\b",
     re.IGNORECASE,
 )
 
 
+def _normalize_spoken_numbers(text: str) -> str:
+    def replace(match: re.Match[str]) -> str:
+        number = NUMBER_WORDS[match.group("num").lower()]
+        return f"{number} {match.group('next')}"
+
+    return NUMBER_WORD_START_PATTERN.sub(replace, text)
+
+
 def _split_inventory_phrases(text: str) -> list[str]:
-    cleaned = re.sub(r"\s+", " ", text.replace("\n", ", ").replace(";", ", ")).strip()
+    cleaned = _normalize_spoken_numbers(text)
+    cleaned = re.sub(r"\s+", " ", cleaned.replace("\n", ", ").replace(";", ", ")).strip()
     cleaned = LEADING_NOISE.sub("", cleaned)
-    matches = list(START_PATTERN.finditer(cleaned))
+    matches = list(QUANTITY_START_PATTERN.finditer(cleaned))
     phrases: list[str] = []
     for index, match in enumerate(matches):
         start = match.start()
@@ -41,22 +79,45 @@ def _split_inventory_phrases(text: str) -> list[str]:
 
 
 def _clean_item_name(value: str) -> str:
-    return re.sub(r"(?:,?\s+and)$", "", value.strip(" ,."), flags=re.IGNORECASE).strip(" ,.")
+    cleaned = value.strip(" ,.")
+    previous = None
+    while previous != cleaned:
+        previous = cleaned
+        cleaned = TRAILING_CONNECTOR.sub("", cleaned).strip(" ,.")
+        cleaned = TRAILING_CONNECTOR_FRAGMENT.sub("", cleaned).strip(" ,.")
+        cleaned = re.sub(r"(?:,?\s+(?:and|andn|then|also))$", "", cleaned, flags=re.IGNORECASE).strip(" ,.")
+    return cleaned
+
+
+def _parse_quantity_unit_item(phrase: str) -> tuple[re.Match[str], float, str, str] | None:
+    match = QUANTITY_START_PATTERN.search(phrase)
+    if not match:
+        return None
+
+    qty = float(match.group("qty"))
+    first_word = match.group("first")
+    first_normalized = normalize_unit(first_word)
+    remainder = phrase[match.end() :].strip(" ,.")
+
+    if first_normalized in UNIT_ALIASES.values():
+        item_part = re.sub(r"^of\s+", "", remainder, flags=re.IGNORECASE).strip(" ,.")
+        return match, qty, first_normalized, item_part
+
+    item_part = f"{first_word} {remainder}".strip(" ,.")
+    return match, qty, "individual", item_part
 
 
 def parse_voice_text(text: str) -> list[ParsedCandidate]:
     candidates: list[ParsedCandidate] = []
     for phrase in _split_inventory_phrases(text):
-        match = START_PATTERN.search(phrase)
-        if not match:
+        parsed = _parse_quantity_unit_item(phrase)
+        if not parsed:
             continue
-        qty = float(match.group("qty"))
-        unit = normalize_unit(match.group("unit"))
-        item_part = phrase[match.end() :].strip(" ,.")
+        match, qty, unit, item_part = parsed
         partial_match = PARTIAL_TAIL.search(item_part)
         if partial_match:
             item_name = _clean_item_name(item_part[: partial_match.start()])
-            partial_phrase = f"{match.group('qty')} {match.group('unit')} {item_name}, {partial_match.group(0)}"
+            partial_phrase = f"{match.group('qty')} {unit} {item_name}, {partial_match.group(0)}"
         else:
             item_name = _clean_item_name(item_part)
             partial_phrase = phrase

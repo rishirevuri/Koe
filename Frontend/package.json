@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "python3 -m http.server 5174 --bind 127.0.0.1",
-    "start": "python3 -m http.server 5174 --bind 127.0.0.1"
+    "dev": "vite --host 127.0.0.1 --port 5174",
+    "start": "vite --host 127.0.0.1 --port 5174"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.45.4",
+    "vite": "^5.4.11"
   }
 }

@@ -13,6 +13,7 @@ def build_report(count: CountSession) -> dict:
         entries.append(
             {
                 "name": name,
+                "category": entry.inventory_item.category if entry.inventory_item else None,
                 "quantity": entry.quantity,
                 "unit": entry.unit,
                 "area": entry.area,

@@ -2,10 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import CountEntry, CountSession
+from app.models import CountEntry, CountSession, InventoryItem
 from app.schemas import MatchResponse, NormalizeItemRequest, ParseResponse, ParseUploadRequest, ParseVoiceRequest, ParsedEntry
+from app.config import get_settings
+from app.auth import ensure_restaurant_id_matches, get_current_restaurant
 from app.services.issue_service import create_issue
 from app.services.matching_service import MatchResult, match_inventory_item
+from app.services.external_ai_service import parse_inventory_with_claude
 from app.services.upload_parse_service import parse_upload_text
 from app.services.voice_parse_service import ParsedCandidate, parse_voice_text
 
@@ -46,6 +49,7 @@ def _handle_candidates(
         entry_id: int | None = None
         entry = None
         clean_name = match.matched_name or candidate.item_name
+        matched_item = db.get(InventoryItem, match.matched_item_id) if match.matched_item_id else None
         if save:
             entry = CountEntry(
                 count_session_id=count_session_id,
@@ -84,6 +88,7 @@ def _handle_candidates(
                 raw_phrase=candidate.raw_phrase,
                 item_name=clean_name,
                 normalized_item_name=match.normalized_name,
+                category=matched_item.category if matched_item else None,
                 quantity=candidate.quantity,
                 unit=candidate.unit,
                 area=area or count.area,
@@ -105,24 +110,44 @@ def _handle_candidates(
 
 
 @router.post("/parse-voice", response_model=ParseResponse)
-def parse_voice(payload: ParseVoiceRequest, db: Session = Depends(get_db)) -> ParseResponse:
+def parse_voice(
+    payload: ParseVoiceRequest,
+    db: Session = Depends(get_db),
+    current_restaurant=Depends(get_current_restaurant),
+) -> ParseResponse:
+    ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
+    settings = get_settings()
+    candidates = parse_voice_text(payload.text)
+    if settings.enable_external_ai and settings.is_claude_configured and (settings.text_ai_provider or "claude").lower() == "claude":
+        try:
+            claude_candidates = parse_inventory_with_claude(payload.text)
+            if claude_candidates:
+                candidates = claude_candidates
+        except Exception:
+            candidates = parse_voice_text(payload.text)
+
     return _handle_candidates(
         db,
-        restaurant_id=payload.restaurant_id,
+        restaurant_id=current_restaurant.id,
         count_session_id=payload.count_session_id,
         text=payload.text,
         area=payload.area,
         source="voice",
         save=payload.save,
-        candidates=parse_voice_text(payload.text),
+        candidates=candidates,
     )
 
 
 @router.post("/parse-upload", response_model=ParseResponse)
-def parse_upload(payload: ParseUploadRequest, db: Session = Depends(get_db)) -> ParseResponse:
+def parse_upload(
+    payload: ParseUploadRequest,
+    db: Session = Depends(get_db),
+    current_restaurant=Depends(get_current_restaurant),
+) -> ParseResponse:
+    ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
     return _handle_candidates(
         db,
-        restaurant_id=payload.restaurant_id,
+        restaurant_id=current_restaurant.id,
         count_session_id=payload.count_session_id,
         text=payload.text,
         area=payload.area,
@@ -133,5 +158,10 @@ def parse_upload(payload: ParseUploadRequest, db: Session = Depends(get_db)) -> 
 
 
 @router.post("/normalize-item", response_model=MatchResponse)
-def normalize_item(payload: NormalizeItemRequest, db: Session = Depends(get_db)) -> MatchResult:
-    return match_inventory_item(db, payload.restaurant_id, payload.item_name)
+def normalize_item(
+    payload: NormalizeItemRequest,
+    db: Session = Depends(get_db),
+    current_restaurant=Depends(get_current_restaurant),
+) -> MatchResult:
+    ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
+    return match_inventory_item(db, current_restaurant.id, payload.item_name)

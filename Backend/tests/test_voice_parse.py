@@ -13,3 +13,67 @@ def test_voice_parse_seeded_demo_sentence() -> None:
         ("tomatoes", 5, "boxes"),
         ("cheese", 2, "boxes"),
     ]
+
+
+def test_voice_parse_browser_transcript_with_number_words_and_no_punctuation() -> None:
+    text = (
+        "we have three bottles of olive oil one of which is half empty "
+        "three heads of lettuce five boxes of tomatoes and two boxes of cheese"
+    )
+    parsed = parse_voice_text(text)
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("olive oil", 2.5, "bottles"),
+        ("lettuce", 3, "heads"),
+        ("tomatoes", 5, "boxes"),
+        ("cheese", 2, "boxes"),
+    ]
+
+
+def test_voice_parse_partial_variant_one_of_them() -> None:
+    text = "we have 3 bottles of olive oil one of them is half empty 3 heads of lettuce"
+    parsed = parse_voice_text(text)
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("olive oil", 2.5, "bottles"),
+        ("lettuce", 3, "heads"),
+    ]
+
+
+def test_voice_parse_no_unit_defaults_to_individual() -> None:
+    parsed = parse_voice_text("i have 10 cucumbers")
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("cucumbers", 10, "individual"),
+    ]
+
+
+def test_voice_parse_no_unit_then_unit_phrase_stays_separate() -> None:
+    text = "i have 10 tomatoes and i also have 10 cartons of eggs"
+    parsed = parse_voice_text(text)
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("tomatoes", 10, "individual"),
+        ("eggs", 10, "cartons"),
+    ]
+
+
+def test_voice_parse_speech_connector_does_not_attach_to_item() -> None:
+    text = "i have 10 tomatoes and then i said i also have 10 cartridges of eggs"
+    parsed = parse_voice_text(text)
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("tomatoes", 10, "individual"),
+        ("eggs", 10, "cartridges"),
+    ]
+
+
+def test_voice_parse_dangling_connector_does_not_attach_to_item() -> None:
+    text = "i have 10 eggs and then i have 30 mg of salt"
+    parsed = parse_voice_text(text)
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("eggs", 10, "individual"),
+        ("salt", 30, "milligrams"),
+    ]
+
+
+def test_voice_parse_metric_units_are_units() -> None:
+    parsed = parse_voice_text("i have 20 grams of salt")
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("salt", 20, "grams"),
+    ]

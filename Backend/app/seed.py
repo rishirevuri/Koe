@@ -17,6 +17,12 @@ SEED_ITEMS = [
     ("Pellegrino", "Beverages", "cases", ["san pellegrino", "sparkling water"], 4),
 ]
 
+SEED_RESTAURANTS = [
+    ("Demo Restaurant", "Local Demo"),
+    ("Smoking Pig BBQ", "Tester sample starter inventory"),
+    ("Massimo’s", "Tester sample starter inventory"),
+]
+
 
 def seed(reset: bool = True) -> None:
     Path(BASE_DIR / "data").mkdir(parents=True, exist_ok=True)
@@ -26,23 +32,27 @@ def seed(reset: bool = True) -> None:
 
     db = SessionLocal()
     try:
-        restaurant = Restaurant(name="Demo Restaurant", location="Fremont, CA")
-        db.add(restaurant)
-        db.flush()
-        for name, category, unit, aliases, par_level in SEED_ITEMS:
-            db.add(
-                InventoryItem(
-                    restaurant_id=restaurant.id,
-                    name=name,
-                    normalized_name=normalize_text(name),
-                    category=category,
-                    default_unit=normalize_unit(unit),
-                    aliases=json.dumps(aliases),
-                    par_level=par_level,
+        restaurants: list[Restaurant] = []
+        for restaurant_name, location in SEED_RESTAURANTS:
+            restaurant = Restaurant(name=restaurant_name, location=location, owner_user_id=None)
+            db.add(restaurant)
+            db.flush()
+            restaurants.append(restaurant)
+            for name, category, unit, aliases, par_level in SEED_ITEMS:
+                db.add(
+                    InventoryItem(
+                        restaurant_id=restaurant.id,
+                        name=name,
+                        normalized_name=normalize_text(name),
+                        category=category,
+                        default_unit=normalize_unit(unit),
+                        aliases=json.dumps(aliases),
+                        par_level=par_level,
+                    )
                 )
-            )
         db.commit()
-        print(f"Seeded Demo Restaurant with id={restaurant.id}")
+        seeded = ", ".join(f"{restaurant.name} id={restaurant.id}" for restaurant in restaurants)
+        print(f"Seeded sample starter inventory for {seeded}")
     finally:
         db.close()
 
