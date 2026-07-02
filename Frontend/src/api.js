@@ -1,6 +1,6 @@
 import { supabase } from "./supabaseClient.js";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://koe-backend-pfz2.onrender.com";
 
 export function getAuthHeader(session) {
   const token = session?.access_token;

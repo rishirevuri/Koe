@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5174",
-    "start": "vite --host 127.0.0.1 --port 5174"
+    "start": "vite --host 127.0.0.1 --port 5174",
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
