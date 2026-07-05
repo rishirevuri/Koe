@@ -1762,7 +1762,7 @@ button:disabled,
 }
 
 .product-topbar {
-  grid-template-columns: auto minmax(280px, 1fr) minmax(210px, max-content) minmax(220px, auto) auto auto;
+  grid-template-columns: auto minmax(280px, 1fr) minmax(220px, auto) auto auto;
   gap: 16px;
   max-width: 1480px;
   margin: 0 auto 20px;
@@ -1789,21 +1789,6 @@ button:disabled,
   text-transform: uppercase;
 }
 
-.restaurant-signature {
-  display: block;
-  max-width: 320px;
-  overflow: hidden;
-  color: var(--product-accent);
-  font-family: var(--serif);
-  font-size: clamp(1.9rem, 2.55vw, 2.8rem);
-  font-weight: 600;
-  line-height: 0.9;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
-}
-
 .product-logo {
   color: var(--product-accent);
 }
@@ -1825,6 +1810,15 @@ button:disabled,
 .account-panel {
   min-height: 52px;
   box-shadow: none;
+}
+
+.account-panel small {
+  color: var(--product-accent);
+  font-family: var(--serif);
+  font-size: clamp(1.18rem, 1.45vw, 1.58rem);
+  font-weight: 600;
+  line-height: 0.92;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
 .account-panel svg,
@@ -2187,16 +2181,10 @@ button:disabled,
     grid-template-columns: auto 1fr;
   }
 
-  .restaurant-signature,
   .account-panel,
   .logout-topbar-button,
   .product-topbar > .new-count-button {
     grid-row: auto;
-  }
-
-  .restaurant-signature {
-    justify-self: start;
-    text-align: left;
   }
 }
 
@@ -2225,11 +2213,6 @@ button:disabled,
   .insight-column {
     width: 100%;
     max-width: 100%;
-  }
-
-  .restaurant-signature {
-    max-width: 100%;
-    font-size: 2.4rem;
   }
 
 }

@@ -1065,8 +1065,6 @@ function render() {
   const recordingLabel = state.isRecording ? "Transcribing" : state.recordingMode === "paused" ? "Paused" : "Ready";
   const primaryRecordingLabel = state.recordingMode === "paused" ? "Resume" : "Start";
   const secondaryRecordingLabel = state.recordingMode === "paused" ? "Reset" : "Pause";
-  const restaurantName = state.selectedRestaurantName || "Restaurant Workspace";
-
   app.innerHTML = `
     <main class="product-shell">
       <header class="product-topbar">
@@ -1074,7 +1072,6 @@ function render() {
         <div class="product-title-block">
           <h1>Inventory Count Workspace</h1>
         </div>
-        <a class="restaurant-signature" href="./index.html" aria-label="${escapeHtml(restaurantName)} home">${escapeHtml(restaurantName)}</a>
         <div class="account-panel">
           <span>${ProductIcon("pin")}</span>
           <div>
