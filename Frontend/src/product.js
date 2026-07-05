@@ -30,7 +30,7 @@ const state = {
   selectedRestaurantId: null,
   selectedRestaurantName: "",
   selectedRestaurantLocation: "",
-  selectedArea: "Dry Storage",
+  selectedArea: "",
   status: "Ready",
   activeCountId: null,
   countStartedAt: null,
@@ -42,6 +42,7 @@ const state = {
   isProcessing: false,
   isGeneratingReport: false,
   isRecording: false,
+  recordingMode: "idle",
   recordingSeconds: 0,
   voiceLevel: 0,
   speechRecognition: null,
@@ -99,22 +100,33 @@ function playRecordingChirp() {
   try {
     const context = new AudioContext();
     const oscillator = context.createOscillator();
+    const tremolo = context.createOscillator();
+    const tremoloGain = context.createGain();
     const gain = context.createGain();
     const startedAt = context.currentTime;
 
-    oscillator.type = "sine";
-    oscillator.frequency.setValueAtTime(780, startedAt);
-    oscillator.frequency.exponentialRampToValueAtTime(1280, startedAt + 0.08);
-    oscillator.frequency.exponentialRampToValueAtTime(940, startedAt + 0.16);
+    oscillator.type = "triangle";
+    oscillator.frequency.setValueAtTime(118, startedAt);
+    oscillator.frequency.linearRampToValueAtTime(132, startedAt + 0.18);
+    oscillator.frequency.linearRampToValueAtTime(110, startedAt + 0.34);
+
+    tremolo.type = "sine";
+    tremolo.frequency.setValueAtTime(38, startedAt);
+    tremoloGain.gain.setValueAtTime(0.045, startedAt);
+    tremolo.connect(tremoloGain);
+    tremoloGain.connect(gain.gain);
+
     gain.gain.setValueAtTime(0.0001, startedAt);
-    gain.gain.exponentialRampToValueAtTime(0.12, startedAt + 0.025);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startedAt + 0.18);
+    gain.gain.exponentialRampToValueAtTime(0.1, startedAt + 0.035);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startedAt + 0.38);
 
     oscillator.connect(gain);
     gain.connect(context.destination);
     oscillator.start(startedAt);
-    oscillator.stop(startedAt + 0.19);
-    window.setTimeout(() => context.close(), 260);
+    tremolo.start(startedAt);
+    oscillator.stop(startedAt + 0.4);
+    tremolo.stop(startedAt + 0.4);
+    window.setTimeout(() => context.close(), 520);
   } catch {
     // Audio feedback is optional and can be blocked by browser policy.
   }
@@ -249,6 +261,21 @@ function resetWorkspaceState() {
   state.report = null;
   state.dataHealthItems = [];
   state.status = "Ready";
+}
+
+function renderVoiceMeter() {
+  const level = state.isRecording ? state.voiceLevel : state.recordingMode === "paused" ? 0.18 : 0.08;
+  return `
+    <div class="mic-meter" aria-hidden="true">
+      ${Array.from({ length: 9 })
+        .map((_, index) => {
+          const offset = Math.abs(index - 4);
+          const height = 6 + Math.max(0, level * 34 - offset * 4);
+          return `<span style="height: ${height.toFixed(1)}px"></span>`;
+        })
+        .join("")}
+    </div>
+  `;
 }
 
 function buildDataHealth(entries) {
@@ -424,9 +451,9 @@ async function loadCurrentWorkspace() {
     state.selectedRestaurantName = me.restaurant.name;
     state.selectedRestaurantLocation = "Restaurant workspace";
     state.userEmail = me.email || state.userEmail;
-    state.authStatus = "Workspace ready";
+    state.authStatus = "Ready";
     clearMessages();
-    console.log("Workspace ready");
+    console.log("Workspace loaded");
   } catch (error) {
     state.workspace = null;
     if (isUnauthorizedError(error)) {
@@ -523,7 +550,7 @@ async function ensureCountSession() {
   render();
   try {
     const count = await createCountSession({
-      area: state.selectedArea || "Dry Storage",
+      area: state.selectedArea || null,
       notes: "Frontend local demo count",
     });
     state.activeCountId = count.id;
@@ -624,6 +651,11 @@ async function exportCsv() {
     render();
     return;
   }
+  if (!state.selectedArea.trim()) {
+    setError("Pick or type a kitchen area before exporting CSV.");
+    render();
+    return;
+  }
   try {
     if (!state.session || state.view !== "ready") throw new Error("Sign in before exporting CSV.");
     await downloadCsv(state.activeCountId);
@@ -633,14 +665,8 @@ async function exportCsv() {
   }
 }
 
-async function toggleRecording() {
+async function startRecording() {
   clearMessages();
-  if (state.isRecording) {
-    stopRecording();
-    setNotice("Speech captured in the transcript. Review it, then click Process Count.");
-    render();
-    return;
-  }
 
   const SpeechRecognition = getSpeechRecognitionConstructor();
   if (!SpeechRecognition) {
@@ -659,7 +685,7 @@ async function toggleRecording() {
     state.recognitionBaseTranscript = state.transcript.trim();
     state.shouldRestartRecognition = true;
     state.isRecording = true;
-    state.recordingSeconds = 0;
+    state.recordingMode = "recording";
     state.status = "Recording";
     setVoiceLevel(0);
 
@@ -725,7 +751,43 @@ async function toggleRecording() {
   render();
 }
 
-function stopRecording() {
+function pauseRecording() {
+  if (state.recordingMode === "paused") {
+    resetRecording();
+    return;
+  }
+  if (!state.isRecording) return;
+  stopRecording({ preserveMode: true });
+  state.recordingMode = "paused";
+  state.status = state.activeCountId ? "In Progress" : "Ready";
+  setNotice("Recording paused. Resume when you are ready, or reset the capture.");
+  render();
+}
+
+function resetRecording() {
+  stopRecording();
+  state.recordingMode = "idle";
+  state.recordingSeconds = 0;
+  state.transcript = "";
+  state.recognitionBaseTranscript = "";
+  setNotice("Recording reset.");
+  render();
+}
+
+function handlePrimaryRecordingAction() {
+  if (state.isRecording) return;
+  startRecording();
+}
+
+function handleMicButtonClick() {
+  if (state.isRecording) {
+    pauseRecording();
+    return;
+  }
+  startRecording();
+}
+
+function stopRecording(options = {}) {
   state.shouldRestartRecognition = false;
   if (state.recordingTimer) {
     window.clearInterval(state.recordingTimer);
@@ -744,6 +806,9 @@ function stopRecording() {
   }
   stopVoiceMeter();
   state.isRecording = false;
+  if (!options.preserveMode) {
+    state.recordingMode = "idle";
+  }
   state.status = state.activeCountId ? "In Progress" : "Ready";
 }
 
@@ -995,9 +1060,11 @@ function render() {
   const needsReview = state.parsedEntries.filter((entry) => entry.needs_review).length;
   const source = state.activeCountId ? "Voice Count" : "Not started";
   const started = state.countStartedAt ? formatDateTime(state.countStartedAt) : "—";
-  const headerMeta = state.countStartedAt ? `${state.selectedArea} • ${started}` : state.selectedArea;
+  const selectedArea = state.selectedArea.trim();
   const countId = state.activeCountId || "—";
-  const recordingLabel = state.isRecording ? "Transcribing" : "Ready";
+  const recordingLabel = state.isRecording ? "Transcribing" : state.recordingMode === "paused" ? "Paused" : "Ready";
+  const primaryRecordingLabel = state.recordingMode === "paused" ? "Resume" : "Start";
+  const secondaryRecordingLabel = state.recordingMode === "paused" ? "Reset" : "Pause";
   const restaurantName = state.selectedRestaurantName || "Restaurant Workspace";
 
   app.innerHTML = `
@@ -1006,7 +1073,6 @@ function render() {
         <a href="./index.html" class="product-logo">Koe</a>
         <div class="product-title-block">
           <h1>Inventory Count Workspace</h1>
-          <p><strong>${escapeHtml(state.authStatus || "Workspace ready")}</strong> ${escapeHtml(headerMeta)}</p>
         </div>
         <a class="restaurant-signature" href="./index.html" aria-label="${escapeHtml(restaurantName)} home">${escapeHtml(restaurantName)}</a>
         <div class="account-panel">
@@ -1037,11 +1103,15 @@ function render() {
             </div>
             <div class="voice-capture voice-capture--interactive">
               <div class="mic-panel">
-                <button class="mic-ring mic-button ${state.isRecording ? "mic-button--recording" : ""}" id="mic-button" type="button" aria-label="${state.isRecording ? "Stop recording" : "Start recording"}" style="--voice-level: ${state.voiceLevel.toFixed(3)}">
+                <button class="mic-ring mic-button ${state.isRecording ? "mic-button--recording" : ""}" id="mic-button" type="button" aria-label="${state.isRecording ? "Pause recording" : state.recordingMode === "paused" ? "Resume recording" : "Start recording"}" style="--voice-level: ${state.voiceLevel.toFixed(3)}">
                   <div class="mic-core">${ProductIcon("mic")}</div>
                 </button>
                 <strong>${formatTimer(state.recordingSeconds)}</strong>
-                <button class="recording-action" id="recording-action" type="button">${state.isRecording ? "Stop Recording" : "Start Recording"}</button>
+                ${renderVoiceMeter()}
+                <div class="recording-controls" aria-label="Recording controls">
+                  <button class="recording-button recording-button--primary" id="recording-start-action" type="button" ${state.isRecording ? "disabled" : ""}>${primaryRecordingLabel}</button>
+                  <button class="recording-button recording-button--secondary" id="recording-pause-action" type="button" ${state.recordingMode === "idle" && !state.isRecording ? "disabled" : ""}>${secondaryRecordingLabel}</button>
+                </div>
               </div>
               <div class="transcript-panel transcript-panel--editor">
                 <label for="transcript-input">Transcript</label>
@@ -1089,16 +1159,20 @@ function render() {
           <section class="workspace-card summary-card">
             <h2>${ProductIcon("file")} Count Summary</h2>
             <div class="area-control">
-              <label for="area-select">Area</label>
-              <select id="area-select">
-                ${AREA_OPTIONS.map((area) => `<option value="${area}" ${area === state.selectedArea ? "selected" : ""}>${area}</option>`).join("")}
-              </select>
+              <label for="area-input">Kitchen area</label>
+              <div class="area-input-shell">
+                <input id="area-input" list="area-options" value="${escapeHtml(state.selectedArea)}" placeholder="Type or choose an area" />
+                <span aria-hidden="true"></span>
+              </div>
+              <datalist id="area-options">
+                ${AREA_OPTIONS.map((area) => `<option value="${escapeHtml(area)}"></option>`).join("")}
+              </datalist>
             </div>
             <dl>
               <div><dt>Total Items</dt><dd>${totalItems}</dd></div>
               <div><dt>Needs Review</dt><dd>${needsReview}</dd></div>
               <div><dt>Source</dt><dd>${source}</dd></div>
-              <div><dt>Area</dt><dd>${escapeHtml(state.selectedArea)}</dd></div>
+              <div><dt>Area</dt><dd>${escapeHtml(selectedArea || "Not set")}</dd></div>
               <div><dt>Started</dt><dd>${started}</dd></div>
               <div><dt>Count ID</dt><dd>${escapeHtml(countId)}</dd></div>
             </dl>
@@ -1160,8 +1234,9 @@ function bindEvents() {
     setNotice("Demo transcript added.");
     render();
   });
-  document.querySelector("#mic-button")?.addEventListener("click", toggleRecording);
-  document.querySelector("#recording-action")?.addEventListener("click", toggleRecording);
+  document.querySelector("#mic-button")?.addEventListener("click", handleMicButtonClick);
+  document.querySelector("#recording-start-action")?.addEventListener("click", handlePrimaryRecordingAction);
+  document.querySelector("#recording-pause-action")?.addEventListener("click", pauseRecording);
   document.querySelector("#generate-report-button")?.addEventListener("click", generateReport);
   document.querySelector("#export-csv-button")?.addEventListener("click", exportCsv);
   document.querySelector("#send-sheets-button")?.addEventListener("click", () => {
@@ -1183,9 +1258,8 @@ function bindEvents() {
   document.querySelector("#transcript-input")?.addEventListener("input", (event) => {
     state.transcript = event.target.value;
   });
-  document.querySelector("#area-select")?.addEventListener("change", (event) => {
+  document.querySelector("#area-input")?.addEventListener("input", (event) => {
     state.selectedArea = event.target.value;
-    render();
   });
 }
 
