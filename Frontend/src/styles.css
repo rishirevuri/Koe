@@ -1815,9 +1815,9 @@ button:disabled,
 .account-panel small {
   color: var(--product-accent);
   font-family: var(--serif);
-  font-size: clamp(1.18rem, 1.45vw, 1.58rem);
+  font-size: clamp(1rem, 1.18vw, 1.28rem);
   font-weight: 600;
-  line-height: 0.92;
+  line-height: 1.16;
   text-shadow: 0 1px 0 rgba(255, 255, 255, 0.75);
 }
 
