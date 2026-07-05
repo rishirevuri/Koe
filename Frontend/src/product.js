@@ -138,10 +138,10 @@ function setVoiceLevel(level) {
     "--voice-level": clamped.toFixed(3),
     "--voice-opacity": (0.16 + clamped * 0.5).toFixed(3),
     "--voice-wave-scale": (0.35 + clamped * 1.6).toFixed(3),
-    "--voice-spread": `${8 + clamped * 24}px`,
-    "--voice-shadow-alpha": (0.07 + clamped * 0.16).toFixed(3),
-    "--voice-ring-opacity": (clamped * 0.85).toFixed(3),
-    "--voice-ring-scale": (0.82 + clamped * 0.55).toFixed(3),
+    "--voice-spread": `${6 + clamped * 8}px`,
+    "--voice-shadow-alpha": (0.06 + clamped * 0.1).toFixed(3),
+    "--voice-ring-opacity": (clamped * 0.58).toFixed(3),
+    "--voice-ring-scale": (0.82 + clamped * 0.2).toFixed(3),
   };
   state.voiceLevel = clamped;
   const ring = document.querySelector("#mic-button");
