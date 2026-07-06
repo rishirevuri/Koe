@@ -8,6 +8,7 @@ import {
   parseVoiceCount,
 } from "./api.js";
 import { isSupabaseConfigured, supabase, supabaseConfigError } from "./supabaseClient.js";
+import { bindSidebar, renderSidebar } from "./sidebar.js";
 
 const DEMO_TRANSCRIPT =
   "We have 3 bottles of olive oil, one of which is half empty, 3 heads of lettuce, 5 boxes of tomatoes, and 2 boxes of cheese.";
@@ -454,6 +455,11 @@ async function loadCurrentWorkspace() {
     state.authStatus = "Ready";
     clearMessages();
     console.log("Workspace loaded");
+    if (state.pendingDashboardRedirect) {
+      state.navigatingAway = true;
+      window.location.assign("./dashboard.html");
+      return;
+    }
   } catch (error) {
     state.workspace = null;
     if (isUnauthorizedError(error)) {
@@ -470,7 +476,7 @@ async function loadCurrentWorkspace() {
       setError(error.message);
     }
   } finally {
-    render();
+    if (!state.navigatingAway) render();
   }
 }
 
@@ -507,6 +513,8 @@ async function handleAuthSubmit(mode) {
   state.authEmail = email;
   state.authPassword = "";
   setNotice(mode === "signup" ? "Account created. Check your email if confirmation is enabled." : "Logged in.");
+  // After a successful auth + confirmed workspace, land on the dashboard.
+  state.pendingDashboardRedirect = true;
   await initializeAuthFlow();
 }
 
@@ -1066,7 +1074,9 @@ function render() {
   const primaryRecordingLabel = state.recordingMode === "paused" ? "Resume" : "Start";
   const secondaryRecordingLabel = state.recordingMode === "paused" ? "Reset" : "Pause";
   app.innerHTML = `
-    <main class="product-shell">
+    <div class="app-shell">
+      ${renderSidebar({ restaurantName: state.selectedRestaurantName, active: "count" })}
+      <main class="app-main product-shell">
       <header class="product-topbar">
         <a href="./index.html" class="product-logo">Koe</a>
         <div class="product-title-block">
@@ -1190,7 +1200,8 @@ function render() {
           </div>
         </aside>
       </section>
-    </main>
+      </main>
+    </div>
   `;
 
   bindEvents();
@@ -1223,6 +1234,7 @@ function bindAuthEvents() {
 }
 
 function bindEvents() {
+  bindSidebar({ onLogout: logout });
   document.querySelector("#logout-button")?.addEventListener("click", logout);
   document.querySelector("#start-count-button")?.addEventListener("click", startNewCount);
   document.querySelector("#process-count-button")?.addEventListener("click", processCount);

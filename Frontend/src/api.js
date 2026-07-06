@@ -52,6 +52,10 @@ export async function getAuthMe() {
   return request("/auth/me");
 }
 
+export async function getDashboardSummary() {
+  return request("/dashboard/summary");
+}
+
 export async function linkTesterRestaurant(restaurantName) {
   return request("/auth/dev-link-restaurant", {
     method: "POST",

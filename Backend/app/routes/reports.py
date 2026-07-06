@@ -34,8 +34,13 @@ def get_report_csv(
     if not count:
         raise HTTPException(status_code=404, detail="Count session not found")
     ensure_count_belongs_to_restaurant(count.restaurant_id, current_restaurant)
+    csv_content = build_csv(count)
+    if not count.exported:
+        count.exported = True
+        db.add(count)
+        db.commit()
     return Response(
-        content=build_csv(count),
+        content=csv_content,
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="koe-count-{count_id}.csv"'},
     )

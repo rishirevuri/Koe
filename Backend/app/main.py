@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.database import create_db_and_tables
-from app.routes import ai, auth, counts, health, integrations, inventory, issues, reports, restaurants
+from app.routes import ai, auth, counts, dashboard, health, integrations, inventory, issues, reports, restaurants
 
 
 @asynccontextmanager
@@ -43,3 +43,4 @@ app.include_router(ai.router)
 app.include_router(integrations.router)
 app.include_router(issues.router)
 app.include_router(reports.router)
+app.include_router(dashboard.router)

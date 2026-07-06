@@ -5,7 +5,7 @@ from app import auth as auth_deps
 from app.config import Settings
 from app.database import SessionLocal
 from app.main import app
-from app.models import CountSession, Restaurant
+from app.models import CountEntry, CountSession, InventoryItem, Restaurant
 from app.routes import ai, integrations
 from app.routes import auth as auth_routes
 from app.seed import seed
@@ -295,3 +295,103 @@ def test_google_sheets_placeholder_disabled_without_external_calls(monkeypatch) 
     assert payload["provider"] == "google_sheets"
     assert "Google Sheets OAuth credentials" in payload["message"]
     assert "ENABLE_EXTERNAL_AI=true" in payload["message"]
+
+
+def test_dashboard_summary_empty_state() -> None:
+    response = client.get("/dashboard/summary")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["low_stock_items"] == []
+    assert data["last_count_summary"] is None
+    assert data["count_over_count_changes"] == []
+    assert data["data_quality_insights"] == []
+    assert data["export_status"] == {"count_id": None, "exported": False}
+
+
+def test_dashboard_summary_normal_state() -> None:
+    text = (
+        "We have 3 bottles of olive oil, one of which is half empty, "
+        "3 heads of lettuce, 5 boxes of tomatoes, and 2 boxes of cheese."
+    )
+    count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+    assert client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": text, "area": "Dry Storage", "save": True},
+    ).status_code == 200
+
+    data = client.get("/dashboard/summary").json()
+
+    low = data["low_stock_items"]
+    assert {row["item_name"] for row in low} == {"Olive oil", "Lettuce", "Tomatoes", "Cheese"}
+    assert low[0]["item_name"] == "Lettuce"  # biggest shortfall (10 - 3 = 7)
+    olive = next(row for row in low if row["item_name"] == "Olive oil")
+    assert olive["current_quantity"] == 2.5
+    assert olive["par_level"] == 6
+    assert olive["shortfall"] == 3.5
+    assert olive["unit"] == "bottles"
+
+    summary = data["last_count_summary"]
+    assert summary["count_id"] == count_id
+    assert summary["area"] == "Dry Storage"
+    assert summary["total_items_counted"] == 4
+    assert summary["needs_review_count"] == 0
+
+    assert "Olive oil was counted as a partial quantity (2.5 bottles)." in data["data_quality_insights"]
+
+    assert data["export_status"] == {"count_id": count_id, "exported": False}
+    assert client.get(f"/reports/{count_id}/csv").status_code == 200
+    assert client.get("/dashboard/summary").json()["export_status"]["exported"] is True
+
+
+def test_dashboard_count_over_count_changes() -> None:
+    first = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+    client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": first, "text": "3 bottles of olive oil and 3 heads of lettuce", "area": "Dry Storage", "save": True},
+    )
+    second = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+    client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": second, "text": "6 bottles of olive oil and 5 heads of lettuce", "area": "Dry Storage", "save": True},
+    )
+
+    changes = client.get("/dashboard/summary").json()["count_over_count_changes"]
+    by_name = {row["item_name"]: row for row in changes}
+    assert by_name["Olive oil"]["previous_quantity"] == 3
+    assert by_name["Olive oil"]["current_quantity"] == 6
+    assert by_name["Olive oil"]["delta"] == 3
+    assert by_name["Lettuce"]["delta"] == 2
+    assert changes[0]["item_name"] == "Olive oil"  # abs delta 3 > 2
+
+
+def test_dashboard_restaurant_isolation() -> None:
+    db = SessionLocal()
+    try:
+        massimo = db.query(Restaurant).filter(Restaurant.name == "Massimo’s").one()
+        massimo.owner_user_id = "other-user"
+        count = CountSession(restaurant_id=massimo.id, area="Freezer")
+        db.add_all([massimo, count])
+        db.flush()
+        item = db.query(InventoryItem).filter(InventoryItem.restaurant_id == massimo.id).first()
+        db.add(
+            CountEntry(
+                count_session_id=count.id,
+                inventory_item_id=item.id,
+                item_name=item.name,
+                normalized_item_name=item.normalized_name,
+                quantity=1,
+                unit=item.default_unit,
+                area="Freezer",
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    data = client.get("/dashboard/summary").json()
+    # TEST_USER's restaurant (Smoking Pig BBQ) has no counts, so nothing from
+    # Massimo's workspace should appear here.
+    assert data["last_count_summary"] is None
+    assert data["low_stock_items"] == []
+    assert data["count_over_count_changes"] == []
+    assert data["export_status"]["count_id"] is None

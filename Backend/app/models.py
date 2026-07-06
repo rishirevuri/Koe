@@ -56,6 +56,7 @@ class CountSession(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exported: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     restaurant: Mapped[Restaurant] = relationship(back_populates="count_sessions")
     entries: Mapped[list["CountEntry"]] = relationship(back_populates="count_session", cascade="all, delete-orphan")
