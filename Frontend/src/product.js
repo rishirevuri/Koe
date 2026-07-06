@@ -23,6 +23,7 @@ const state = {
   authMode: "login",
   authEmail: "",
   authPassword: "",
+  authConfirmPassword: "",
   authLoading: false,
   session: null,
   userEmail: "",
@@ -359,7 +360,7 @@ async function initializeAuthFlow() {
     state.userEmail = "";
     state.view = "unauthenticated";
     state.authReady = true;
-    state.authStatus = "Sign in to use Koe";
+    state.authStatus = "Sign in to account";
     setError(supabaseConfigError);
     render();
     return;
@@ -379,7 +380,7 @@ async function initializeAuthFlow() {
     resetWorkspaceState();
     state.view = "unauthenticated";
     state.authReady = true;
-    state.authStatus = "Sign in to use Koe";
+    state.authStatus = "Sign in to account";
     render();
     return;
   }
@@ -406,7 +407,7 @@ function initialize() {
     state.userEmail = "";
     state.view = "unauthenticated";
     state.authReady = true;
-    state.authStatus = "Sign in to use Koe";
+    state.authStatus = "Sign in to account";
     render();
   });
 }
@@ -418,7 +419,7 @@ async function handleInvalidSession() {
   state.userEmail = "";
   state.view = "unauthenticated";
   state.authReady = true;
-  state.authStatus = "Sign in to use Koe";
+  state.authStatus = "Sign in to account";
   render();
 }
 
@@ -434,7 +435,7 @@ async function loadCurrentWorkspace() {
   if (!state.session) {
     console.log("No Supabase session found; rendering auth screen");
     state.view = "unauthenticated";
-    state.authStatus = "Sign in to use Koe";
+    state.authStatus = "Sign in to account";
     render();
     return;
   }
@@ -490,8 +491,14 @@ async function handleAuthSubmit(mode) {
 
   const email = document.querySelector("#auth-email")?.value.trim() || state.authEmail.trim();
   const password = document.querySelector("#auth-password")?.value || state.authPassword;
+  const confirmPassword = document.querySelector("#auth-confirm-password")?.value || state.authConfirmPassword;
   if (!email || !password) {
     setError("Enter an email and password.");
+    render();
+    return;
+  }
+  if (mode === "signup" && password !== confirmPassword) {
+    setError("Passwords do not match.");
     render();
     return;
   }
@@ -512,10 +519,67 @@ async function handleAuthSubmit(mode) {
 
   state.authEmail = email;
   state.authPassword = "";
+  state.authConfirmPassword = "";
   setNotice(mode === "signup" ? "Account created. Check your email if confirmation is enabled." : "Logged in.");
   // After a successful auth + confirmed workspace, land on the dashboard.
   state.pendingDashboardRedirect = true;
   await initializeAuthFlow();
+  window.history.replaceState({}, "", "/dashboard");
+}
+
+async function handleResetPassword() {
+  clearMessages();
+  if (!isSupabaseConfigured) {
+    setError(supabaseConfigError);
+    render();
+    return;
+  }
+
+  const email = document.querySelector("#auth-email")?.value.trim() || state.authEmail.trim();
+  if (!email) {
+    setError("Enter your email first, then click Reset password.");
+    render();
+    return;
+  }
+
+  state.authLoading = true;
+  render();
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/dashboard`,
+  });
+  state.authLoading = false;
+
+  if (error) {
+    setError(error.message);
+  } else {
+    setNotice("Password reset email sent.");
+  }
+  render();
+}
+
+async function handleGoogleSignIn() {
+  clearMessages();
+  if (!isSupabaseConfigured) {
+    setError(supabaseConfigError);
+    render();
+    return;
+  }
+
+  state.authLoading = true;
+  render();
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: {
+      redirectTo: `${window.location.origin}/dashboard`,
+    },
+  });
+
+  if (error) {
+    console.error("Google sign-in failed:", error.message);
+    state.authLoading = false;
+    setError(error.message);
+    render();
+  }
 }
 
 async function logout() {
@@ -527,7 +591,7 @@ async function logout() {
   state.userEmail = "";
   state.view = "unauthenticated";
   state.authReady = true;
-  state.authStatus = "Sign in to use Koe";
+  state.authStatus = "Sign in to account";
   render();
 }
 
@@ -959,32 +1023,55 @@ function renderReportPreview() {
 
 function renderAuthPanel() {
   const isSignup = state.authMode === "signup";
+  const title = isSignup ? "Create an account" : "Sign in to account";
+  const subtitle = isSignup
+    ? "Sign up with email or Google to get started."
+    : "Use your email or Google to access your restaurant workspace.";
+  const submitLabel = isSignup ? "Sign up" : "Sign in";
+  const googleLabel = isSignup ? "Sign up with Google" : "Sign in with Google";
   return `
     <main class="auth-shell">
       <section class="auth-panel">
         <a href="./index.html" class="product-logo">Koe</a>
         <div class="auth-copy">
-          <span class="auth-status">${escapeHtml(state.authStatus || "Sign in to use Koe")}</span>
-          <h1>${isSignup ? "Create Tester Login" : "Sign in to use Koe"}</h1>
-          <p>Use the email and password for your restaurant tester account.</p>
+          <h1>${title}</h1>
+          <p>${subtitle}</p>
         </div>
         ${renderMessages()}
         <form class="auth-form" id="auth-form">
           <label>
             <span>Email</span>
-            <input id="auth-email" type="email" autocomplete="email" value="${escapeHtml(state.authEmail)}" required />
+            <input id="auth-email" type="email" autocomplete="email" placeholder="you@company.com" value="${escapeHtml(state.authEmail)}" required />
           </label>
           <label>
             <span>Password</span>
-            <input id="auth-password" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" required />
+            <input id="auth-password" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" placeholder="${isSignup ? "Create a password" : ""}" required />
           </label>
+          ${
+            isSignup
+              ? `<label>
+                  <span>Confirm password</span>
+                  <input id="auth-confirm-password" type="password" autocomplete="new-password" placeholder="Confirm your password" required />
+                </label>`
+              : ""
+          }
           <button class="new-count-button auth-submit-button" type="submit" ${state.authLoading || !state.backendConnected ? "disabled" : ""}>
-            ${state.authLoading ? "Please wait..." : isSignup ? "Sign Up" : "Log In"}
+            ${state.authLoading ? "Please wait..." : submitLabel}
           </button>
         </form>
-        <button class="ghost-button auth-switch-button" id="auth-switch-button" type="button">
-          ${isSignup ? "Use an existing login" : "Create a tester login"}
+        <div class="auth-divider"><span>Or</span></div>
+        <button class="google-auth-button" id="google-auth-button" type="button" ${state.authLoading ? "disabled" : ""}>
+          <span class="google-auth-mark" aria-hidden="true">G</span>
+          <span>${googleLabel}</span>
         </button>
+        <div class="auth-links">
+          ${
+            isSignup
+              ? `<p>Already have an account? <button id="auth-switch-button" type="button">Sign in</button></p>`
+              : `<p>Having trouble? <button id="reset-password-button" type="button">Reset password</button></p>
+                 <p>Don't have an account? <button id="auth-switch-button" type="button">Sign up</button></p>`
+          }
+        </div>
       </section>
     </main>
   `;
@@ -1030,7 +1117,7 @@ function render() {
   }
 
   if (!isSupabaseConfigured) {
-    state.authStatus = "Sign in to use Koe";
+    state.authStatus = "Sign in to account";
     setError(supabaseConfigError);
     app.innerHTML = renderAuthPanel();
     bindAuthEvents();
@@ -1220,9 +1307,16 @@ function bindAuthEvents() {
   document.querySelector("#auth-password")?.addEventListener("input", (event) => {
     state.authPassword = event.target.value;
   });
+  document.querySelector("#auth-confirm-password")?.addEventListener("input", (event) => {
+    state.authConfirmPassword = event.target.value;
+  });
+  document.querySelector("#google-auth-button")?.addEventListener("click", handleGoogleSignIn);
+  document.querySelector("#reset-password-button")?.addEventListener("click", handleResetPassword);
   document.querySelector("#auth-switch-button")?.addEventListener("click", () => {
     clearMessages();
     state.authMode = state.authMode === "login" ? "signup" : "login";
+    state.authPassword = "";
+    state.authConfirmPassword = "";
     render();
   });
   document.querySelectorAll(".tester-link-button").forEach((button) => {
