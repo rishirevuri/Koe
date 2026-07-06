@@ -579,6 +579,8 @@ h1 em {
   padding: 42px 18px;
   place-items: center;
   color: var(--ink);
+  --auth-font: "Bonita", "Bodoni 72", "Didot", Georgia, serif;
+  --auth-placeholder-font: "Times New Roman", Times, serif;
   background:
     radial-gradient(circle at 50% 0%, rgba(170, 132, 80, 0.12), transparent 34%),
     linear-gradient(135deg, #fbf6ee 0%, #fffaf3 45%, #f6efe4 100%);
@@ -616,10 +618,10 @@ h1 em {
 .auth-copy h1 {
   margin: 0;
   color: var(--ink);
-  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: clamp(2rem, 4vw, 3rem);
-  font-weight: 800;
-  line-height: 1.12;
+  font-family: var(--auth-font);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 500;
+  line-height: 1.06;
   letter-spacing: 0;
   text-align: center;
 }
@@ -644,7 +646,9 @@ h1 em {
   max-width: 480px;
   margin: 12px auto 0;
   color: rgba(38, 48, 64, 0.72);
-  font-size: 17px;
+  font-family: var(--auth-font);
+  font-size: 18px;
+  font-weight: 400;
   line-height: 1.45;
   text-align: center;
 }
@@ -661,8 +665,9 @@ h1 em {
   display: grid;
   gap: 10px;
   color: rgba(38, 48, 64, 0.7);
-  font-size: 16px;
-  font-weight: 760;
+  font-family: var(--auth-font);
+  font-size: 18px;
+  font-weight: 500;
 }
 
 .auth-form label em {
@@ -682,8 +687,9 @@ h1 em {
   min-height: 58px;
   padding: 0 20px;
   color: var(--ink);
-  font: inherit;
-  font-size: 17px;
+  font-family: var(--auth-font);
+  font-size: 18px;
+  font-weight: 400;
   background: rgba(255, 255, 252, 0.92);
   border: 1px solid rgba(6, 19, 45, 0.14);
   border-radius: 14px;
@@ -692,6 +698,8 @@ h1 em {
 
 .auth-form input::placeholder {
   color: rgba(38, 48, 64, 0.42);
+  font-family: var(--auth-placeholder-font);
+  font-weight: 400;
 }
 
 .auth-form input:focus {
@@ -704,17 +712,27 @@ h1 em {
   width: 100%;
 }
 
-.auth-submit-button {
+.auth-panel .auth-submit-button {
   min-height: 62px;
-  margin-top: 6px;
+  width: 100%;
+  max-width: 560px;
+  margin: -2px auto 0;
   border-radius: 14px;
-  font-size: 18px;
-  background: #2f6293;
+  font-family: var(--auth-font);
+  font-size: 20px;
+  font-weight: 500;
+  background: var(--ink);
   box-shadow: none;
 }
 
-.auth-submit-button:hover:not(:disabled) {
-  background: #285981;
+.auth-panel .auth-submit-button:hover:not(:disabled) {
+  background: #0c1c3a;
+}
+
+.auth-panel .auth-submit-button:disabled {
+  color: var(--ivory);
+  background: var(--ink);
+  opacity: 0.68;
 }
 
 .google-auth-button {
@@ -727,9 +745,9 @@ h1 em {
   min-height: 58px;
   margin: 0 auto;
   color: var(--ink);
-  font: inherit;
-  font-size: 18px;
-  font-weight: 800;
+  font-family: var(--auth-font);
+  font-size: 20px;
+  font-weight: 500;
   background: rgba(255, 255, 252, 0.9);
   border: 1px solid rgba(6, 19, 45, 0.12);
   border-radius: 14px;
@@ -747,8 +765,9 @@ h1 em {
   max-width: 560px;
   margin: 0 auto;
   color: rgba(38, 48, 64, 0.54);
-  font-size: 16px;
-  font-weight: 700;
+  font-family: var(--auth-font);
+  font-size: 18px;
+  font-weight: 400;
 }
 
 .auth-divider::before,
@@ -763,7 +782,9 @@ h1 em {
   gap: 10px;
   justify-items: center;
   color: rgba(38, 48, 64, 0.66);
-  font-size: 17px;
+  font-family: var(--auth-font);
+  font-size: 18px;
+  font-weight: 400;
 }
 
 .auth-links p {
@@ -774,7 +795,7 @@ h1 em {
   padding: 0;
   color: var(--product-accent, var(--ink));
   font: inherit;
-  font-weight: 800;
+  font-weight: 500;
   background: none;
   border: 0;
   cursor: pointer;
