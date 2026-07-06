@@ -21,6 +21,8 @@ const state = {
   backendMessage: "Checking backend...",
   authReady: false,
   authMode: "login",
+  authFirstName: "",
+  authLastName: "",
   authEmail: "",
   authPassword: "",
   authConfirmPassword: "",
@@ -492,8 +494,15 @@ async function handleAuthSubmit(mode) {
   const email = document.querySelector("#auth-email")?.value.trim() || state.authEmail.trim();
   const password = document.querySelector("#auth-password")?.value || state.authPassword;
   const confirmPassword = document.querySelector("#auth-confirm-password")?.value || state.authConfirmPassword;
+  const firstName = document.querySelector("#auth-first-name")?.value.trim() || state.authFirstName.trim();
+  const lastName = document.querySelector("#auth-last-name")?.value.trim() || state.authLastName.trim();
   if (!email || !password) {
     setError("Enter an email and password.");
+    render();
+    return;
+  }
+  if (mode === "signup" && !firstName) {
+    setError("Enter your first name.");
     render();
     return;
   }
@@ -507,7 +516,16 @@ async function handleAuthSubmit(mode) {
   render();
   const result =
     mode === "signup"
-      ? await supabase.auth.signUp({ email, password })
+      ? await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              first_name: firstName,
+              last_name: lastName,
+            },
+          },
+        })
       : await supabase.auth.signInWithPassword({ email, password });
   state.authLoading = false;
 
@@ -517,6 +535,8 @@ async function handleAuthSubmit(mode) {
     return;
   }
 
+  state.authFirstName = firstName;
+  state.authLastName = lastName;
   state.authEmail = email;
   state.authPassword = "";
   state.authConfirmPassword = "";
@@ -1039,6 +1059,20 @@ function renderAuthPanel() {
         </div>
         ${renderMessages()}
         <form class="auth-form" id="auth-form">
+          ${
+            isSignup
+              ? `<div class="auth-name-grid">
+                  <label>
+                    <span>First name</span>
+                    <input id="auth-first-name" type="text" autocomplete="given-name" placeholder="Jane" value="${escapeHtml(state.authFirstName)}" required />
+                  </label>
+                  <label>
+                    <span>Last name <em>(optional)</em></span>
+                    <input id="auth-last-name" type="text" autocomplete="family-name" placeholder="Doe" value="${escapeHtml(state.authLastName)}" />
+                  </label>
+                </div>`
+              : ""
+          }
           <label>
             <span>Email</span>
             <input id="auth-email" type="email" autocomplete="email" placeholder="you@company.com" value="${escapeHtml(state.authEmail)}" required />
@@ -1297,9 +1331,17 @@ function render() {
 function bindAuthEvents() {
   document.querySelector("#auth-form")?.addEventListener("submit", (event) => {
     event.preventDefault();
+    state.authFirstName = document.querySelector("#auth-first-name")?.value || "";
+    state.authLastName = document.querySelector("#auth-last-name")?.value || "";
     state.authEmail = document.querySelector("#auth-email")?.value || "";
     state.authPassword = document.querySelector("#auth-password")?.value || "";
     handleAuthSubmit(state.authMode);
+  });
+  document.querySelector("#auth-first-name")?.addEventListener("input", (event) => {
+    state.authFirstName = event.target.value;
+  });
+  document.querySelector("#auth-last-name")?.addEventListener("input", (event) => {
+    state.authLastName = event.target.value;
   });
   document.querySelector("#auth-email")?.addEventListener("input", (event) => {
     state.authEmail = event.target.value;
@@ -1315,6 +1357,8 @@ function bindAuthEvents() {
   document.querySelector("#auth-switch-button")?.addEventListener("click", () => {
     clearMessages();
     state.authMode = state.authMode === "login" ? "signup" : "login";
+    state.authFirstName = "";
+    state.authLastName = "";
     state.authPassword = "";
     state.authConfirmPassword = "";
     render();

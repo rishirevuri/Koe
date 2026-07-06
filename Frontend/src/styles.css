@@ -576,7 +576,7 @@ h1 em {
 .auth-shell {
   display: grid;
   min-height: 100vh;
-  padding: 32px 18px;
+  padding: 42px 18px;
   place-items: center;
   color: var(--ink);
   background:
@@ -586,19 +586,20 @@ h1 em {
 
 .auth-panel {
   display: grid;
-  gap: 18px;
-  width: min(640px, 100%);
+  gap: 22px;
+  width: min(720px, 100%);
   min-width: 0;
-  padding: 34px clamp(24px, 5vw, 56px);
-  background: rgba(255, 252, 247, 0.94);
-  border: 1px solid rgba(170, 132, 80, 0.18);
-  border-radius: 16px;
-  box-shadow: 0 22px 60px rgba(50, 39, 26, 0.1);
+  padding: 42px clamp(28px, 6vw, 68px);
+  background: rgba(255, 253, 249, 0.96);
+  border: 1px solid rgba(6, 19, 45, 0.1);
+  border-radius: 20px;
+  box-shadow: 0 28px 72px rgba(50, 39, 26, 0.1);
 }
 
 .auth-panel > .product-logo {
   justify-self: center;
-  font-size: 3.3rem;
+  font-size: 3.45rem;
+  line-height: 0.9;
 }
 
 .auth-panel .message-stack {
@@ -616,8 +617,8 @@ h1 em {
   margin: 0;
   color: var(--ink);
   font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  font-size: clamp(1.55rem, 3vw, 2rem);
-  font-weight: 700;
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
   line-height: 1.12;
   letter-spacing: 0;
   text-align: center;
@@ -640,40 +641,57 @@ h1 em {
 }
 
 .auth-copy p {
-  max-width: 410px;
-  margin: 10px auto 0;
+  max-width: 480px;
+  margin: 12px auto 0;
   color: rgba(38, 48, 64, 0.72);
-  font-size: 15px;
+  font-size: 17px;
   line-height: 1.45;
   text-align: center;
 }
 
 .auth-form {
   display: grid;
-  gap: 13px;
+  gap: 17px;
   width: 100%;
-  max-width: 440px;
-  margin: 2px auto 0;
+  max-width: 560px;
+  margin: 4px auto 0;
 }
 
 .auth-form label {
   display: grid;
-  gap: 8px;
+  gap: 10px;
   color: rgba(38, 48, 64, 0.7);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: 16px;
+  font-weight: 760;
+}
+
+.auth-form label em {
+  color: rgba(38, 48, 64, 0.48);
+  font-style: normal;
+  font-weight: 500;
+}
+
+.auth-name-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
 }
 
 .auth-form input {
   width: 100%;
-  min-height: 50px;
-  padding: 0 15px;
+  min-height: 58px;
+  padding: 0 20px;
   color: var(--ink);
   font: inherit;
+  font-size: 17px;
   background: rgba(255, 255, 252, 0.92);
   border: 1px solid rgba(6, 19, 45, 0.14);
-  border-radius: 11px;
+  border-radius: 14px;
   outline: 0;
+}
+
+.auth-form input::placeholder {
+  color: rgba(38, 48, 64, 0.42);
 }
 
 .auth-form input:focus {
@@ -687,10 +705,16 @@ h1 em {
 }
 
 .auth-submit-button {
-  min-height: 50px;
-  margin-top: 3px;
-  border-radius: 11px;
-  font-size: 15px;
+  min-height: 62px;
+  margin-top: 6px;
+  border-radius: 14px;
+  font-size: 18px;
+  background: #2f6293;
+  box-shadow: none;
+}
+
+.auth-submit-button:hover:not(:disabled) {
+  background: #285981;
 }
 
 .google-auth-button {
@@ -699,16 +723,16 @@ h1 em {
   justify-content: center;
   gap: 12px;
   width: 100%;
-  max-width: 440px;
-  min-height: 50px;
+  max-width: 560px;
+  min-height: 58px;
   margin: 0 auto;
   color: var(--ink);
   font: inherit;
-  font-size: 15px;
+  font-size: 18px;
   font-weight: 800;
   background: rgba(255, 255, 252, 0.9);
-  border: 1px solid rgba(170, 132, 80, 0.26);
-  border-radius: 11px;
+  border: 1px solid rgba(6, 19, 45, 0.12);
+  border-radius: 14px;
   box-shadow: 0 12px 24px rgba(31, 27, 22, 0.06);
   cursor: pointer;
   transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
@@ -720,10 +744,10 @@ h1 em {
   align-items: center;
   gap: 14px;
   width: 100%;
-  max-width: 440px;
+  max-width: 560px;
   margin: 0 auto;
   color: rgba(38, 48, 64, 0.54);
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 700;
 }
 
@@ -736,10 +760,10 @@ h1 em {
 
 .auth-links {
   display: grid;
-  gap: 7px;
+  gap: 10px;
   justify-items: center;
   color: rgba(38, 48, 64, 0.66);
-  font-size: 14px;
+  font-size: 17px;
 }
 
 .auth-links p {
@@ -778,11 +802,11 @@ h1 em {
 .google-auth-mark {
   display: inline-grid;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   color: #4285f4;
   font-family: "Helvetica Neue", Arial, sans-serif;
-  font-size: 16px;
+  font-size: 18px;
   font-weight: 900;
   background:
     linear-gradient(90deg, #4285f4 0 25%, #34a853 25% 50%, #fbbc05 50% 75%, #ea4335 75% 100%) bottom / 100% 3px no-repeat,
@@ -1866,8 +1890,8 @@ button:disabled,
 }
 
 .product-body .auth-panel {
-  width: min(640px, calc(100vw - 44px));
-  max-width: 640px;
+  width: min(720px, calc(100vw - 44px));
+  max-width: 720px;
   overflow: hidden;
 }
 
@@ -2184,15 +2208,13 @@ button:disabled,
   box-shadow: 0 15px 28px rgba(6, 19, 45, 0.22);
 }
 
-.transcript-panel--editor textarea,
-.auth-form input {
+.transcript-panel--editor textarea {
   background: rgba(255, 255, 252, 0.82);
   border-color: var(--product-line);
   border-radius: 7px;
 }
 
-.transcript-panel--editor textarea:focus,
-.auth-form input:focus {
+.transcript-panel--editor textarea:focus {
   border-color: rgba(170, 132, 80, 0.5);
   box-shadow: 0 0 0 4px rgba(170, 132, 80, 0.1);
 }
@@ -2326,6 +2348,10 @@ button:disabled,
     width: 100%;
     max-width: 100%;
     padding: 24px 18px;
+  }
+
+  .auth-name-grid {
+    grid-template-columns: 1fr;
   }
 
   .product-grid,

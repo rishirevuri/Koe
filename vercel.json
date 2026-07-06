@@ -1,4 +1,5 @@
 {
+  "cleanUrls": true,
   "buildCommand": "cd Frontend && npm install && npm run build",
   "outputDirectory": "Frontend/dist",
   "installCommand": "cd Frontend && npm install"
