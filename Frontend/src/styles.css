@@ -1289,17 +1289,17 @@ button:disabled,
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 15px;
-  min-height: 58px;
-  padding: 0 32px;
+  gap: 10px;
+  min-height: 48px;
+  padding: 0 22px;
   color: #fffaf2;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 500;
   white-space: nowrap;
   background: var(--ink);
   border: 1px solid rgba(6, 19, 45, 0.9);
-  border-radius: 10px;
-  box-shadow: 0 18px 34px rgba(6, 19, 45, 0.19);
+  border-radius: 12px;
+  box-shadow: 0 12px 24px rgba(6, 19, 45, 0.13);
 }
 
 .new-count-button:hover,
@@ -2224,7 +2224,7 @@ button:disabled,
   position: relative;
   overflow: hidden;
   border-radius: 12px;
-  font-weight: 750;
+  font-weight: 500;
   letter-spacing: 0;
   transition:
     transform 180ms ease,
@@ -2242,7 +2242,7 @@ button:disabled,
     #06132d;
   border: 1px solid rgba(6, 19, 45, 0.92);
   box-shadow:
-    0 16px 30px rgba(6, 19, 45, 0.18),
+    0 12px 24px rgba(6, 19, 45, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.13);
 }
 
@@ -2254,7 +2254,7 @@ button:disabled,
     #0b1b36;
   border-color: rgba(6, 19, 45, 1);
   box-shadow:
-    0 21px 38px rgba(6, 19, 45, 0.23),
+    0 16px 30px rgba(6, 19, 45, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
@@ -2267,7 +2267,7 @@ button:disabled,
     rgba(255, 250, 242, 0.82);
   border: 1px solid rgba(16, 35, 31, 0.14);
   box-shadow:
-    0 10px 22px rgba(31, 27, 22, 0.06),
+    0 8px 18px rgba(31, 27, 22, 0.045),
     inset 0 1px 0 rgba(255, 255, 255, 0.78);
 }
 
@@ -2281,7 +2281,7 @@ button:disabled,
     rgba(255, 250, 242, 0.92);
   border-color: rgba(170, 132, 80, 0.42);
   box-shadow:
-    0 15px 28px rgba(31, 27, 22, 0.1),
+    0 11px 22px rgba(31, 27, 22, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.86);
 }
 
@@ -2294,24 +2294,24 @@ button:disabled,
 }
 
 .product-shell .logout-topbar-button {
-  min-height: 52px;
-  padding-inline: 22px;
+  min-height: 44px;
+  padding-inline: 18px;
 }
 
 .product-shell #start-count-button {
-  min-height: 52px;
-  padding-inline: 24px;
+  min-height: 44px;
+  padding-inline: 20px;
 }
 
 .product-shell .process-button {
-  min-width: 184px;
-  min-height: 46px;
-  padding-inline: 26px;
+  min-width: 132px;
+  min-height: 42px;
+  padding-inline: 22px;
 }
 
 .product-shell .report-button {
-  min-height: 54px;
-  padding: 0 20px;
+  min-height: 48px;
+  padding: 0 18px;
 }
 
 .product-shell .report-button--disabled {
@@ -2468,8 +2468,8 @@ button:disabled,
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
-  width: min(204px, 100%);
-  padding: 5px;
+  width: min(190px, 100%);
+  padding: 4px;
   background: rgba(6, 19, 45, 0.06);
   border: 1px solid rgba(6, 19, 45, 0.12);
   border-radius: 999px;
@@ -2478,20 +2478,20 @@ button:disabled,
 
 .recording-button {
   min-width: 0;
-  min-height: 36px;
-  padding: 0 14px;
+  min-height: 32px;
+  padding: 0 12px;
   color: #fffaf2;
   font: inherit;
   font-size: 12px;
-  font-weight: 800;
-  letter-spacing: 0.02em;
+  font-weight: 500;
+  letter-spacing: 0;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 48%),
     var(--product-accent-strong);
   border: 1px solid rgba(6, 19, 45, 0.86);
   border-radius: 999px;
   box-shadow:
-    0 10px 20px rgba(6, 19, 45, 0.14),
+    0 7px 14px rgba(6, 19, 45, 0.12),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
   cursor: pointer;
   transition: transform 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
@@ -2504,7 +2504,7 @@ button:disabled,
     #0c1c3a;
   border-color: rgba(6, 19, 45, 0.95);
   box-shadow:
-    0 12px 24px rgba(6, 19, 45, 0.2),
+    0 10px 20px rgba(6, 19, 45, 0.17),
     inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
@@ -2534,7 +2534,7 @@ button:disabled,
 }
 
 .voice-card .transcript-actions .process-button {
-  min-height: 44px;
+  min-height: 42px;
   color: var(--ivory);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 46%),
@@ -2542,7 +2542,7 @@ button:disabled,
   border-color: rgba(6, 19, 45, 0.9);
   border-radius: 12px;
   box-shadow:
-    0 14px 26px rgba(6, 19, 45, 0.17),
+    0 10px 20px rgba(6, 19, 45, 0.14),
     inset 0 1px 0 rgba(255, 255, 255, 0.13);
 }
 
@@ -2551,7 +2551,7 @@ button:disabled,
     linear-gradient(180deg, rgba(255, 255, 255, 0.13), transparent 46%),
     #0c1c3a;
   box-shadow:
-    0 18px 32px rgba(6, 19, 45, 0.22),
+    0 14px 26px rgba(6, 19, 45, 0.18),
     inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
@@ -2723,6 +2723,7 @@ button:disabled,
 .app-main {
   margin-left: 256px;
   min-height: 100vh;
+  transition: margin-left 220ms ease;
 }
 
 .sidebar {
@@ -2737,12 +2738,14 @@ button:disabled,
   border-right: 1px solid var(--product-line);
   backdrop-filter: blur(10px) saturate(1.04);
   -webkit-backdrop-filter: blur(10px) saturate(1.04);
+  transition: width 220ms ease, padding 220ms ease, transform 220ms ease;
 }
 
 .sidebar-head {
+  position: relative;
   display: grid;
   gap: 2px;
-  padding: 0 8px;
+  padding: 0 46px 0 8px;
   margin-bottom: 26px;
 }
 
@@ -2758,11 +2761,43 @@ button:disabled,
   overflow: hidden;
   font-family: var(--script);
   font-size: 1.5rem;
-  font-weight: 600;
+  font-weight: 500;
   line-height: 1.15;
   color: var(--ink);
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sidebar-collapse {
+  position: absolute;
+  top: 2px;
+  right: 0;
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: rgba(16, 35, 31, 0.72);
+  background: rgba(255, 250, 242, 0.52);
+  border: 1px solid rgba(16, 35, 31, 0.12);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: transform 180ms ease, color 180ms ease, border-color 180ms ease, background-color 180ms ease;
+}
+
+.sidebar-collapse:hover {
+  color: var(--ink);
+  background: rgba(255, 250, 242, 0.82);
+  border-color: rgba(170, 132, 80, 0.34);
+}
+
+.sidebar-collapse svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .sidebar-nav {
@@ -2774,12 +2809,13 @@ button:disabled,
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 11px 12px;
+  min-height: 42px;
+  padding: 0 12px;
   color: var(--ink-soft);
   font-size: 15px;
-  font-weight: 600;
-  border-radius: 9px;
-  transition: background-color 160ms ease, color 160ms ease;
+  font-weight: 500;
+  border-radius: 12px;
+  transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease;
 }
 
 .sidebar-link:hover {
@@ -2790,6 +2826,7 @@ button:disabled,
 .sidebar-link.is-active {
   background: var(--product-accent);
   color: var(--ivory);
+  box-shadow: 0 12px 24px rgba(6, 19, 45, 0.13);
 }
 
 .sidebar-link svg {
@@ -2807,15 +2844,16 @@ button:disabled,
   align-items: center;
   gap: 12px;
   margin-top: auto;
-  padding: 11px 12px;
+  min-height: 42px;
+  padding: 0 12px;
   color: var(--ink-soft);
   font: inherit;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
   text-align: left;
   background: transparent;
   border: 1px solid var(--product-line);
-  border-radius: 9px;
+  border-radius: 12px;
   cursor: pointer;
   transition: border-color 160ms ease, color 160ms ease;
 }
@@ -2843,6 +2881,48 @@ button:disabled,
   display: none;
 }
 
+.app-shell.sidebar-collapsed .sidebar {
+  width: 76px;
+  padding: 24px 14px 20px;
+}
+
+.app-shell.sidebar-collapsed .app-main {
+  margin-left: 76px;
+}
+
+.app-shell.sidebar-collapsed .sidebar-head {
+  justify-items: center;
+  padding: 0;
+  margin-bottom: 28px;
+}
+
+.app-shell.sidebar-collapsed .sidebar-logo {
+  font-size: 1.55rem;
+}
+
+.app-shell.sidebar-collapsed .sidebar-restaurant,
+.app-shell.sidebar-collapsed .sidebar-link span,
+.app-shell.sidebar-collapsed .sidebar-logout span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.app-shell.sidebar-collapsed .sidebar-collapse {
+  position: static;
+  margin-top: 12px;
+  transform: rotate(180deg);
+}
+
+.app-shell.sidebar-collapsed .sidebar-link,
+.app-shell.sidebar-collapsed .sidebar-logout {
+  justify-content: center;
+  padding: 0;
+}
+
 @media (max-width: 900px) {
   .app-main {
     margin-left: 0;
@@ -2850,9 +2930,53 @@ button:disabled,
   }
 
   .sidebar {
+    width: 256px;
+    padding: 26px 18px 22px;
     transform: translateX(-100%);
     transition: transform 220ms ease;
     box-shadow: var(--product-shadow);
+  }
+
+  .app-shell.sidebar-collapsed .app-main {
+    margin-left: 0;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar {
+    width: 256px;
+    padding: 26px 18px 22px;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar-head {
+    justify-items: stretch;
+    padding: 0 46px 0 8px;
+    margin-bottom: 26px;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar-logo {
+    font-size: 2rem;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar-restaurant,
+  .app-shell.sidebar-collapsed .sidebar-link span,
+  .app-shell.sidebar-collapsed .sidebar-logout span {
+    position: static;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    white-space: nowrap;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar-collapse {
+    position: absolute;
+    margin-top: 0;
+    transform: none;
+  }
+
+  .app-shell.sidebar-collapsed .sidebar-link,
+  .app-shell.sidebar-collapsed .sidebar-logout {
+    justify-content: flex-start;
+    padding: 0 12px;
   }
 
   .app-shell.sidebar-open .sidebar {

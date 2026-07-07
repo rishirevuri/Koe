@@ -15,6 +15,7 @@ function icon(name) {
     grid: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>`,
     mic: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"></path><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg>`,
     logout: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H4"></path><path d="M8 8l-4 4 4 4"></path><path d="M13 4h6v16h-6"></path></svg>`,
+    collapse: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>`,
   };
   return icons[name] || "";
 }
@@ -32,17 +33,20 @@ export function renderSidebar({ restaurantName, active }) {
       <div class="sidebar-head">
         <a class="sidebar-logo" href="./dashboard.html">Koe</a>
         <a class="sidebar-restaurant" href="./dashboard.html" title="${escapeHtml(restaurantName)}">${escapeHtml(restaurantName || "Your Restaurant")}</a>
+        <button class="sidebar-collapse" id="sidebar-collapse" type="button" aria-label="Collapse navigation" title="Collapse navigation">
+          ${icon("collapse")}
+        </button>
       </div>
       <nav class="sidebar-nav">
-        <a class="sidebar-link ${active === "dashboard" ? "is-active" : ""}" href="./dashboard.html" ${active === "dashboard" ? 'aria-current="page"' : ""}>
+        <a class="sidebar-link ${active === "dashboard" ? "is-active" : ""}" href="./dashboard.html" title="Dashboard" ${active === "dashboard" ? 'aria-current="page"' : ""}>
           ${icon("grid")}<span>Dashboard</span>
         </a>
-        <a class="sidebar-link ${active === "count" ? "is-active" : ""}" href="./product.html" ${active === "count" ? 'aria-current="page"' : ""}>
-          ${icon("mic")}<span>Initiate Count</span>
+        <a class="sidebar-link ${active === "count" ? "is-active" : ""}" href="./product.html" title="Count" ${active === "count" ? 'aria-current="page"' : ""}>
+          ${icon("mic")}<span>Count</span>
         </a>
       </nav>
-      <button class="sidebar-logout" id="sidebar-logout" type="button">
-        ${icon("logout")}<span>Log Out</span>
+      <button class="sidebar-logout" id="sidebar-logout" type="button" title="Exit">
+        ${icon("logout")}<span>Exit</span>
       </button>
     </aside>
   `;
@@ -54,10 +58,22 @@ export function renderSidebar({ restaurantName, active }) {
  */
 export function bindSidebar({ onLogout }) {
   const shell = document.querySelector(".app-shell");
+  const collapseButton = document.querySelector("#sidebar-collapse");
   const close = () => shell?.classList.remove("sidebar-open");
+  const setCollapsed = (collapsed) => {
+    shell?.classList.toggle("sidebar-collapsed", collapsed);
+    collapseButton?.setAttribute("aria-label", collapsed ? "Expand navigation" : "Collapse navigation");
+    collapseButton?.setAttribute("title", collapsed ? "Expand navigation" : "Collapse navigation");
+    window.localStorage.setItem("koe:sidebarCollapsed", collapsed ? "1" : "0");
+  };
+
+  setCollapsed(window.localStorage.getItem("koe:sidebarCollapsed") === "1");
 
   document.querySelector("#sidebar-toggle")?.addEventListener("click", () => {
     shell?.classList.toggle("sidebar-open");
+  });
+  collapseButton?.addEventListener("click", () => {
+    setCollapsed(!shell?.classList.contains("sidebar-collapsed"));
   });
   document.querySelector("#sidebar-scrim")?.addEventListener("click", close);
   document.querySelectorAll(".sidebar-link").forEach((link) => link.addEventListener("click", close));

@@ -208,7 +208,7 @@ function renderContent() {
       <div class="dashboard-status">
         <h1>We couldn't load your dashboard</h1>
         <p class="dashboard-status-detail">${escapeHtml(state.error)}</p>
-        <button class="new-count-button" id="dashboard-retry" type="button">Retry</button>
+        <button class="new-count-button" id="dashboard-retry" type="button">Try again</button>
       </div>
     `;
   }
@@ -224,7 +224,7 @@ function renderContent() {
       </header>
       <div class="dashboard-empty">
         <p>No counts yet. Start your first count and Koe will surface low-stock items, changes over time, and data-quality checks here.</p>
-        <a class="new-count-button" href="./product.html">Start New Count</a>
+        <a class="new-count-button" href="./product.html">New count</a>
       </div>
     `;
   }
@@ -240,7 +240,7 @@ function renderContent() {
     ${renderDataQuality(data.data_quality_insights || [])}
     ${renderExportStatus(data.export_status || {})}
     <div class="dashboard-cta">
-      <a class="new-count-button" href="./product.html">Start New Count</a>
+      <a class="new-count-button" href="./product.html">New count</a>
     </div>
   `;
 }
@@ -336,7 +336,7 @@ function renderExportStatus(status) {
   const exported = Boolean(status.exported);
   const link =
     !exported && status.count_id
-      ? ` <a class="dashboard-inline-link" href="./product.html">Open count to export</a>`
+      ? ` <a class="dashboard-inline-link" href="./product.html">Open count</a>`
       : "";
   return `
     <section class="dashboard-section">

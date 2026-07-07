@@ -1163,7 +1163,7 @@ function renderWorkspaceSetup() {
       <section class="auth-panel setup-panel">
         <div class="auth-panel-topline">
           <a href="./index.html" class="product-logo">Koe</a>
-          <button class="ghost-button" id="logout-button" type="button">Logout</button>
+          <button class="ghost-button" id="logout-button" type="button">Exit</button>
         </div>
         <div class="auth-copy">
           <span class="auth-status">${escapeHtml(state.authStatus || "Setting up workspace...")}</span>
@@ -1237,8 +1237,8 @@ function render() {
   const started = state.countStartedAt ? formatDateTime(state.countStartedAt) : "—";
   const selectedArea = state.selectedArea.trim();
   const countId = state.activeCountId || "—";
-  const primaryRecordingLabel = state.recordingMode === "paused" ? "Resume" : "Start";
-  const secondaryRecordingLabel = state.recordingMode === "paused" ? "Reset" : "Pause";
+  const primaryRecordingLabel = state.recordingMode === "paused" ? "Resume" : "Record";
+  const secondaryRecordingLabel = state.recordingMode === "paused" ? "Clear" : "Pause";
   app.innerHTML = `
     <div class="app-shell">
       ${renderSidebar({ restaurantName: state.selectedRestaurantName, active: "count" })}
@@ -1254,9 +1254,9 @@ function render() {
             <small>${escapeHtml(state.selectedRestaurantName)}</small>
           </div>
         </div>
-        <button class="ghost-button logout-topbar-button" id="logout-button" type="button">Logout</button>
+        <button class="ghost-button logout-topbar-button" id="logout-button" type="button">Exit</button>
         <button class="new-count-button" id="start-count-button" type="button" ${state.isCreatingCount || !state.backendConnected ? "disabled" : ""}>
-          ${ProductIcon("plus")} ${state.isCreatingCount ? "Starting..." : "Start New Count"}
+          ${ProductIcon("plus")} ${state.isCreatingCount ? "Starting" : "New count"}
         </button>
       </header>
 
@@ -1289,7 +1289,7 @@ function render() {
                 <textarea id="transcript-input" placeholder="Paste or type what your staff counted...">${escapeHtml(state.transcript)}</textarea>
                 <div class="transcript-actions">
                   <button class="new-count-button process-button" id="process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
-                    ${state.isProcessing ? "Processing Count..." : "Process Count"}
+                    ${state.isProcessing ? "Processing" : "Process"}
                   </button>
                 </div>
               </div>
@@ -1303,11 +1303,11 @@ function render() {
                 <h2>Parsed Inventory</h2>
                 <p>Koe turns your transcript into structured, clean data from the local backend.</p>
               </div>
-              <button class="ghost-button" id="edit-items-button" type="button">${ProductIcon("edit")} Edit Items</button>
+              <button class="ghost-button" id="edit-items-button" type="button">${ProductIcon("edit")} Edit</button>
             </div>
             ${renderInventoryTable()}
             <div class="table-footer">
-              <button class="add-item-button" id="add-item-button" type="button">${ProductIcon("plus")} Add Item</button>
+              <button class="add-item-button" id="add-item-button" type="button">${ProductIcon("plus")} Add</button>
               <span>${totalItems} item${totalItems === 1 ? "" : "s"} total</span>
             </div>
           </section>
@@ -1319,7 +1319,7 @@ function render() {
               <p>${needsReview ? `${needsReview} item${needsReview === 1 ? "" : "s"} need review.` : "No critical issues found yet."}</p>
               <small>${totalItems ? "Review flags come directly from the backend parse response." : "Process a count to check for review issues."}</small>
             </div>
-            <button class="ghost-button" id="review-items-button" type="button">Review All Items</button>
+            <button class="ghost-button" id="review-items-button" type="button">Review</button>
           </section>
 
           ${renderReportPreview()}
@@ -1356,10 +1356,10 @@ function render() {
 
           <div class="report-actions">
             <button class="report-button report-button--primary" id="generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId ? "disabled" : ""}>
-              ${ProductIcon("file")} ${state.isGeneratingReport ? "Generating..." : "Generate Report"} <span>→</span>
+              ${ProductIcon("file")} ${state.isGeneratingReport ? "Creating" : "Report"} <span>→</span>
             </button>
-            <button class="report-button" id="export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export CSV</button>
-            <button class="report-button report-button--disabled" id="send-sheets-button" type="button" disabled>${ProductIcon("sheet")} Send to Sheets — Coming Soon</button>
+            <button class="report-button" id="export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export</button>
+            <button class="report-button report-button--disabled" id="send-sheets-button" type="button" disabled>${ProductIcon("sheet")} Sheets</button>
           </div>
         </aside>
       </section>
