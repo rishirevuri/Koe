@@ -51,7 +51,7 @@ a {
   inset: 0;
   z-index: -3;
   content: "";
-  background-image: url("../FrontEnd_reference.png");
+  background-image: url("../kitchen-background.png");
   background-position: center center;
   background-size: cover;
   filter: saturate(0.98) contrast(1.02);
@@ -686,19 +686,23 @@ h1 em {
 }
 
 .auth-form--signup .auth-email-field {
+  order: 3;
+}
+
+.auth-form--signup .auth-restaurant-field {
   order: 2;
 }
 
 .auth-form--signup .auth-password-field {
-  order: 3;
-}
-
-.auth-form--signup .auth-confirm-field {
   order: 4;
 }
 
-.auth-form--signup .auth-submit-button {
+.auth-form--signup .auth-confirm-field {
   order: 5;
+}
+
+.auth-form--signup .auth-submit-button {
+  order: 6;
 }
 
 .auth-form input {

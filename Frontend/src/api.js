@@ -63,6 +63,14 @@ export async function linkTesterRestaurant(restaurantName) {
   });
 }
 
+export async function createRestaurant(name, session = null) {
+  return request("/restaurants", {
+    method: "POST",
+    session,
+    body: JSON.stringify({ name }),
+  });
+}
+
 export async function getRestaurants() {
   return request("/restaurants");
 }

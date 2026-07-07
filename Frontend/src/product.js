@@ -1,5 +1,6 @@
 import {
   checkBackendHealth,
+  createRestaurant,
   createCountSession,
   downloadCsv,
   getAuthMe,
@@ -23,6 +24,7 @@ const state = {
   authMode: "login",
   authFirstName: "",
   authLastName: "",
+  authRestaurantName: "",
   authEmail: "",
   authPassword: "",
   authConfirmPassword: "",
@@ -30,6 +32,7 @@ const state = {
   session: null,
   userEmail: "",
   workspaceMissing: false,
+  workspaceCreateAttempted: false,
   workspace: null,
   selectedRestaurantId: null,
   selectedRestaurantName: "",
@@ -256,6 +259,7 @@ function resetWorkspaceState() {
   stopRecording();
   state.workspace = null;
   state.workspaceMissing = false;
+  state.workspaceCreateAttempted = false;
   state.selectedRestaurantId = null;
   state.selectedRestaurantName = "";
   state.selectedRestaurantLocation = "";
@@ -470,6 +474,19 @@ async function loadCurrentWorkspace() {
       return;
     }
     if (isMissingWorkspaceError(error)) {
+      const pendingRestaurantName =
+        state.authRestaurantName.trim() || state.session?.user?.user_metadata?.restaurant_name?.trim() || "";
+      if (pendingRestaurantName && !state.workspaceCreateAttempted) {
+        state.workspaceCreateAttempted = true;
+        try {
+          await createRestaurant(pendingRestaurantName, state.session);
+          await loadCurrentWorkspace();
+          return;
+        } catch (createError) {
+          console.error("Restaurant workspace creation failed:", createError.message);
+          setError(createError.message || "Restaurant workspace setup failed.");
+        }
+      }
       console.log("Workspace missing; rendering setup");
       state.workspaceMissing = true;
       state.view = "setup";
@@ -496,6 +513,7 @@ async function handleAuthSubmit(mode) {
   const confirmPassword = document.querySelector("#auth-confirm-password")?.value || state.authConfirmPassword;
   const firstName = document.querySelector("#auth-first-name")?.value.trim() || state.authFirstName.trim();
   const lastName = document.querySelector("#auth-last-name")?.value.trim() || state.authLastName.trim();
+  const restaurantName = document.querySelector("#auth-restaurant-name")?.value.trim() || state.authRestaurantName.trim();
   if (!email || !password) {
     setError("Enter an email and password.");
     render();
@@ -503,6 +521,11 @@ async function handleAuthSubmit(mode) {
   }
   if (mode === "signup" && !firstName) {
     setError("Enter your first name.");
+    render();
+    return;
+  }
+  if (mode === "signup" && !restaurantName) {
+    setError("Enter the name of your restaurant.");
     render();
     return;
   }
@@ -523,6 +546,7 @@ async function handleAuthSubmit(mode) {
             data: {
               first_name: firstName,
               last_name: lastName,
+              restaurant_name: restaurantName,
             },
           },
         })
@@ -537,9 +561,20 @@ async function handleAuthSubmit(mode) {
 
   state.authFirstName = firstName;
   state.authLastName = lastName;
+  state.authRestaurantName = restaurantName;
   state.authEmail = email;
   state.authPassword = "";
   state.authConfirmPassword = "";
+  if (mode === "signup" && restaurantName && result.data?.session) {
+    try {
+      await createRestaurant(restaurantName, result.data.session);
+    } catch (error) {
+      console.error("Restaurant workspace creation failed:", error.message);
+      setError(error.message || "Account created, but restaurant workspace setup failed.");
+      render();
+      return;
+    }
+  }
   setNotice(mode === "signup" ? "Account created. Check your email if confirmation is enabled." : "Logged in.");
   // After a successful auth + confirmed workspace, land on the dashboard.
   state.pendingDashboardRedirect = true;
@@ -1073,6 +1108,14 @@ function renderAuthPanel() {
                 </div>`
               : ""
           }
+          ${
+            isSignup
+              ? `<label class="auth-restaurant-field">
+                  <span>Name of Restaurant</span>
+                  <input id="auth-restaurant-name" type="text" autocomplete="organization" placeholder="Restaurant name" value="${escapeHtml(state.authRestaurantName)}" required />
+                </label>`
+              : ""
+          }
           <label class="auth-email-field">
             <span>Email</span>
             <input id="auth-email" type="email" autocomplete="email" placeholder="you@company.com" value="${escapeHtml(state.authEmail)}" required />
@@ -1089,7 +1132,7 @@ function renderAuthPanel() {
                 </label>`
               : ""
           }
-          <button class="new-count-button auth-submit-button" type="submit" ${state.authLoading || !state.backendConnected ? "disabled" : ""}>
+          <button class="new-count-button auth-submit-button" type="submit" ${state.authLoading ? "disabled" : ""}>
             ${state.authLoading ? "Please wait..." : submitLabel}
           </button>
         </form>
@@ -1333,6 +1376,7 @@ function bindAuthEvents() {
     event.preventDefault();
     state.authFirstName = document.querySelector("#auth-first-name")?.value || "";
     state.authLastName = document.querySelector("#auth-last-name")?.value || "";
+    state.authRestaurantName = document.querySelector("#auth-restaurant-name")?.value || "";
     state.authEmail = document.querySelector("#auth-email")?.value || "";
     state.authPassword = document.querySelector("#auth-password")?.value || "";
     handleAuthSubmit(state.authMode);
@@ -1342,6 +1386,9 @@ function bindAuthEvents() {
   });
   document.querySelector("#auth-last-name")?.addEventListener("input", (event) => {
     state.authLastName = event.target.value;
+  });
+  document.querySelector("#auth-restaurant-name")?.addEventListener("input", (event) => {
+    state.authRestaurantName = event.target.value;
   });
   document.querySelector("#auth-email")?.addEventListener("input", (event) => {
     state.authEmail = event.target.value;
@@ -1359,6 +1406,7 @@ function bindAuthEvents() {
     state.authMode = state.authMode === "login" ? "signup" : "login";
     state.authFirstName = "";
     state.authLastName = "";
+    state.authRestaurantName = "";
     state.authPassword = "";
     state.authConfirmPassword = "";
     render();
