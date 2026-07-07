@@ -681,6 +681,26 @@ h1 em {
   gap: 14px;
 }
 
+.auth-form--signup .auth-name-grid {
+  order: 1;
+}
+
+.auth-form--signup .auth-email-field {
+  order: 2;
+}
+
+.auth-form--signup .auth-password-field {
+  order: 3;
+}
+
+.auth-form--signup .auth-confirm-field {
+  order: 4;
+}
+
+.auth-form--signup .auth-submit-button {
+  order: 5;
+}
+
 .auth-form input {
   width: 100%;
   min-height: 50px;

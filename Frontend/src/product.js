@@ -1058,7 +1058,7 @@ function renderAuthPanel() {
           <p>${subtitle}</p>
         </div>
         ${renderMessages()}
-        <form class="auth-form" id="auth-form">
+        <form class="auth-form ${isSignup ? "auth-form--signup" : "auth-form--signin"}" id="auth-form">
           ${
             isSignup
               ? `<div class="auth-name-grid">
@@ -1073,17 +1073,17 @@ function renderAuthPanel() {
                 </div>`
               : ""
           }
-          <label>
+          <label class="auth-email-field">
             <span>Email</span>
             <input id="auth-email" type="email" autocomplete="email" placeholder="you@company.com" value="${escapeHtml(state.authEmail)}" required />
           </label>
-          <label>
+          <label class="auth-password-field">
             <span>Password</span>
             <input id="auth-password" type="password" autocomplete="${isSignup ? "new-password" : "current-password"}" placeholder="${isSignup ? "Create a password" : ""}" required />
           </label>
           ${
             isSignup
-              ? `<label>
+              ? `<label class="auth-confirm-field">
                   <span>Confirm password</span>
                   <input id="auth-confirm-password" type="password" autocomplete="new-password" placeholder="Confirm your password" required />
                 </label>`
