@@ -78,7 +78,7 @@ function Navbar() {
     <header class="navbar" aria-label="Main navigation">
       <a class="brand" href="#" aria-label="Koe home">Koe</a>
       <div class="nav-actions">
-        ${CTAButton({ label: "Sign In/Up", href: "/product.html", variant: "nav" })}
+        ${CTAButton({ label: "Sign In", href: "/product.html", variant: "nav" })}
       </div>
     </header>
   `;
@@ -112,8 +112,8 @@ function HeroSection() {
         </p>
 
         <div class="hero-actions">
-          ${CTAButton({ label: "Use Koe", href: "/product.html" })}
-          ${CTAButton({ label: "Sign In/Up", href: "/product.html", variant: "secondary" })}
+          ${CTAButton({ label: "Open Koe", href: "/product.html" })}
+          ${CTAButton({ label: "Sign In", href: "/product.html", variant: "secondary" })}
         </div>
 
         <ul class="benefit-row" aria-label="Koe benefits">${benefitMarkup}</ul>

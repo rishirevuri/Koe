@@ -12,9 +12,6 @@ import {
 import { isSupabaseConfigured, supabase, supabaseConfigError } from "./supabaseClient.js";
 import { bindSidebar, renderSidebar } from "./sidebar.js";
 
-const DEMO_TRANSCRIPT =
-  "We have 3 bottles of olive oil, one of which is half empty, 3 heads of lettuce, 5 boxes of tomatoes, and 2 boxes of cheese.";
-
 const AREA_OPTIONS = ["Dry Storage", "Walk-in", "Freezer", "Bar", "Wine Storage", "Prep Station"];
 const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
 
@@ -666,8 +663,6 @@ async function linkWorkspace(restaurantName) {
     state.workspaceCreateAttempted = false;
     setSelectedRestaurantId("");
     await loadCurrentWorkspace();
-    setNotice(`${restaurantName} linked to this login.`);
-    render();
   } catch (error) {
     setError(error.message);
     render();
@@ -1242,7 +1237,6 @@ function render() {
   const started = state.countStartedAt ? formatDateTime(state.countStartedAt) : "—";
   const selectedArea = state.selectedArea.trim();
   const countId = state.activeCountId || "—";
-  const recordingLabel = state.isRecording ? "Transcribing" : state.recordingMode === "paused" ? "Paused" : "Ready";
   const primaryRecordingLabel = state.recordingMode === "paused" ? "Resume" : "Start";
   const secondaryRecordingLabel = state.recordingMode === "paused" ? "Reset" : "Pause";
   app.innerHTML = `
@@ -1250,7 +1244,6 @@ function render() {
       ${renderSidebar({ restaurantName: state.selectedRestaurantName, active: "count" })}
       <main class="app-main product-shell">
       <header class="product-topbar">
-        <a href="./index.html" class="product-logo">Koe</a>
         <div class="product-title-block">
           <h1>Inventory Count Workspace</h1>
         </div>
@@ -1278,7 +1271,6 @@ function render() {
                 <h2>Count by Voice</h2>
                 <p>Speak into your browser microphone and Koe will place the live transcript here. You can also paste or type manually.</p>
               </div>
-              <div class="listening-pill ${state.isRecording ? "" : "listening-pill--idle"}"><span></span> ${recordingLabel} <i></i></div>
             </div>
             <div class="voice-capture voice-capture--interactive">
               <div class="mic-panel">
@@ -1296,7 +1288,6 @@ function render() {
                 <label for="transcript-input">Transcript</label>
                 <textarea id="transcript-input" placeholder="Paste or type what your staff counted...">${escapeHtml(state.transcript)}</textarea>
                 <div class="transcript-actions">
-                  <button class="ghost-button" id="demo-transcript-button" type="button">Use Demo Transcript</button>
                   <button class="new-count-button process-button" id="process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
                     ${state.isProcessing ? "Processing Count..." : "Process Count"}
                   </button>
@@ -1432,11 +1423,6 @@ function bindEvents() {
   document.querySelector("#logout-button")?.addEventListener("click", logout);
   document.querySelector("#start-count-button")?.addEventListener("click", startNewCount);
   document.querySelector("#process-count-button")?.addEventListener("click", processCount);
-  document.querySelector("#demo-transcript-button")?.addEventListener("click", () => {
-    state.transcript = DEMO_TRANSCRIPT;
-    setNotice("Demo transcript added.");
-    render();
-  });
   document.querySelector("#mic-button")?.addEventListener("click", handleMicButtonClick);
   document.querySelector("#recording-start-action")?.addEventListener("click", handlePrimaryRecordingAction);
   document.querySelector("#recording-pause-action")?.addEventListener("click", pauseRecording);

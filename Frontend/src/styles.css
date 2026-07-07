@@ -1055,7 +1055,7 @@ h1 em {
 
 .product-topbar {
   display: grid;
-  grid-template-columns: 160px minmax(320px, 1fr) minmax(260px, auto) auto auto;
+  grid-template-columns: minmax(320px, 1fr) minmax(260px, auto) auto auto;
   align-items: center;
   gap: 24px;
   margin-bottom: 22px;
@@ -1967,7 +1967,7 @@ button:disabled,
   }
 
   .product-topbar {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .location-picker,
@@ -2132,7 +2132,7 @@ button:disabled,
 }
 
 .product-topbar {
-  grid-template-columns: auto minmax(280px, 1fr) minmax(220px, auto) auto auto;
+  grid-template-columns: minmax(280px, 1fr) minmax(220px, auto) auto auto;
   gap: 16px;
   max-width: 1480px;
   margin: 0 auto 20px;
@@ -2214,6 +2214,110 @@ button:disabled,
 .report-button {
   border-color: rgba(16, 35, 31, 0.16);
   border-radius: 7px;
+}
+
+.product-shell .new-count-button,
+.product-shell .ghost-button,
+.product-shell .add-item-button,
+.product-shell .report-button,
+.product-shell .recording-button {
+  position: relative;
+  overflow: hidden;
+  border-radius: 12px;
+  font-weight: 750;
+  letter-spacing: 0;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease,
+    color 180ms ease;
+}
+
+.product-shell .new-count-button,
+.product-shell .report-button--primary {
+  color: #fffaf2;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 46%),
+    #06132d;
+  border: 1px solid rgba(6, 19, 45, 0.92);
+  box-shadow:
+    0 16px 30px rgba(6, 19, 45, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.13);
+}
+
+.product-shell .new-count-button:hover:not(:disabled),
+.product-shell .report-button--primary:hover:not(:disabled) {
+  transform: translateY(-2px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.13), transparent 46%),
+    #0b1b36;
+  border-color: rgba(6, 19, 45, 1);
+  box-shadow:
+    0 21px 38px rgba(6, 19, 45, 0.23),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.product-shell .ghost-button,
+.product-shell .add-item-button,
+.product-shell .report-button:not(.report-button--primary) {
+  color: #10231f;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 250, 242, 0.58)),
+    rgba(255, 250, 242, 0.82);
+  border: 1px solid rgba(16, 35, 31, 0.14);
+  box-shadow:
+    0 10px 22px rgba(31, 27, 22, 0.06),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.product-shell .ghost-button:hover:not(:disabled),
+.product-shell .add-item-button:hover:not(:disabled),
+.product-shell .report-button:not(.report-button--primary):hover:not(:disabled) {
+  transform: translateY(-1px);
+  color: #06132d;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(255, 250, 242, 0.7)),
+    rgba(255, 250, 242, 0.92);
+  border-color: rgba(170, 132, 80, 0.42);
+  box-shadow:
+    0 15px 28px rgba(31, 27, 22, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.86);
+}
+
+.product-shell .new-count-button svg,
+.product-shell .ghost-button svg,
+.product-shell .add-item-button svg,
+.product-shell .report-button svg {
+  width: 19px;
+  height: 19px;
+}
+
+.product-shell .logout-topbar-button {
+  min-height: 52px;
+  padding-inline: 22px;
+}
+
+.product-shell #start-count-button {
+  min-height: 52px;
+  padding-inline: 24px;
+}
+
+.product-shell .process-button {
+  min-width: 184px;
+  min-height: 46px;
+  padding-inline: 26px;
+}
+
+.product-shell .report-button {
+  min-height: 54px;
+  padding: 0 20px;
+}
+
+.product-shell .report-button--disabled {
+  color: rgba(38, 48, 64, 0.58);
+  background: rgba(255, 250, 242, 0.5);
+  border-color: rgba(16, 35, 31, 0.1);
 }
 
 .voice-card,
@@ -2366,33 +2470,42 @@ button:disabled,
   gap: 8px;
   width: min(204px, 100%);
   padding: 5px;
-  background: rgba(6, 19, 45, 0.08);
-  border: 1px solid rgba(6, 19, 45, 0.1);
+  background: rgba(6, 19, 45, 0.06);
+  border: 1px solid rgba(6, 19, 45, 0.12);
   border-radius: 999px;
+  box-shadow: inset 0 1px 1px rgba(6, 19, 45, 0.04);
 }
 
 .recording-button {
   min-width: 0;
   min-height: 36px;
   padding: 0 14px;
-  color: var(--ivory);
+  color: #fffaf2;
   font: inherit;
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0.02em;
-  background: var(--product-accent-strong);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 48%),
+    var(--product-accent-strong);
   border: 1px solid rgba(6, 19, 45, 0.86);
   border-radius: 999px;
-  box-shadow: 0 10px 20px rgba(6, 19, 45, 0.16);
+  box-shadow:
+    0 10px 20px rgba(6, 19, 45, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
   cursor: pointer;
   transition: transform 180ms ease, background-color 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .recording-button:hover:not(:disabled) {
   transform: translateY(-1px);
-  background: #0c1c3a;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.13), transparent 48%),
+    #0c1c3a;
   border-color: rgba(6, 19, 45, 0.95);
-  box-shadow: 0 12px 24px rgba(6, 19, 45, 0.22);
+  box-shadow:
+    0 12px 24px rgba(6, 19, 45, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .recording-button--primary {
@@ -2403,7 +2516,9 @@ button:disabled,
 
 .recording-button--secondary {
   color: var(--ivory);
-  background: rgba(6, 19, 45, 0.88);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), transparent 48%),
+    rgba(6, 19, 45, 0.88);
 }
 
 .recording-button:disabled {
@@ -2415,22 +2530,29 @@ button:disabled,
 
 .voice-card .transcript-actions {
   align-items: stretch;
+  justify-content: flex-end;
 }
 
-.voice-card .transcript-actions .ghost-button,
 .voice-card .transcript-actions .process-button {
   min-height: 44px;
   color: var(--ivory);
-  background: var(--product-accent-strong);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 46%),
+    var(--product-accent-strong);
   border-color: rgba(6, 19, 45, 0.9);
-  border-radius: 999px;
-  box-shadow: 0 12px 24px rgba(6, 19, 45, 0.16);
+  border-radius: 12px;
+  box-shadow:
+    0 14px 26px rgba(6, 19, 45, 0.17),
+    inset 0 1px 0 rgba(255, 255, 255, 0.13);
 }
 
-.voice-card .transcript-actions .ghost-button:hover,
 .voice-card .transcript-actions .process-button:hover:not(:disabled) {
-  background: #0c1c3a;
-  box-shadow: 0 15px 28px rgba(6, 19, 45, 0.22);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.13), transparent 46%),
+    #0c1c3a;
+  box-shadow:
+    0 18px 32px rgba(6, 19, 45, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
 }
 
 .transcript-panel--editor textarea {
@@ -2546,7 +2668,7 @@ button:disabled,
 
 @media (max-width: 1180px) {
   .product-topbar {
-    grid-template-columns: auto 1fr;
+    grid-template-columns: minmax(0, 1fr) auto;
   }
 
   .account-panel,

@@ -1,4 +1,4 @@
-import { getAuthMe, getDashboardSummary } from "./api.js";
+import { getAuthMe, getDashboardSummary, getRestaurants, setSelectedRestaurantId } from "./api.js";
 import { isSupabaseConfigured, supabase } from "./supabaseClient.js";
 import { bindSidebar, renderSidebar } from "./sidebar.js";
 
@@ -9,6 +9,7 @@ const state = {
   phase: "loading", // loading | ready | error
   error: "",
   data: null,
+  restaurants: [],
 };
 
 function escapeHtml(value) {
@@ -51,6 +52,7 @@ async function logout() {
   } catch {
     // ignore; navigate to the auth page regardless
   }
+  setSelectedRestaurantId("");
   window.location.assign("./product.html");
 }
 
@@ -77,6 +79,33 @@ async function initialize() {
     return;
   }
 
+  try {
+    state.restaurants = await getRestaurants();
+  } catch (error) {
+    if (error.status === 401) {
+      goToLogin();
+      return;
+    }
+    state.phase = "error";
+    state.error = error.message || "Could not load your restaurants.";
+    renderShell();
+    return;
+  }
+
+  if (!state.restaurants.length) {
+    goToLogin();
+    return;
+  }
+
+  if (state.restaurants.length > 1) {
+    setSelectedRestaurantId("");
+    state.phase = "select-restaurant";
+    renderRestaurantChooser();
+    return;
+  }
+
+  setSelectedRestaurantId(state.restaurants[0].id);
+
   // Confirm the workspace. Workspace provisioning/setup lives on product.html,
   // so send the user there if they are not yet linked.
   try {
@@ -93,6 +122,48 @@ async function initialize() {
 
   renderShell();
   loadSummary();
+}
+
+async function selectRestaurant(restaurantId) {
+  const restaurant = state.restaurants.find((item) => String(item.id) === String(restaurantId));
+  if (!restaurant) return;
+  setSelectedRestaurantId(restaurant.id);
+  state.restaurantName = restaurant.name || state.restaurantName;
+  state.phase = "loading";
+  renderShell();
+  loadSummary();
+}
+
+function renderRestaurantChooser() {
+  app.innerHTML = `
+    <main class="restaurant-select-shell">
+      <section class="restaurant-select-panel">
+        <a href="./index.html" class="product-logo">Koe</a>
+        <div class="restaurant-select-copy">
+          <h1>Choose a restaurant</h1>
+          <p>Select the workspace you want to open.</p>
+        </div>
+        <div class="restaurant-choice-list">
+          ${state.restaurants
+            .map(
+              (restaurant) => `
+                <button class="restaurant-choice-button" data-restaurant-id="${restaurant.id}" type="button">
+                  <span>
+                    <strong>${escapeHtml(restaurant.name)}</strong>
+                    <small>${escapeHtml(restaurant.location || "Restaurant workspace")}</small>
+                  </span>
+                  <i aria-hidden="true">→</i>
+                </button>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+    </main>
+  `;
+  document.querySelectorAll(".restaurant-choice-button").forEach((button) => {
+    button.addEventListener("click", () => selectRestaurant(button.dataset.restaurantId));
+  });
 }
 
 async function loadSummary() {
