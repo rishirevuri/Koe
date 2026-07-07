@@ -1089,15 +1089,15 @@ function renderAuthPanel() {
                 </label>`
               : ""
           }
+          <button class="new-count-button auth-submit-button" type="submit" ${state.authLoading || !state.backendConnected ? "disabled" : ""}>
+            ${state.authLoading ? "Please wait..." : submitLabel}
+          </button>
         </form>
+        <div class="auth-divider"><span>Or</span></div>
         <button class="google-auth-button" id="google-auth-button" type="button" ${state.authLoading ? "disabled" : ""}>
           <span class="google-auth-mark" aria-hidden="true">G</span>
           <span>${googleLabel}</span>
         </button>
-        <button class="new-count-button auth-submit-button" type="submit" form="auth-form" ${state.authLoading || !state.backendConnected ? "disabled" : ""}>
-          ${state.authLoading ? "Please wait..." : submitLabel}
-        </button>
-        <div class="auth-divider"><span>Or</span></div>
         <div class="auth-links">
           ${
             isSignup
