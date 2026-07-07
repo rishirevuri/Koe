@@ -7,6 +7,7 @@ import {
   getReport,
   linkTesterRestaurant,
   parseVoiceCount,
+  setSelectedRestaurantId,
 } from "./api.js";
 import { isSupabaseConfigured, supabase, supabaseConfigError } from "./supabaseClient.js";
 import { bindSidebar, renderSidebar } from "./sidebar.js";
@@ -15,6 +16,7 @@ const DEMO_TRANSCRIPT =
   "We have 3 bottles of olive oil, one of which is half empty, 3 heads of lettuce, 5 boxes of tomatoes, and 2 boxes of cheese.";
 
 const AREA_OPTIONS = ["Dry Storage", "Walk-in", "Freezer", "Bar", "Wine Storage", "Prep Station"];
+const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
 
 const state = {
   backendConnected: false,
@@ -420,6 +422,7 @@ function initialize() {
 
 async function handleInvalidSession() {
   await supabase.auth.signOut();
+  setSelectedRestaurantId("");
   resetWorkspaceState();
   state.session = null;
   state.userEmail = "";
@@ -456,6 +459,7 @@ async function loadCurrentWorkspace() {
     state.workspaceMissing = false;
     state.view = "ready";
     state.selectedRestaurantId = me.restaurant.id;
+    setSelectedRestaurantId(me.restaurant.id);
     state.selectedRestaurantName = me.restaurant.name;
     state.selectedRestaurantLocation = "Restaurant workspace";
     state.userEmail = me.email || state.userEmail;
@@ -565,6 +569,7 @@ async function handleAuthSubmit(mode) {
   state.authEmail = email;
   state.authPassword = "";
   state.authConfirmPassword = "";
+  setSelectedRestaurantId("");
   if (mode === "signup" && restaurantName && result.data?.session) {
     try {
       await createRestaurant(restaurantName, result.data.session);
@@ -579,7 +584,6 @@ async function handleAuthSubmit(mode) {
   // After a successful auth + confirmed workspace, land on the dashboard.
   state.pendingDashboardRedirect = true;
   await initializeAuthFlow();
-  window.history.replaceState({}, "", "/dashboard");
 }
 
 async function handleResetPassword() {
@@ -598,9 +602,10 @@ async function handleResetPassword() {
   }
 
   state.authLoading = true;
+  setSelectedRestaurantId("");
   render();
   const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/dashboard`,
+    redirectTo: dashboardRedirectUrl,
   });
   state.authLoading = false;
 
@@ -625,7 +630,7 @@ async function handleGoogleSignIn() {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: {
-      redirectTo: `${window.location.origin}/dashboard`,
+      redirectTo: dashboardRedirectUrl,
     },
   });
 
@@ -641,6 +646,7 @@ async function logout() {
   clearMessages();
   stopRecording();
   await supabase.auth.signOut();
+  setSelectedRestaurantId("");
   resetWorkspaceState();
   state.session = null;
   state.userEmail = "";
@@ -657,6 +663,8 @@ async function linkWorkspace(restaurantName) {
   try {
     await linkTesterRestaurant(restaurantName);
     state.authLoading = false;
+    state.workspaceCreateAttempted = false;
+    setSelectedRestaurantId("");
     await loadCurrentWorkspace();
     setNotice(`${restaurantName} linked to this login.`);
     render();

@@ -1,6 +1,19 @@
 import { supabase } from "./supabaseClient.js";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://koe-backend-pfz2.onrender.com";
+const SELECTED_RESTAURANT_KEY = "koe:selectedRestaurantId";
+
+export function getSelectedRestaurantId() {
+  return window.localStorage.getItem(SELECTED_RESTAURANT_KEY) || "";
+}
+
+export function setSelectedRestaurantId(restaurantId) {
+  if (restaurantId) {
+    window.localStorage.setItem(SELECTED_RESTAURANT_KEY, String(restaurantId));
+    return;
+  }
+  window.localStorage.removeItem(SELECTED_RESTAURANT_KEY);
+}
 
 export function getAuthHeader(session) {
   const token = session?.access_token;
@@ -11,9 +24,11 @@ export function getAuthHeader(session) {
 }
 
 async function getAuthHeaders(session = null) {
-  if (session) return getAuthHeader(session);
-  const { data } = await supabase.auth.getSession();
-  return getAuthHeader(data.session);
+  const authHeader = session ? getAuthHeader(session) : getAuthHeader((await supabase.auth.getSession()).data.session);
+  const selectedRestaurantId = getSelectedRestaurantId();
+  return selectedRestaurantId
+    ? { ...authHeader, "X-Restaurant-Id": selectedRestaurantId }
+    : authHeader;
 }
 
 async function request(path, options = {}) {
