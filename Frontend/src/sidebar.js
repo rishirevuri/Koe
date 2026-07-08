@@ -14,6 +14,8 @@ function icon(name) {
   const icons = {
     grid: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>`,
     mic: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"></path><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg>`,
+    report: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"></path><path d="M14 3v6h5"></path><path d="M9 14h6M9 17h4"></path></svg>`,
+    account: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c1.4-3.4 3.7-5 7-5s5.6 1.6 7 5"></path></svg>`,
     logout: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H4"></path><path d="M8 8l-4 4 4 4"></path><path d="M13 4h6v16h-6"></path></svg>`,
     collapse: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>`,
   };
@@ -49,6 +51,20 @@ export function renderSidebar({ restaurantName, active }) {
         ${icon("logout")}<span>Exit</span>
       </button>
     </aside>
+    <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
+      <a class="mobile-bottom-link ${active === "dashboard" ? "is-active" : ""}" href="./dashboard.html" ${active === "dashboard" ? 'aria-current="page"' : ""}>
+        ${icon("grid")}<span>Dashboard</span>
+      </a>
+      <a class="mobile-bottom-link ${active === "count" ? "is-active" : ""}" href="./product.html" ${active === "count" ? 'aria-current="page"' : ""}>
+        ${icon("mic")}<span>Count</span>
+      </a>
+      <a class="mobile-bottom-link" href="./product.html#reports">
+        ${icon("report")}<span>Reports</span>
+      </a>
+      <a class="mobile-bottom-link" href="./product.html#account">
+        ${icon("account")}<span>Account</span>
+      </a>
+    </nav>
   `;
 }
 

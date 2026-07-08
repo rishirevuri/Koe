@@ -13,6 +13,7 @@ import { isSupabaseConfigured, supabase, supabaseConfigError } from "./supabaseC
 import { bindSidebar, renderSidebar } from "./sidebar.js";
 
 const AREA_OPTIONS = ["Dry Storage", "Walk-in", "Freezer", "Bar", "Wine Storage", "Prep Station"];
+const MOBILE_AREA_OPTIONS = ["Walk-in", "Dry Storage", "Bar", "Kitchen", "Other"];
 const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
 
 const state = {
@@ -63,6 +64,8 @@ const state = {
   error: "",
   authStatus: "Checking session...",
   view: "checking",
+  lastScrolledHash: "",
+  mobileAreaOtherActive: false,
 };
 
 const app = document.querySelector("#product-app");
@@ -150,14 +153,12 @@ function setVoiceLevel(level) {
     "--voice-ring-scale": (0.82 + clamped * 0.2).toFixed(3),
   };
   state.voiceLevel = clamped;
-  const ring = document.querySelector("#mic-button");
-  const capture = document.querySelector(".voice-capture--interactive");
-  if (ring) {
+  document.querySelectorAll(".mic-button").forEach((ring) => {
     Object.entries(voiceVars).forEach(([name, value]) => ring.style.setProperty(name, value));
-  }
-  if (capture) {
+  });
+  document.querySelectorAll(".voice-capture--interactive, .mobile-recorder-card").forEach((capture) => {
     Object.entries(voiceVars).forEach(([name, value]) => capture.style.setProperty(name, value));
-  }
+  });
 }
 
 async function startVoiceMeter() {
@@ -971,8 +972,7 @@ function renderInventoryTable() {
     .map((group) => {
       const itemRows = group.entries
         .map((entry) => {
-          const statusClass = entry.needs_review ? "status-pill status-pill--review" : "status-pill";
-          const statusText = entry.needs_review ? "Needs Review" : "Confirmed";
+          const status = getEntryStatus(entry);
           const detail = entry.partial_detail || entry.review_reason || entry.raw_phrase || "";
           return `
         <tr>
@@ -981,7 +981,7 @@ function renderInventoryTable() {
           <td>${escapeHtml(entry.quantity)}</td>
           <td>${escapeHtml(entry.unit)}</td>
           <td>${escapeHtml(entry.source || "Voice")}</td>
-          <td><span class="${statusClass}">${entry.needs_review ? "!" : "✓"} ${statusText}</span></td>
+          <td><span class="status-pill ${status.className}">${escapeHtml(status.label)}</span></td>
         </tr>
         ${
           detail
@@ -1013,7 +1013,72 @@ function renderInventoryTable() {
       </thead>
       <tbody>${rows}</tbody>
     </table>
+    ${renderMobileInventoryCards()}
   `;
+}
+
+function getEntryStatus(entry) {
+  if (entry.needs_review) return { label: "Needs Review", className: "status-pill--review" };
+  if (!entry.unit) return { label: "Missing Unit", className: "status-pill--review" };
+  if (entry.partial_detail) return { label: "Partial", className: "status-pill--partial" };
+  return { label: "Clean", className: "" };
+}
+
+function renderMobileAreaSelector() {
+  const showCustomArea =
+    state.mobileAreaOtherActive || Boolean(state.selectedArea && !MOBILE_AREA_OPTIONS.includes(state.selectedArea));
+  return `
+    <section class="workspace-card mobile-area-card" aria-label="Area selector">
+      <span>Area</span>
+      <div class="mobile-area-options">
+        ${MOBILE_AREA_OPTIONS.map((area) => {
+          const active =
+            area === "Other"
+              ? showCustomArea
+              : state.selectedArea === area;
+          return `<button class="mobile-area-option ${active ? "is-active" : ""}" data-area="${escapeHtml(area)}" type="button">${escapeHtml(area)}</button>`;
+        }).join("")}
+      </div>
+      ${
+        showCustomArea
+          ? `<input class="mobile-area-custom" id="mobile-area-custom" value="${escapeHtml(MOBILE_AREA_OPTIONS.includes(state.selectedArea) ? "" : state.selectedArea)}" placeholder="Type custom area" />`
+          : ""
+      }
+    </section>
+  `;
+}
+
+function renderMobileInventoryCards() {
+  if (!state.parsedEntries.length) {
+    return `
+      <div class="mobile-inventory-list">
+        <div class="mobile-empty-card">
+          <strong>No items parsed yet</strong>
+          <span>Record or type a count, then process it here.</span>
+        </div>
+      </div>
+    `;
+  }
+
+  const mobileCards = state.parsedEntries
+    .map((entry) => {
+      const status = getEntryStatus(entry);
+      const detail = entry.partial_detail || entry.review_reason || entry.raw_phrase || "";
+      return `
+        <article class="mobile-inventory-card">
+          <div>
+            <h3>${escapeHtml(entry.item_name)}</h3>
+            <p>${escapeHtml(entry.quantity)} ${escapeHtml(entry.unit || "unit")}</p>
+          </div>
+          <span class="status-pill ${status.className}">${escapeHtml(status.label)}</span>
+          ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
+          <button class="mobile-card-edit" type="button" aria-label="Edit ${escapeHtml(entry.item_name)}">Edit</button>
+        </article>
+      `;
+    })
+    .join("");
+
+  return `<div class="mobile-inventory-list">${mobileCards}</div>`;
 }
 
 function renderDataHealth() {
@@ -1075,6 +1140,109 @@ function renderReportPreview() {
             .join("")}
         </tbody>
       </table>
+    </section>
+  `;
+}
+
+function renderMobileReportSection() {
+  const summary = state.report?.summary || null;
+  return `
+    <section class="workspace-card mobile-report-section" id="reports">
+      <div class="section-heading section-heading--row">
+        <div>
+          <h2>Reports</h2>
+          <p>${state.report ? `Count #${escapeHtml(state.report.count_id)}` : "Latest count summary"}</p>
+        </div>
+      </div>
+      <dl>
+        <div><dt>Items</dt><dd>${summary?.total_items ?? state.parsedEntries.length}</dd></div>
+        <div><dt>Issues</dt><dd>${summary?.items_needing_review ?? state.parsedEntries.filter((entry) => entry.needs_review).length}</dd></div>
+        <div><dt>Area</dt><dd>${escapeHtml(state.selectedArea || "Not set")}</dd></div>
+      </dl>
+      <div class="mobile-report-notes">
+        <strong>Manager notes</strong>
+        <p>${state.report ? "Report is ready for review or CSV export." : "Generate a report after processing a count."}</p>
+      </div>
+      <button class="report-button" id="mobile-export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export</button>
+    </section>
+  `;
+}
+
+function renderMobileAccountSection() {
+  return `
+    <section class="workspace-card mobile-account-section" id="account">
+      <div>
+        <h2>Account</h2>
+        <p>${escapeHtml(state.userEmail || "Logged in")}</p>
+        <small>${escapeHtml(state.selectedRestaurantName || "Restaurant workspace")}</small>
+      </div>
+      <button class="ghost-button" id="mobile-logout-button" type="button">Exit</button>
+    </section>
+  `;
+}
+
+function renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabel, secondaryRecordingLabel }) {
+  const restaurantName = state.selectedRestaurantName || "Restaurant workspace";
+  const showActions = state.parsedEntries.length > 0 || state.report;
+  return `
+    <section class="mobile-count-screen" aria-label="Mobile count app">
+      <header class="mobile-app-bar">
+        <a class="mobile-app-logo" href="./dashboard.html">Koe</a>
+        <span>${escapeHtml(restaurantName)}</span>
+        <a class="mobile-app-icon" href="#account" aria-label="Open account">${ProductIcon("pin")}</a>
+      </header>
+
+      <section class="mobile-count-header">
+        <div>
+          <h1>New Count</h1>
+          <p>${escapeHtml(restaurantName)}</p>
+        </div>
+        <button class="mobile-new-count-button" id="mobile-start-count-button" type="button" ${state.isCreatingCount || !state.backendConnected ? "disabled" : ""}>
+          ${state.isCreatingCount ? "Starting" : "Start"}
+        </button>
+      </section>
+
+      ${renderMessages()}
+      ${renderMobileAreaSelector()}
+
+      <section class="mobile-recorder-card">
+        <button class="mobile-mic-button mic-button ${state.isRecording ? "mic-button--recording" : ""}" id="mobile-mic-button" type="button" aria-label="${state.isRecording ? "Pause recording" : state.recordingMode === "paused" ? "Resume recording" : "Start recording"}" style="--voice-level: ${state.voiceLevel.toFixed(3)}">
+          <span>${ProductIcon("mic")}</span>
+        </button>
+        <strong>${formatTimer(state.recordingSeconds)}</strong>
+        ${renderVoiceMeter()}
+        <div class="mobile-recording-controls" aria-label="Recording controls">
+          <button class="recording-button recording-button--primary" id="mobile-recording-start-action" type="button" ${state.isRecording ? "disabled" : ""}>${primaryRecordingLabel === "Record" ? "Start" : primaryRecordingLabel}</button>
+          <button class="recording-button recording-button--secondary" id="mobile-recording-pause-action" type="button" ${state.recordingMode === "idle" && !state.isRecording ? "disabled" : ""}>${secondaryRecordingLabel === "Clear" ? "Reset" : secondaryRecordingLabel}</button>
+        </div>
+      </section>
+
+      <section class="mobile-transcript-card">
+        <label for="mobile-transcript-input">Transcript</label>
+        <textarea id="mobile-transcript-input" placeholder="Speak or type the count here...">${escapeHtml(state.transcript)}</textarea>
+      </section>
+
+      <button class="mobile-process-button" id="mobile-process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
+        ${state.isProcessing ? "Processing" : "Process Count"}
+      </button>
+
+      <section class="mobile-parsed-section">
+        <div class="mobile-section-title">
+          <h2>Parsed Items</h2>
+          <span>${totalItems} total · ${needsReview} review</span>
+        </div>
+        ${renderMobileInventoryCards()}
+      </section>
+
+      ${renderMobileReportSection()}
+      ${renderMobileAccountSection()}
+
+      <div class="mobile-count-action-bar ${showActions ? "is-visible" : ""}" aria-label="Report actions">
+        <button class="report-button report-button--primary" id="mobile-generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId ? "disabled" : ""}>
+          ${state.isGeneratingReport ? "Creating" : "Generate Report"}
+        </button>
+        <button class="report-button" id="mobile-export-action-button" type="button" ${!state.activeCountId ? "disabled" : ""}>Export CSV</button>
+      </div>
     </section>
   `;
 }
@@ -1243,131 +1411,146 @@ function render() {
     <div class="app-shell">
       ${renderSidebar({ restaurantName: state.selectedRestaurantName, active: "count" })}
       <main class="app-main product-shell">
-      <header class="product-topbar">
-        <div class="product-title-block">
-          <h1>Inventory Count Workspace</h1>
-        </div>
-        <div class="account-panel">
-          <span>${ProductIcon("pin")}</span>
-          <div>
-            <strong>${escapeHtml(state.userEmail || "Logged in")}</strong>
-            <small>${escapeHtml(state.selectedRestaurantName)}</small>
+      <div class="desktop-count-workspace">
+        <header class="product-topbar">
+          <div class="product-title-block">
+            <h1>Inventory Count Workspace</h1>
           </div>
-        </div>
-        <button class="ghost-button logout-topbar-button" id="logout-button" type="button">Exit</button>
-        <button class="new-count-button" id="start-count-button" type="button" ${state.isCreatingCount || !state.backendConnected ? "disabled" : ""}>
-          ${ProductIcon("plus")} ${state.isCreatingCount ? "Starting" : "New count"}
-        </button>
-      </header>
-
-      ${renderMessages()}
-
-      <section class="product-grid" aria-label="Inventory count workspace">
-        <div class="workspace-column">
-          <section class="workspace-card voice-card">
-            <div class="section-heading">
-              <div>
-                <span class="step-number">01</span>
-                <h2>Count by Voice</h2>
-                <p>Speak into your browser microphone and Koe will place the live transcript here. You can also paste or type manually.</p>
-              </div>
-            </div>
-            <div class="voice-capture voice-capture--interactive">
-              <div class="mic-panel">
-                <button class="mic-ring mic-button ${state.isRecording ? "mic-button--recording" : ""}" id="mic-button" type="button" aria-label="${state.isRecording ? "Pause recording" : state.recordingMode === "paused" ? "Resume recording" : "Start recording"}" style="--voice-level: ${state.voiceLevel.toFixed(3)}">
-                  <div class="mic-core">${ProductIcon("mic")}</div>
-                </button>
-                <strong>${formatTimer(state.recordingSeconds)}</strong>
-                ${renderVoiceMeter()}
-                <div class="recording-controls" aria-label="Recording controls">
-                  <button class="recording-button recording-button--primary" id="recording-start-action" type="button" ${state.isRecording ? "disabled" : ""}>${primaryRecordingLabel}</button>
-                  <button class="recording-button recording-button--secondary" id="recording-pause-action" type="button" ${state.recordingMode === "idle" && !state.isRecording ? "disabled" : ""}>${secondaryRecordingLabel}</button>
-                </div>
-              </div>
-              <div class="transcript-panel transcript-panel--editor">
-                <label for="transcript-input">Transcript</label>
-                <textarea id="transcript-input" placeholder="Paste or type what your staff counted...">${escapeHtml(state.transcript)}</textarea>
-                <div class="transcript-actions">
-                  <button class="new-count-button process-button" id="process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
-                    ${state.isProcessing ? "Processing" : "Process"}
-                  </button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <section class="workspace-card parsed-card">
-            <div class="section-heading section-heading--row">
-              <div>
-                <span class="step-number">02</span>
-                <h2>Parsed Inventory</h2>
-                <p>Koe turns your transcript into structured, clean data from the local backend.</p>
-              </div>
-              <button class="ghost-button" id="edit-items-button" type="button">${ProductIcon("edit")} Edit</button>
-            </div>
-            ${renderInventoryTable()}
-            <div class="table-footer">
-              <button class="add-item-button" id="add-item-button" type="button">${ProductIcon("plus")} Add</button>
-              <span>${totalItems} item${totalItems === 1 ? "" : "s"} total</span>
-            </div>
-          </section>
-
-          <section class="workspace-card review-card">
-            <div class="review-icon">${ProductIcon("shield")}</div>
+          <div class="account-panel">
+            <span>${ProductIcon("pin")}</span>
             <div>
-              <h2>Review Issues</h2>
-              <p>${needsReview ? `${needsReview} item${needsReview === 1 ? "" : "s"} need review.` : "No critical issues found yet."}</p>
-              <small>${totalItems ? "Review flags come directly from the backend parse response." : "Process a count to check for review issues."}</small>
+              <strong>${escapeHtml(state.userEmail || "Logged in")}</strong>
+              <small>${escapeHtml(state.selectedRestaurantName)}</small>
             </div>
-            <button class="ghost-button" id="review-items-button" type="button">Review</button>
-          </section>
-
-          ${renderReportPreview()}
-        </div>
-
-        <aside class="insight-column" aria-label="Count tools">
-          <section class="workspace-card summary-card">
-            <h2>${ProductIcon("file")} Count Summary</h2>
-            <div class="area-control">
-              <label for="area-input">Kitchen area</label>
-              <div class="area-input-shell">
-                <input id="area-input" list="area-options" value="${escapeHtml(state.selectedArea)}" placeholder="Type or choose an area" />
-                <span aria-hidden="true"></span>
-              </div>
-              <datalist id="area-options">
-                ${AREA_OPTIONS.map((area) => `<option value="${escapeHtml(area)}"></option>`).join("")}
-              </datalist>
-            </div>
-            <dl>
-              <div><dt>Total Items</dt><dd>${totalItems}</dd></div>
-              <div><dt>Needs Review</dt><dd>${needsReview}</dd></div>
-              <div><dt>Source</dt><dd>${source}</dd></div>
-              <div><dt>Area</dt><dd>${escapeHtml(selectedArea || "Not set")}</dd></div>
-              <div><dt>Started</dt><dd>${started}</dd></div>
-              <div><dt>Count ID</dt><dd>${escapeHtml(countId)}</dd></div>
-            </dl>
-          </section>
-
-          <section class="workspace-card data-card">
-            <h2>${ProductIcon("heart")} Data Health</h2>
-            <p>We clean and normalize your data after backend parsing.</p>
-            ${renderDataHealth()}
-          </section>
-
-          <div class="report-actions">
-            <button class="report-button report-button--primary" id="generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId ? "disabled" : ""}>
-              ${ProductIcon("file")} ${state.isGeneratingReport ? "Creating" : "Report"} <span>→</span>
-            </button>
-            <button class="report-button" id="export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export</button>
-            <button class="report-button report-button--disabled" id="send-sheets-button" type="button" disabled>${ProductIcon("sheet")} Sheets</button>
           </div>
-        </aside>
-      </section>
+          <button class="ghost-button logout-topbar-button" id="logout-button" type="button">Exit</button>
+          <button class="new-count-button" id="start-count-button" type="button" ${state.isCreatingCount || !state.backendConnected ? "disabled" : ""}>
+            ${ProductIcon("plus")} ${state.isCreatingCount ? "Starting" : "New count"}
+          </button>
+        </header>
+
+        ${renderMessages()}
+
+        <section class="product-grid" aria-label="Inventory count workspace">
+          <div class="workspace-column">
+            <section class="workspace-card voice-card">
+              <div class="section-heading">
+                <div>
+                  <span class="step-number">01</span>
+                  <h2>Count by Voice</h2>
+                  <p>Speak into your browser microphone and Koe will place the live transcript here. You can also paste or type manually.</p>
+                </div>
+              </div>
+              <div class="voice-capture voice-capture--interactive">
+                <div class="mic-panel">
+                  <button class="mic-ring mic-button ${state.isRecording ? "mic-button--recording" : ""}" id="mic-button" type="button" aria-label="${state.isRecording ? "Pause recording" : state.recordingMode === "paused" ? "Resume recording" : "Start recording"}" style="--voice-level: ${state.voiceLevel.toFixed(3)}">
+                    <div class="mic-core">${ProductIcon("mic")}</div>
+                  </button>
+                  <strong>${formatTimer(state.recordingSeconds)}</strong>
+                  ${renderVoiceMeter()}
+                  <div class="recording-controls" aria-label="Recording controls">
+                    <button class="recording-button recording-button--primary" id="recording-start-action" type="button" ${state.isRecording ? "disabled" : ""}>${primaryRecordingLabel}</button>
+                    <button class="recording-button recording-button--secondary" id="recording-pause-action" type="button" ${state.recordingMode === "idle" && !state.isRecording ? "disabled" : ""}>${secondaryRecordingLabel}</button>
+                  </div>
+                </div>
+                <div class="transcript-panel transcript-panel--editor">
+                  <label for="transcript-input">Transcript</label>
+                  <textarea id="transcript-input" placeholder="Paste or type what your staff counted...">${escapeHtml(state.transcript)}</textarea>
+                  <div class="transcript-actions">
+                    <button class="new-count-button process-button" id="process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
+                      ${state.isProcessing ? "Processing" : "Process"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <section class="workspace-card parsed-card">
+              <div class="section-heading section-heading--row">
+                <div>
+                  <span class="step-number">02</span>
+                  <h2>Parsed Inventory</h2>
+                  <p>Koe turns your transcript into structured, clean data from the local backend.</p>
+                </div>
+                <button class="ghost-button" id="edit-items-button" type="button">${ProductIcon("edit")} Edit</button>
+              </div>
+              ${renderInventoryTable()}
+              <div class="table-footer">
+                <button class="add-item-button" id="add-item-button" type="button">${ProductIcon("plus")} Add</button>
+                <span>${totalItems} item${totalItems === 1 ? "" : "s"} total</span>
+              </div>
+            </section>
+
+            <section class="workspace-card review-card">
+              <div class="review-icon">${ProductIcon("shield")}</div>
+              <div>
+                <h2>Review Issues</h2>
+                <p>${needsReview ? `${needsReview} item${needsReview === 1 ? "" : "s"} need review.` : "No critical issues found yet."}</p>
+                <small>${totalItems ? "Review flags come directly from the backend parse response." : "Process a count to check for review issues."}</small>
+              </div>
+              <button class="ghost-button" id="review-items-button" type="button">Review</button>
+            </section>
+
+            ${renderReportPreview()}
+          </div>
+
+          <aside class="insight-column" aria-label="Count tools">
+            <section class="workspace-card summary-card">
+              <h2>${ProductIcon("file")} Count Summary</h2>
+              <div class="area-control">
+                <label for="area-input">Kitchen area</label>
+                <div class="area-input-shell">
+                  <input id="area-input" list="area-options" value="${escapeHtml(state.selectedArea)}" placeholder="Type or choose an area" />
+                  <span aria-hidden="true"></span>
+                </div>
+                <datalist id="area-options">
+                  ${AREA_OPTIONS.map((area) => `<option value="${escapeHtml(area)}"></option>`).join("")}
+                </datalist>
+              </div>
+              <dl>
+                <div><dt>Total Items</dt><dd>${totalItems}</dd></div>
+                <div><dt>Needs Review</dt><dd>${needsReview}</dd></div>
+                <div><dt>Source</dt><dd>${source}</dd></div>
+                <div><dt>Area</dt><dd>${escapeHtml(selectedArea || "Not set")}</dd></div>
+                <div><dt>Started</dt><dd>${started}</dd></div>
+                <div><dt>Count ID</dt><dd>${escapeHtml(countId)}</dd></div>
+              </dl>
+            </section>
+
+            <section class="workspace-card data-card">
+              <h2>${ProductIcon("heart")} Data Health</h2>
+              <p>We clean and normalize your data after backend parsing.</p>
+              ${renderDataHealth()}
+            </section>
+
+            <div class="report-actions">
+              <button class="report-button report-button--primary" id="generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId ? "disabled" : ""}>
+                ${ProductIcon("file")} ${state.isGeneratingReport ? "Creating" : "Report"} <span>→</span>
+              </button>
+              <button class="report-button" id="export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export</button>
+              <button class="report-button report-button--disabled" id="send-sheets-button" type="button" disabled>${ProductIcon("sheet")} Sheets</button>
+            </div>
+          </aside>
+        </section>
+      </div>
+      ${renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabel, secondaryRecordingLabel })}
       </main>
     </div>
   `;
 
   bindEvents();
+  scrollHashTargetIntoView();
+}
+
+function scrollHashTargetIntoView() {
+  const hash = window.location.hash;
+  if (!hash || state.lastScrolledHash === hash) return;
+  const target = document.querySelector(hash);
+  if (!target) return;
+  state.lastScrolledHash = hash;
+  window.requestAnimationFrame(() => {
+    target.scrollIntoView({ block: "start" });
+  });
 }
 
 function bindAuthEvents() {
@@ -1422,12 +1605,21 @@ function bindEvents() {
   bindSidebar({ onLogout: logout });
   document.querySelector("#logout-button")?.addEventListener("click", logout);
   document.querySelector("#start-count-button")?.addEventListener("click", startNewCount);
+  document.querySelector("#mobile-start-count-button")?.addEventListener("click", startNewCount);
   document.querySelector("#process-count-button")?.addEventListener("click", processCount);
+  document.querySelector("#mobile-process-count-button")?.addEventListener("click", processCount);
   document.querySelector("#mic-button")?.addEventListener("click", handleMicButtonClick);
+  document.querySelector("#mobile-mic-button")?.addEventListener("click", handleMicButtonClick);
   document.querySelector("#recording-start-action")?.addEventListener("click", handlePrimaryRecordingAction);
+  document.querySelector("#mobile-recording-start-action")?.addEventListener("click", handlePrimaryRecordingAction);
   document.querySelector("#recording-pause-action")?.addEventListener("click", pauseRecording);
+  document.querySelector("#mobile-recording-pause-action")?.addEventListener("click", pauseRecording);
   document.querySelector("#generate-report-button")?.addEventListener("click", generateReport);
+  document.querySelector("#mobile-generate-report-button")?.addEventListener("click", generateReport);
   document.querySelector("#export-csv-button")?.addEventListener("click", exportCsv);
+  document.querySelector("#mobile-export-csv-button")?.addEventListener("click", exportCsv);
+  document.querySelector("#mobile-export-action-button")?.addEventListener("click", exportCsv);
+  document.querySelector("#mobile-logout-button")?.addEventListener("click", logout);
   document.querySelector("#send-sheets-button")?.addEventListener("click", () => {
     setNotice("Google Sheets export is not enabled yet. Use CSV export for now.");
     render();
@@ -1444,11 +1636,30 @@ function bindEvents() {
     setNotice("Detailed review workflow coming next.");
     render();
   });
-  document.querySelector("#transcript-input")?.addEventListener("input", (event) => {
-    state.transcript = event.target.value;
+  document.querySelectorAll("#transcript-input, #mobile-transcript-input").forEach((input) => {
+    input.addEventListener("input", (event) => {
+      state.transcript = event.target.value;
+      event.target.scrollTop = event.target.scrollHeight;
+    });
   });
   document.querySelector("#area-input")?.addEventListener("input", (event) => {
     state.selectedArea = event.target.value;
+    state.mobileAreaOtherActive = false;
+  });
+  document.querySelectorAll(".mobile-area-option").forEach((button) => {
+    button.addEventListener("click", () => {
+      const area = button.dataset.area || "";
+      state.mobileAreaOtherActive = area === "Other";
+      state.selectedArea = area === "Other" ? "" : area;
+      render();
+      if (area === "Other") {
+        document.querySelector("#mobile-area-custom")?.focus();
+      }
+    });
+  });
+  document.querySelector("#mobile-area-custom")?.addEventListener("input", (event) => {
+    state.selectedArea = event.target.value;
+    state.mobileAreaOtherActive = true;
   });
 }
 

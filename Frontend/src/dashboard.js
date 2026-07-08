@@ -223,8 +223,8 @@ function renderContent() {
         <p>Your manager dashboard will fill in once you run your first inventory count.</p>
       </header>
       <div class="dashboard-empty">
-        <p>No counts yet. Start your first count and Koe will surface low-stock items, changes over time, and data-quality checks here.</p>
-        <a class="new-count-button" href="./product.html">New count</a>
+        <p>Start your first inventory count</p>
+        <a class="new-count-button" href="./product.html">Start Count</a>
       </div>
     `;
   }
@@ -234,6 +234,7 @@ function renderContent() {
       <h1>Dashboard</h1>
       <p>${escapeHtml(state.restaurantName)}</p>
     </header>
+    ${renderMobileDashboardPanel(data)}
     ${renderLowStock(data.low_stock_items || [])}
     ${renderLastCount(data.last_count_summary)}
     ${renderChanges(data.count_over_count_changes || [])}
@@ -242,6 +243,27 @@ function renderContent() {
     <div class="dashboard-cta">
       <a class="new-count-button" href="./product.html">New count</a>
     </div>
+  `;
+}
+
+function renderMobileDashboardPanel(data) {
+  const summary = data.last_count_summary || {};
+  const insights = data.data_quality_insights || [];
+  const partialCount = insights.filter((line) => /partial/i.test(String(line))).length;
+  return `
+    <section class="mobile-dashboard-panel" aria-label="Mobile count summary">
+      <div class="mobile-dashboard-heading">
+        <span>${escapeHtml(state.restaurantName)}</span>
+        <h2>Last count</h2>
+      </div>
+      <dl>
+        <div><dt>Items counted</dt><dd>${summary.total_items_counted ?? 0}</dd></div>
+        <div><dt>Needs review</dt><dd>${summary.needs_review_count ?? 0}</dd></div>
+        <div><dt>Partial quantities</dt><dd>${partialCount}</dd></div>
+        <div><dt>Area</dt><dd>${escapeHtml(summary.area || "Not set")}</dd></div>
+      </dl>
+      <a class="new-count-button" href="./product.html">Start Count</a>
+    </section>
   `;
 }
 
