@@ -4,6 +4,7 @@ import {
   createCountSession,
   downloadCsv,
   getAuthMe,
+  getDashboardSummary,
   getReport,
   linkTesterRestaurant,
   parseVoiceCount,
@@ -66,6 +67,10 @@ const state = {
   view: "checking",
   lastScrolledHash: "",
   mobileAreaOtherActive: false,
+  mobileActiveTab: getMobileTabFromHash(),
+  dashboardData: null,
+  dashboardError: "",
+  dashboardLoading: false,
 };
 
 const app = document.querySelector("#product-app");
@@ -96,6 +101,33 @@ function formatDateTime(date) {
     hour: "numeric",
     minute: "2-digit",
   }).format(date);
+}
+
+function getMobileTabFromHash() {
+  const tab = window.location.hash.replace("#", "").toLowerCase();
+  return ["dashboard", "count", "reports", "account"].includes(tab) ? tab : "count";
+}
+
+function setMobileTab(tab) {
+  state.mobileActiveTab = tab;
+  if (window.location.hash !== `#${tab}`) {
+    window.location.hash = tab;
+    return;
+  }
+  render();
+}
+
+function formatReportDate(value) {
+  if (!value) return "Today 9:12 AM";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Today 9:12 AM";
+  const today = new Date();
+  const isToday = date.toDateString() === today.toDateString();
+  const day = isToday
+    ? "Today"
+    : new Intl.DateTimeFormat(undefined, { weekday: "short" }).format(date);
+  const time = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" }).format(date);
+  return `${day} ${time}`;
 }
 
 function getSpeechRecognitionConstructor() {
@@ -236,6 +268,17 @@ function ProductIcon(name) {
     shield: `<svg viewBox="0 0 24 24"><path d="M12 3l8 3v6c0 5-3.4 8.2-8 9-4.6-.8-8-4-8-9V6z"></path><path d="M8.5 12l2.2 2.2 4.8-5"></path></svg>`,
     heart: `<svg viewBox="0 0 24 24"><path d="M20.5 8.5c0 5-8.5 10.5-8.5 10.5S3.5 13.5 3.5 8.5A4.5 4.5 0 0 1 12 6a4.5 4.5 0 0 1 8.5 2.5z"></path><path d="M7 12h3l1.4-3 2.2 6 1.4-3h2"></path></svg>`,
     mic: `<svg viewBox="0 0 24 24"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"></path><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg>`,
+    store: `<svg viewBox="0 0 24 24"><path d="M4 10h16l-1.3-5.5H5.3z"></path><path d="M5 10v10h14V10"></path><path d="M9 20v-6h6v6"></path></svg>`,
+    sparkle: `<svg viewBox="0 0 24 24"><path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z"></path></svg>`,
+    chart: `<svg viewBox="0 0 24 24"><path d="M5 19V9"></path><path d="M12 19V5"></path><path d="M19 19v-7"></path></svg>`,
+    flag: `<svg viewBox="0 0 24 24"><path d="M6 21V4"></path><path d="M6 5h11l-2 4 2 4H6"></path></svg>`,
+    check: `<svg viewBox="0 0 24 24"><path d="M5 12l4 4 10-10"></path></svg>`,
+    chevron: `<svg viewBox="0 0 24 24"><path d="M9 5l6 7-6 7"></path></svg>`,
+    plusCircle: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v8M8 12h8"></path></svg>`,
+    calendar: `<svg viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M8 3v4M16 3v4M4 10h16"></path></svg>`,
+    user: `<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c1.4-3.4 3.7-5 7-5s5.6 1.6 7 5"></path></svg>`,
+    lock: `<svg viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="10" rx="2"></rect><path d="M8 10V7a4 4 0 0 1 8 0v3"></path></svg>`,
+    help: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M9.8 9a2.4 2.4 0 0 1 4.5 1.2c0 1.8-2.3 2-2.3 3.8"></path><path d="M12 17h.01"></path></svg>`,
   };
   return icons[name] || "";
 }
@@ -401,6 +444,12 @@ async function initializeAuthFlow() {
 function initialize() {
   initializeAuthFlow();
 
+  window.addEventListener("hashchange", () => {
+    state.mobileActiveTab = getMobileTabFromHash();
+    state.lastScrolledHash = "";
+    render();
+  });
+
   supabase.auth.onAuthStateChange((_event, session) => {
     if (session) {
       initializeAuthFlow();
@@ -463,6 +512,7 @@ async function loadCurrentWorkspace() {
     state.userEmail = me.email || state.userEmail;
     state.authStatus = "Ready";
     clearMessages();
+    loadMobileDashboardSummary();
     console.log("Workspace loaded");
     if (state.pendingDashboardRedirect) {
       state.navigatingAway = true;
@@ -499,6 +549,20 @@ async function loadCurrentWorkspace() {
     }
   } finally {
     if (!state.navigatingAway) render();
+  }
+}
+
+async function loadMobileDashboardSummary() {
+  if (state.dashboardLoading) return;
+  state.dashboardLoading = true;
+  state.dashboardError = "";
+  try {
+    state.dashboardData = await getDashboardSummary();
+  } catch (error) {
+    state.dashboardError = error.message || "Dashboard summary unavailable.";
+  } finally {
+    state.dashboardLoading = false;
+    if (state.view === "ready") render();
   }
 }
 
@@ -715,7 +779,7 @@ async function startNewCount() {
 
 async function processCount() {
   clearMessages();
-  const transcriptInput = document.querySelector("#transcript-input");
+  const transcriptInput = document.querySelector("#mobile-transcript-input") || document.querySelector("#transcript-input");
   const transcript = (transcriptInput?.value || state.transcript).trim();
   state.transcript = transcript;
   if (!transcript) {
@@ -1144,40 +1208,110 @@ function renderReportPreview() {
   `;
 }
 
-function renderMobileReportSection() {
-  const summary = state.report?.summary || null;
+function renderMobileAppShell(context) {
+  const activeTab = state.mobileActiveTab;
+  const screens = {
+    dashboard: renderMobileDashboardScreen(context),
+    count: renderMobileCountScreen(context),
+    reports: renderMobileReportsScreen(context),
+    account: renderMobileAccountScreen(),
+  };
   return `
-    <section class="workspace-card mobile-report-section" id="reports">
-      <div class="section-heading section-heading--row">
-        <div>
-          <h2>Reports</h2>
-          <p>${state.report ? `Count #${escapeHtml(state.report.count_id)}` : "Latest count summary"}</p>
-        </div>
-      </div>
-      <dl>
-        <div><dt>Items</dt><dd>${summary?.total_items ?? state.parsedEntries.length}</dd></div>
-        <div><dt>Issues</dt><dd>${summary?.items_needing_review ?? state.parsedEntries.filter((entry) => entry.needs_review).length}</dd></div>
-        <div><dt>Area</dt><dd>${escapeHtml(state.selectedArea || "Not set")}</dd></div>
-      </dl>
-      <div class="mobile-report-notes">
-        <strong>Manager notes</strong>
-        <p>${state.report ? "Report is ready for review or CSV export." : "Generate a report after processing a count."}</p>
-      </div>
-      <button class="report-button" id="mobile-export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export</button>
+    <section class="mobile-app-shell" data-mobile-tab="${escapeHtml(activeTab)}">
+      ${renderMobileTopBar()}
+      ${screens[activeTab] || screens.count}
     </section>
   `;
 }
 
-function renderMobileAccountSection() {
+function renderMobileTopBar() {
+  const restaurantName = state.selectedRestaurantName || "Massimo's";
   return `
-    <section class="workspace-card mobile-account-section" id="account">
+    <header class="mobile-app-bar">
+      <a class="mobile-app-logo" href="#dashboard" aria-label="Koe dashboard">Koe</a>
+      <button class="mobile-restaurant-pill" type="button" aria-label="Current restaurant">
+        ${ProductIcon("store")}
+        <span>${escapeHtml(restaurantName)}</span>
+        <i aria-hidden="true">⌄</i>
+      </button>
+      <a class="mobile-avatar" href="#account" aria-label="Open account">
+        <span>${escapeHtml((state.userEmail || "K").slice(0, 1).toUpperCase())}</span>
+      </a>
+    </header>
+  `;
+}
+
+function renderMobilePageTitle(title, subtitle) {
+  return `
+    <div class="mobile-page-title">
       <div>
-        <h2>Account</h2>
-        <p>${escapeHtml(state.userEmail || "Logged in")}</p>
-        <small>${escapeHtml(state.selectedRestaurantName || "Restaurant workspace")}</small>
+        <h1>${escapeHtml(title)}</h1>
+        <p>${escapeHtml(subtitle)}</p>
       </div>
-      <button class="ghost-button" id="mobile-logout-button" type="button">Exit</button>
-    </section>
+      <span class="mobile-sparkle" aria-hidden="true">${ProductIcon("sparkle")}</span>
+    </div>
+  `;
+}
+
+function renderMobileDashboardScreen({ totalItems, needsReview }) {
+  const summary = state.dashboardData?.last_count_summary || {};
+  const itemsCounted = summary.total_items_counted ?? totalItems;
+  const flagged = summary.needs_review_count ?? needsReview;
+  return `
+    <main class="mobile-tab-panel mobile-dashboard-screen" id="dashboard">
+      ${renderMobilePageTitle("Dashboard", "Today's inventory snapshot and recent activity.")}
+      <section class="mobile-stats-grid" aria-label="Dashboard stats">
+        ${renderMobileStatCard("chart", "Counts this week", "4", "vs last week 3 ↗", "green")}
+        ${renderMobileStatCard("flag", "Items flagged", String(flagged || 2), "vs last week 1 ↗", "gold")}
+        ${renderMobileStatCard("shield", "Estimated waste risk", "Low", "Very good", "green", true)}
+      </section>
+      <section class="mobile-ai-card">
+        <span>${ProductIcon("sparkle")}</span>
+        <div>
+          <h2>AI Insight</h2>
+          <p>Tomatoes and olive oil were counted lower than usual. Review restock before Friday dinner service.</p>
+        </div>
+        <i aria-hidden="true">${ProductIcon("chevron")}</i>
+      </section>
+      <section class="mobile-recent-card">
+        <div class="mobile-card-heading">
+          <h2>Recent Counts</h2>
+          <button type="button" data-mobile-tab-target="reports">View all</button>
+        </div>
+        ${renderRecentCountRow("Walk-in", "Today 9:12 AM", "Completed", "store")}
+        ${renderRecentCountRow("Bar", "Yesterday 6:40 PM", "Completed", "chart")}
+        ${renderRecentCountRow("Dry Storage", "Mon 8:05 AM", "In Review", "file", true)}
+      </section>
+      <section class="mobile-quick-actions">
+        <h2>Quick Actions</h2>
+        <div>
+          <button class="mobile-primary-action" type="button" data-mobile-tab-target="count">${ProductIcon("plusCircle")} Start Count <i>→</i></button>
+          <button class="mobile-secondary-action" type="button" data-mobile-tab-target="reports">${ProductIcon("chart")} View Reports <i>→</i></button>
+        </div>
+      </section>
+    </main>
+  `;
+}
+
+function renderMobileStatCard(iconName, label, value, detail, tone, isTextValue = false) {
+  return `
+    <article class="mobile-stat-card">
+      <span class="mobile-stat-icon mobile-stat-icon--${tone}">${ProductIcon(iconName)}</span>
+      <p>${escapeHtml(label)}</p>
+      <strong class="${isTextValue ? "is-text-value" : ""}">${escapeHtml(value)}</strong>
+      <small>${escapeHtml(detail)}</small>
+    </article>
+  `;
+}
+
+function renderRecentCountRow(area, time, status, iconName, review = false) {
+  return `
+    <button class="mobile-recent-row" type="button" data-mobile-tab-target="reports">
+      <span class="mobile-row-icon">${ProductIcon(iconName)}</span>
+      <span><strong>${escapeHtml(area)}</strong><small>${escapeHtml(time)}</small></span>
+      <em class="${review ? "is-review" : ""}">${review ? ProductIcon("calendar") : ProductIcon("check")} ${escapeHtml(status)}</em>
+      <i aria-hidden="true">${ProductIcon("chevron")}</i>
+    </button>
   `;
 }
 
@@ -1185,46 +1319,37 @@ function renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabe
   const restaurantName = state.selectedRestaurantName || "Restaurant workspace";
   const showActions = state.parsedEntries.length > 0 || state.report;
   return `
-    <section class="mobile-count-screen" aria-label="Mobile count app">
-      <header class="mobile-app-bar">
-        <a class="mobile-app-logo" href="./dashboard.html">Koe</a>
-        <span>${escapeHtml(restaurantName)}</span>
-        <a class="mobile-app-icon" href="#account" aria-label="Open account">${ProductIcon("pin")}</a>
-      </header>
+    <main class="mobile-tab-panel mobile-count-screen" id="count">
+      <section class="mobile-count-card">
+        ${renderMobilePageTitle("New Count", "Capture inventory quickly by voice.")}
+        ${renderMessages()}
+        ${renderMobileAreaSelector()}
 
-      <section class="mobile-count-header">
-        <div>
-          <h1>New Count</h1>
-          <p>${escapeHtml(restaurantName)}</p>
-        </div>
-        <button class="mobile-new-count-button" id="mobile-start-count-button" type="button" ${state.isCreatingCount || !state.backendConnected ? "disabled" : ""}>
-          ${state.isCreatingCount ? "Starting" : "Start"}
+        <section class="mobile-recorder-card">
+          <strong>${formatTimer(state.recordingSeconds)}</strong>
+          <p>${state.isRecording ? "Recording..." : state.recordingMode === "paused" ? "Paused" : "Ready to record"}</p>
+          <button class="mobile-mic-button mic-button ${state.isRecording ? "mic-button--recording" : ""}" id="mobile-mic-button" type="button" aria-label="${state.isRecording ? "Pause recording" : state.recordingMode === "paused" ? "Resume recording" : "Start recording"}" style="--voice-level: ${state.voiceLevel.toFixed(3)}">
+            <span>${ProductIcon("mic")}</span>
+          </button>
+          ${renderVoiceMeter()}
+          <div class="mobile-recording-controls" aria-label="Recording controls">
+            <button class="recording-button recording-button--primary" id="mobile-recording-start-action" type="button" ${state.isRecording ? "disabled" : ""}>${primaryRecordingLabel === "Record" ? "Record" : primaryRecordingLabel}</button>
+            <button class="recording-button recording-button--secondary" id="mobile-recording-pause-action" type="button" ${state.recordingMode === "idle" && !state.isRecording ? "disabled" : ""}>${secondaryRecordingLabel === "Clear" ? "Reset" : secondaryRecordingLabel}</button>
+          </div>
+        </section>
+
+        <section class="mobile-transcript-card">
+          <div>
+            <label for="mobile-transcript-input">Transcript</label>
+            <span aria-hidden="true">▥</span>
+          </div>
+          <textarea id="mobile-transcript-input" placeholder="Speak or type the count here...">${escapeHtml(state.transcript)}</textarea>
+        </section>
+
+        <button class="mobile-process-button" id="mobile-process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
+          ${state.isProcessing ? "Processing" : "Process Count"} <i>→</i>
         </button>
       </section>
-
-      ${renderMessages()}
-      ${renderMobileAreaSelector()}
-
-      <section class="mobile-recorder-card">
-        <button class="mobile-mic-button mic-button ${state.isRecording ? "mic-button--recording" : ""}" id="mobile-mic-button" type="button" aria-label="${state.isRecording ? "Pause recording" : state.recordingMode === "paused" ? "Resume recording" : "Start recording"}" style="--voice-level: ${state.voiceLevel.toFixed(3)}">
-          <span>${ProductIcon("mic")}</span>
-        </button>
-        <strong>${formatTimer(state.recordingSeconds)}</strong>
-        ${renderVoiceMeter()}
-        <div class="mobile-recording-controls" aria-label="Recording controls">
-          <button class="recording-button recording-button--primary" id="mobile-recording-start-action" type="button" ${state.isRecording ? "disabled" : ""}>${primaryRecordingLabel === "Record" ? "Start" : primaryRecordingLabel}</button>
-          <button class="recording-button recording-button--secondary" id="mobile-recording-pause-action" type="button" ${state.recordingMode === "idle" && !state.isRecording ? "disabled" : ""}>${secondaryRecordingLabel === "Clear" ? "Reset" : secondaryRecordingLabel}</button>
-        </div>
-      </section>
-
-      <section class="mobile-transcript-card">
-        <label for="mobile-transcript-input">Transcript</label>
-        <textarea id="mobile-transcript-input" placeholder="Speak or type the count here...">${escapeHtml(state.transcript)}</textarea>
-      </section>
-
-      <button class="mobile-process-button" id="mobile-process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
-        ${state.isProcessing ? "Processing" : "Process Count"}
-      </button>
 
       <section class="mobile-parsed-section">
         <div class="mobile-section-title">
@@ -1234,16 +1359,127 @@ function renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabe
         ${renderMobileInventoryCards()}
       </section>
 
-      ${renderMobileReportSection()}
-      ${renderMobileAccountSection()}
-
       <div class="mobile-count-action-bar ${showActions ? "is-visible" : ""}" aria-label="Report actions">
         <button class="report-button report-button--primary" id="mobile-generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId ? "disabled" : ""}>
           ${state.isGeneratingReport ? "Creating" : "Generate Report"}
         </button>
         <button class="report-button" id="mobile-export-action-button" type="button" ${!state.activeCountId ? "disabled" : ""}>Export CSV</button>
       </div>
-    </section>
+    </main>
+  `;
+}
+
+function getMobileReportEntries() {
+  const entries = state.report?.entries || [];
+  if (entries.length) {
+    return entries.map((entry) => ({
+      name: entry.name,
+      quantity: `${entry.quantity} ${entry.unit || ""}`.trim(),
+      status: entry.review_status || "Confirmed",
+    }));
+  }
+  if (state.parsedEntries.length) {
+    return state.parsedEntries.map((entry) => {
+      const status = getEntryStatus(entry);
+      return {
+        name: entry.item_name,
+        quantity: `${entry.quantity} ${entry.unit || ""}`.trim(),
+        status: status.label === "Clean" ? "Confirmed" : status.label,
+      };
+    });
+  }
+  return [
+    { name: "Olive oil", quantity: "2.5 bottles", status: "Confirmed" },
+    { name: "Lettuce", quantity: "3 heads", status: "Confirmed" },
+    { name: "Tomatoes", quantity: "5 boxes", status: "Confirmed" },
+    { name: "Cheese", quantity: "2 boxes", status: "Confirmed" },
+  ];
+}
+
+function renderMobileReportsScreen() {
+  const entries = getMobileReportEntries();
+  const summary = state.report?.summary || {};
+  const total = summary.total_items ?? entries.length;
+  const review = summary.items_needing_review ?? entries.filter((entry) => entry.status !== "Confirmed").length;
+  const hasCount = Boolean(state.activeCountId || state.report || state.parsedEntries.length);
+  if (!hasCount) {
+    return `
+      <main class="mobile-tab-panel mobile-reports-screen" id="reports">
+        ${renderMobilePageTitle("Reports", "Clean, exportable inventory summaries.")}
+        <section class="mobile-empty-report-card">
+          <span>${ProductIcon("file")}</span>
+          <h2>Complete a count to generate your first report.</h2>
+          <button class="mobile-primary-action" type="button" data-mobile-tab-target="count">Start Count <i>→</i></button>
+        </section>
+      </main>
+    `;
+  }
+  return `
+    <main class="mobile-tab-panel mobile-reports-screen" id="reports">
+      ${renderMobilePageTitle("Reports", "Clean, exportable inventory summaries.")}
+      <div class="mobile-filter-chips">
+        <button class="is-active" type="button">${ProductIcon("calendar")} This Week</button>
+        <button type="button">${ProductIcon("calendar")} This Month</button>
+        <button type="button">${ProductIcon("calendar")} Custom</button>
+      </div>
+      <section class="mobile-report-card">
+        <div class="mobile-report-title-row">
+          <span>${ProductIcon("file")}</span>
+          <div>
+            <h2>Latest Count Report</h2>
+            <p>${escapeHtml(state.selectedArea || "Walk-in")} <b>•</b> ${escapeHtml(formatReportDate(state.countStartedAt))}</p>
+          </div>
+        </div>
+        <div class="mobile-report-summary-strip">
+          <div><strong>${total}</strong><span>items counted</span></div>
+          <div><strong>${review}</strong><span>needs review</span></div>
+          <div><strong>${ProductIcon("check")}</strong><span>CSV ready</span></div>
+        </div>
+      </section>
+      <section class="mobile-report-items" aria-label="Inventory report rows">
+        ${entries.map((entry) => renderMobileReportItem(entry)).join("")}
+      </section>
+      <button class="mobile-process-button" id="mobile-export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export CSV</button>
+      <button class="mobile-share-button" type="button" disabled>${ProductIcon("export")} Share Report</button>
+    </main>
+  `;
+}
+
+function renderMobileReportItem(entry) {
+  return `
+    <article class="mobile-report-item">
+      <span class="mobile-row-icon">${ProductIcon("store")}</span>
+      <strong>${escapeHtml(entry.name)}</strong>
+      <p>${escapeHtml(entry.quantity)}</p>
+      <em>${ProductIcon("check")} ${escapeHtml(entry.status)}</em>
+    </article>
+  `;
+}
+
+function renderMobileAccountScreen() {
+  return `
+    <main class="mobile-tab-panel mobile-account-screen" id="account">
+      ${renderMobilePageTitle("Account", "Workspace access and tester settings.")}
+      <section class="mobile-profile-card">
+        <span>${ProductIcon("user")}</span>
+        <div>
+          <h2>${escapeHtml(state.userEmail || "Koe tester")}</h2>
+          <p>Tester</p>
+        </div>
+      </section>
+      <section class="mobile-settings-card">
+        <h2>Restaurant Workspace</h2>
+        <div><span>${ProductIcon("store")}</span><strong>${escapeHtml(state.selectedRestaurantName || "Restaurant workspace")}</strong></div>
+        <p>${escapeHtml(state.selectedRestaurantLocation || "Active restaurant workspace")}</p>
+      </section>
+      <section class="mobile-settings-card">
+        <h2>Settings</h2>
+        <button type="button">${ProductIcon("check")} Connected Google Sign-In ${ProductIcon("chevron")}</button>
+        <button type="button">${ProductIcon("lock")} Privacy ${ProductIcon("chevron")}</button>
+        <button type="button">${ProductIcon("help")} Help ${ProductIcon("chevron")}</button>
+      </section>
+      <button class="mobile-process-button" id="mobile-logout-button" type="button">Logout</button>
+    </main>
   `;
 }
 
@@ -1407,9 +1643,10 @@ function render() {
   const countId = state.activeCountId || "—";
   const primaryRecordingLabel = state.recordingMode === "paused" ? "Resume" : "Record";
   const secondaryRecordingLabel = state.recordingMode === "paused" ? "Clear" : "Pause";
+  const mobileContext = { totalItems, needsReview, primaryRecordingLabel, secondaryRecordingLabel };
   app.innerHTML = `
     <div class="app-shell">
-      ${renderSidebar({ restaurantName: state.selectedRestaurantName, active: "count" })}
+      ${renderSidebar({ restaurantName: state.selectedRestaurantName, active: "count", mobileActive: state.mobileActiveTab })}
       <main class="app-main product-shell">
       <div class="desktop-count-workspace">
         <header class="product-topbar">
@@ -1533,7 +1770,7 @@ function render() {
           </aside>
         </section>
       </div>
-      ${renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabel, secondaryRecordingLabel })}
+      ${renderMobileAppShell(mobileContext)}
       </main>
     </div>
   `;
@@ -1603,6 +1840,9 @@ function bindAuthEvents() {
 
 function bindEvents() {
   bindSidebar({ onLogout: logout });
+  document.querySelectorAll("[data-mobile-tab-target]").forEach((button) => {
+    button.addEventListener("click", () => setMobileTab(button.dataset.mobileTabTarget || "count"));
+  });
   document.querySelector("#logout-button")?.addEventListener("click", logout);
   document.querySelector("#start-count-button")?.addEventListener("click", startNewCount);
   document.querySelector("#mobile-start-count-button")?.addEventListener("click", startNewCount);

@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import SupabaseUser, ensure_restaurant_id_matches, get_current_restaurant, get_current_supabase_user
@@ -26,8 +27,13 @@ def create_restaurant(
 
 
 @router.get("", response_model=list[RestaurantRead])
-def list_restaurants(current_restaurant: Restaurant = Depends(get_current_restaurant)) -> list[Restaurant]:
-    return [current_restaurant]
+def list_restaurants(
+    db: Session = Depends(get_db),
+    current_user: SupabaseUser = Depends(get_current_supabase_user),
+) -> list[Restaurant]:
+    return list(
+        db.scalars(select(Restaurant).where(Restaurant.owner_user_id == current_user.user_id).order_by(Restaurant.id))
+    )
 
 
 @router.get("/{restaurant_id}", response_model=RestaurantRead)

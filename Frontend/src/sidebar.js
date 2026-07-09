@@ -23,9 +23,9 @@ function icon(name) {
 }
 
 /**
- * @param {{ restaurantName: string, active: "dashboard" | "count" }} options
+ * @param {{ restaurantName: string, active: "dashboard" | "count", mobileActive?: "dashboard" | "count" | "reports" | "account" }} options
  */
-export function renderSidebar({ restaurantName, active }) {
+export function renderSidebar({ restaurantName, active, mobileActive = active }) {
   return `
     <button class="sidebar-toggle" id="sidebar-toggle" type="button" aria-label="Toggle navigation">
       <span></span><span></span><span></span>
@@ -52,16 +52,16 @@ export function renderSidebar({ restaurantName, active }) {
       </button>
     </aside>
     <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
-      <a class="mobile-bottom-link ${active === "dashboard" ? "is-active" : ""}" href="./dashboard.html" ${active === "dashboard" ? 'aria-current="page"' : ""}>
+      <a class="mobile-bottom-link ${mobileActive === "dashboard" ? "is-active" : ""}" href="./product.html#dashboard" ${mobileActive === "dashboard" ? 'aria-current="page"' : ""}>
         ${icon("grid")}<span>Dashboard</span>
       </a>
-      <a class="mobile-bottom-link ${active === "count" ? "is-active" : ""}" href="./product.html" ${active === "count" ? 'aria-current="page"' : ""}>
+      <a class="mobile-bottom-link ${mobileActive === "count" ? "is-active" : ""}" href="./product.html#count" ${mobileActive === "count" ? 'aria-current="page"' : ""}>
         ${icon("mic")}<span>Count</span>
       </a>
-      <a class="mobile-bottom-link" href="./product.html#reports">
+      <a class="mobile-bottom-link ${mobileActive === "reports" ? "is-active" : ""}" href="./product.html#reports" ${mobileActive === "reports" ? 'aria-current="page"' : ""}>
         ${icon("report")}<span>Reports</span>
       </a>
-      <a class="mobile-bottom-link" href="./product.html#account">
+      <a class="mobile-bottom-link ${mobileActive === "account" ? "is-active" : ""}" href="./product.html#account" ${mobileActive === "account" ? 'aria-current="page"' : ""}>
         ${icon("account")}<span>Account</span>
       </a>
     </nav>

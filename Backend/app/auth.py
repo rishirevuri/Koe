@@ -64,8 +64,12 @@ def get_current_supabase_user(token: str = Depends(get_bearer_token)) -> Supabas
 def get_current_restaurant(
     db: Session = Depends(get_db),
     current_user: SupabaseUser = Depends(get_current_supabase_user),
+    selected_restaurant_id: int | None = Header(default=None, alias="X-Restaurant-Id"),
 ) -> Restaurant:
-    restaurant = db.scalar(select(Restaurant).where(Restaurant.owner_user_id == current_user.user_id).order_by(Restaurant.id))
+    query = select(Restaurant).where(Restaurant.owner_user_id == current_user.user_id)
+    if selected_restaurant_id is not None:
+        query = query.where(Restaurant.id == selected_restaurant_id)
+    restaurant = db.scalar(query.order_by(Restaurant.id))
     if not restaurant:
         raise HTTPException(status_code=404, detail="No restaurant workspace found for this user.")
     return restaurant
