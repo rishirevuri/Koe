@@ -112,8 +112,8 @@ function HeroSection() {
         </p>
 
         <div class="hero-actions">
-          ${CTAButton({ label: "Open Koe", href: "/product.html" })}
-          ${CTAButton({ label: "Sign In", href: "/product.html", variant: "secondary" })}
+          ${CTAButton({ label: "Use Koe", href: "/dashboard.html" })}
+          ${CTAButton({ label: "Sign In/Up", href: "/product.html", variant: "secondary" })}
         </div>
 
         <ul class="benefit-row" aria-label="Koe benefits">${benefitMarkup}</ul>
