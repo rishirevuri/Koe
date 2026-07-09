@@ -4558,6 +4558,22 @@ button:disabled,
     line-height: 1;
   }
 
+  .mobile-restaurant-name {
+    justify-self: end;
+    min-width: 0;
+    max-width: 148px;
+    overflow: hidden;
+    color: #0f5132;
+    font-family: var(--script);
+    font-size: 1.32rem;
+    font-weight: 500;
+    line-height: 1.1;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.74);
+  }
+
   .mobile-avatar {
     display: grid;
     width: 48px;
@@ -5014,21 +5030,31 @@ button:disabled,
   }
 
   .mobile-mic-button {
-    width: 154px;
-    height: 154px;
+    width: 132px;
+    height: 132px;
     margin: 10px 0 8px;
     background: #06132d;
     box-shadow:
-      0 0 0 18px rgba(170, 132, 80, 0.08),
-      0 0 0 36px rgba(170, 132, 80, 0.055),
-      0 20px 45px rgba(6, 19, 45, 0.19);
+      0 0 0 14px rgba(170, 132, 80, 0.08),
+      0 0 0 29px rgba(170, 132, 80, 0.055),
+      0 18px 38px rgba(6, 19, 45, 0.18);
   }
 
   .mobile-mic-button.mic-button--recording {
     box-shadow:
-      0 0 0 18px rgba(170, 132, 80, 0.14),
-      0 0 0 39px rgba(170, 132, 80, 0.08),
-      0 20px 45px rgba(6, 19, 45, 0.2);
+      0 0 0 14px rgba(170, 132, 80, 0.14),
+      0 0 0 31px rgba(170, 132, 80, 0.08),
+      0 18px 38px rgba(6, 19, 45, 0.19);
+  }
+
+  .mobile-mic-button span {
+    width: 70px;
+    height: 70px;
+  }
+
+  .mobile-mic-button svg {
+    width: 34px;
+    height: 34px;
   }
 
   .mobile-recorder-card .mic-meter {

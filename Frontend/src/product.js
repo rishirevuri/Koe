@@ -1229,11 +1229,7 @@ function renderMobileTopBar() {
   return `
     <header class="mobile-app-bar">
       <a class="mobile-app-logo" href="#dashboard" aria-label="Koe dashboard">Koe</a>
-      <button class="mobile-restaurant-pill" type="button" aria-label="Current restaurant">
-        ${ProductIcon("store")}
-        <span>${escapeHtml(restaurantName)}</span>
-        <i aria-hidden="true">⌄</i>
-      </button>
+      <div class="mobile-restaurant-name" aria-label="Current restaurant">${escapeHtml(restaurantName)}</div>
       <a class="mobile-avatar" href="#account" aria-label="Open account">
         <span>${escapeHtml((state.userEmail || "K").slice(0, 1).toUpperCase())}</span>
       </a>
@@ -1264,14 +1260,6 @@ function renderMobileDashboardScreen({ totalItems, needsReview }) {
         ${renderMobileStatCard("chart", "Counts this week", "4", "vs last week 3 ↗", "green")}
         ${renderMobileStatCard("flag", "Items flagged", String(flagged || 2), "vs last week 1 ↗", "gold")}
         ${renderMobileStatCard("shield", "Estimated waste risk", "Low", "Very good", "green", true)}
-      </section>
-      <section class="mobile-ai-card">
-        <span>${ProductIcon("sparkle")}</span>
-        <div>
-          <h2>AI Insight</h2>
-          <p>Tomatoes and olive oil were counted lower than usual. Review restock before Friday dinner service.</p>
-        </div>
-        <i aria-hidden="true">${ProductIcon("chevron")}</i>
       </section>
       <section class="mobile-recent-card">
         <div class="mobile-card-heading">
