@@ -134,42 +134,12 @@ function getSpeechRecognitionConstructor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
 }
 
-function playRecordingChirp() {
-  const AudioContext = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContext) return;
-
+function vibrateRecordingFeedback() {
+  if (!navigator.vibrate) return;
   try {
-    const context = new AudioContext();
-    const oscillator = context.createOscillator();
-    const tremolo = context.createOscillator();
-    const tremoloGain = context.createGain();
-    const gain = context.createGain();
-    const startedAt = context.currentTime;
-
-    oscillator.type = "triangle";
-    oscillator.frequency.setValueAtTime(118, startedAt);
-    oscillator.frequency.linearRampToValueAtTime(132, startedAt + 0.18);
-    oscillator.frequency.linearRampToValueAtTime(110, startedAt + 0.34);
-
-    tremolo.type = "sine";
-    tremolo.frequency.setValueAtTime(38, startedAt);
-    tremoloGain.gain.setValueAtTime(0.045, startedAt);
-    tremolo.connect(tremoloGain);
-    tremoloGain.connect(gain.gain);
-
-    gain.gain.setValueAtTime(0.0001, startedAt);
-    gain.gain.exponentialRampToValueAtTime(0.1, startedAt + 0.035);
-    gain.gain.exponentialRampToValueAtTime(0.0001, startedAt + 0.38);
-
-    oscillator.connect(gain);
-    gain.connect(context.destination);
-    oscillator.start(startedAt);
-    tremolo.start(startedAt);
-    oscillator.stop(startedAt + 0.4);
-    tremolo.stop(startedAt + 0.4);
-    window.setTimeout(() => context.close(), 520);
+    navigator.vibrate([18, 28, 22]);
   } catch {
-    // Audio feedback is optional and can be blocked by browser policy.
+    // Haptic feedback is optional and may be blocked by the browser/device.
   }
 }
 
@@ -925,7 +895,6 @@ async function startRecording() {
       }
     };
 
-    playRecordingChirp();
     try {
       await startVoiceMeter();
     } catch {
@@ -971,10 +940,12 @@ function resetRecording() {
 
 function handlePrimaryRecordingAction() {
   if (state.isRecording) return;
+  vibrateRecordingFeedback();
   startRecording();
 }
 
 function handleMicButtonClick() {
+  vibrateRecordingFeedback();
   if (state.isRecording) {
     pauseRecording();
     return;
