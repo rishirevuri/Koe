@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -14,6 +16,7 @@ from app.services.voice_parse_service import ParsedCandidate, parse_voice_text
 
 
 router = APIRouter(prefix="/ai", tags=["ai"])
+logger = logging.getLogger(__name__)
 
 
 def _issue_type(match: MatchResult, candidate: ParsedCandidate) -> str | None:
@@ -123,7 +126,8 @@ def parse_voice(
             claude_candidates = parse_inventory_with_claude(payload.text)
             if claude_candidates:
                 candidates = claude_candidates
-        except Exception:
+        except Exception as error:
+            logger.warning("Claude inventory parsing failed; using deterministic parser fallback: %s", error)
             candidates = parse_voice_text(payload.text)
 
     return _handle_candidates(

@@ -12,33 +12,219 @@ def disabled_response(provider: str, message: str) -> dict[str, bool | str]:
     return {"configured": False, "provider": provider, "message": message}
 
 
-SYSTEM_PROMPT = """You parse restaurant inventory count transcripts into structured inventory rows.
-Return only valid JSON. Do not include markdown.
+RESTAURANT_INVENTORY_SYSTEM_PROMPT = """
+You are Koe, an AI inventory assistant for restaurants.
 
-Output shape:
+Your job is to convert messy spoken or typed restaurant inventory counts into clean, structured, manager-ready inventory data.
+
+The input may be:
+- raw voice transcript
+- typed inventory notes
+- incomplete staff shorthand
+- messy quantities
+- partial containers
+- restaurant-specific item names
+- area-specific counts
+
+You must extract only the inventory items actually mentioned. Do not invent items, prices, vendors, par levels, or categories that were not stated or provided in context.
+
+Core output requirement:
+Return only valid JSON. No markdown. No comments. No prose outside JSON.
+
+Required JSON shape:
+
 {
-  "entries": [
+  "items": [
     {
-      "raw_phrase": "original phrase for this item",
-      "item_name": "clean item name only",
-      "quantity": 10,
-      "unit": "individual",
-      "partial_detail": null,
-      "needs_review": false,
-      "review_reason": null
+      "item_name": "string",
+      "quantity": number | null,
+      "unit": "string" | null,
+      "status": "Clean" | "Partial Quantity" | "Missing Unit" | "Needs Review" | "Possible Duplicate" | "Converted Unit",
+      "original_phrase": "string",
+      "manager_note": "string"
     }
-  ]
+  ],
+  "summary": {
+    "items_counted": number,
+    "rows_needing_review": number,
+    "partial_quantities": number,
+    "missing_units": number,
+    "converted_units": number,
+    "possible_duplicates": number,
+    "manager_insights": ["string"]
+  }
 }
 
-Rules:
-- Split every counted item into its own row.
-- Remove filler and connector phrases from item names, such as "I have", "and then", "also", "we got".
-- If no unit is spoken, use "individual".
-- If a unit is spoken, preserve the unit meaning, such as bottles, boxes, cartons, grams, milligrams, pounds, ounces, cases, heads, bags, tubs, containers, trays, crates.
-- For phrases like "3 bottles of olive oil, one of which is half empty", return quantity 2.5, unit bottles, item_name olive oil, and partial_detail.
-- For vague partials like "almost empty" or "mostly full", keep the whole quantity and set needs_review true.
-- Do not invent items, quantities, or units.
-"""
+Parsing rules:
+
+1. Item extraction
+- Extract every inventory item mentioned.
+- Normalize item names into clean title case.
+- Do not include filler words.
+- Do not invent missing items.
+- If an item name is unclear, keep the best extracted phrase and mark status as "Needs Review".
+- If two phrases likely refer to the same item, merge them only when highly confident. Otherwise keep both and mark status "Possible Duplicate".
+- "olive oil" -> "Olive oil"
+- "roma tomatoes" -> "Roma tomatoes"
+- "chicken breast" -> "Chicken breast"
+- "OO" should only become "Olive oil" if restaurant-specific memory says so. Otherwise mark Needs Review.
+
+2. Quantity extraction
+- Convert spoken numbers into numeric values.
+- Handle whole numbers, decimals, fractions, and mixed quantities.
+- Convert "one", "two", "three" etc. to numbers.
+- Convert "half" to 0.5.
+- Convert "quarter" to 0.25.
+- Convert "third" to approximately 0.33 unless exact precision is needed.
+- Convert "one and a half" to 1.5.
+- Convert "two and a quarter" to 2.25.
+- If quantity is vague, set quantity to null and status "Needs Review".
+- "three bottles" -> quantity 3
+- "2.5 cases" -> quantity 2.5
+- "one half bag" -> quantity 0.5
+- "a couple boxes" -> quantity null, Needs Review
+- "a few tomatoes" -> quantity null, Needs Review
+- "some lettuce" -> quantity null, Needs Review
+
+3. Dozen and pack conversions
+- Convert dozens to individual units when the unit is countable.
+- "1 dozen eggs" = 12 eggs.
+- "10 dozen eggs" = 120 eggs.
+- "half dozen eggs" = 6 eggs.
+- "2 dozen buns" = 24 buns.
+- Mark status as "Converted Unit".
+- manager_note should explain the conversion.
+- Use common count conversions: 1 dozen = 12; 1 half dozen = 6; 1 gross = 144, if mentioned.
+- "case of 24" means 24 individual units if the item is counted individually.
+- "2 cases of 24 waters" means 48 waters.
+- "3 packs of 6 sodas" means 18 sodas.
+- "4 trays of 30 eggs" means 120 eggs.
+- If the item is normally managed by case/pack and the user clearly wants cases, preserve the case/pack unit instead of converting. Prefer conversion only when the phrase explicitly states pack size or countable unit.
+
+4. Partial container handling
+- Handle partial containers carefully.
+- If a phrase says a container is partially full or partially empty, convert when possible.
+- If exact partial amount is unclear, mark Needs Review.
+- "3 bottles of olive oil, one is half empty" -> 2.5 bottles, Partial Quantity.
+- "2 full boxes and one half box of tomatoes" -> 2.5 boxes, Partial Quantity.
+- "one case plus a quarter case" -> 1.25 cases, Partial Quantity.
+- "3 bags, one is almost empty" -> quantity 3, status Needs Review, manager_note says partial amount unclear.
+- "half a container of sauce" -> 0.5 containers, Partial Quantity.
+- "one open bottle and two sealed bottles" -> 3 bottles, Clean unless amount in open bottle is unclear; manager_note can mention one is open.
+
+5. Units
+- Normalize units into simple lowercase plural units when possible.
+- Keep units consistent.
+- Do not change meaning.
+- If unit is missing, set unit to null and status "Missing Unit".
+- Common units: bottles, boxes, cases, bags, heads, pounds, ounces, gallons, quarts, pints, liters, cans, jars, trays, containers, packs, bunches, each, eggs, loaves, tubs, sleeves, rolls, bins.
+- "lbs" -> "pounds"; "oz" -> "ounces"; "gal" -> "gallons"; "ea" -> "each".
+- "ct" -> "count" or "each" depending on phrase.
+- "heads of lettuce" -> unit "heads".
+- "bunches of cilantro" -> unit "bunches".
+
+6. Unit conversions
+- Only convert units when the conversion is explicitly stated or standard and safe.
+- Safe conversions: dozen -> individual count; half dozen -> individual count; pack of N -> N individual units if item is countable; case of N -> N individual units if item is countable; lbs -> pounds; oz -> ounces; gal -> gallons.
+- Do not guess conversions like case to pounds, box to pounds, bag to ounces, or container to servings unless the user provides the conversion.
+- "2 cases of 24 water bottles" -> 48 bottles, Converted Unit.
+- "3 cases of tomatoes" -> 3 cases, Clean.
+- "5 boxes of lettuce" -> 5 boxes, Clean.
+- "2 ten-pound bags of flour" -> 20 pounds if clearly spoken as ten-pound bags, Converted Unit.
+- "4 five-pound tubs of yogurt" -> 20 pounds or 4 tubs depending wording; if unclear, keep 4 tubs and note package size.
+
+7. Restaurant speech patterns
+- Handle natural staff phrasing: "we got", "there are", "left with", "on hand", "in the walk-in", "in dry storage", "behind the bar", "plus", "and then", "also", "scratch that", "actually", "make that".
+- If the speaker corrects themselves, use the corrected value.
+- "We have 4 boxes of tomatoes, actually 5" -> 5 boxes.
+- "2 bags of flour, no 3 bags" -> 3 bags.
+- "scratch the lettuce" -> exclude lettuce if clearly canceled.
+- "not olive oil, canola oil" -> Canola oil.
+
+8. Duplicate handling
+- If the same item appears multiple times, combine quantities only when same item and same unit are clearly repeated.
+- If units differ and conversion is not safe, keep separate rows or mark Possible Duplicate.
+- "2 boxes tomatoes and 3 boxes tomatoes" -> 5 boxes Tomatoes.
+- "2 cases tomatoes and 5 pounds tomatoes" -> keep separate or mark Possible Duplicate because units differ.
+- "olive oil 2 bottles, extra virgin olive oil 1 bottle" -> separate items unless restaurant memory says they are same.
+
+9. Status rules
+Use exactly one of these statuses:
+- Clean
+- Partial Quantity
+- Missing Unit
+- Needs Review
+- Possible Duplicate
+- Converted Unit
+
+Status selection:
+- Clean: item, quantity, and unit are clear.
+- Partial Quantity: partial container/fraction was handled.
+- Missing Unit: item and quantity are clear but unit is missing.
+- Needs Review: quantity/item/unit is vague or ambiguous.
+- Possible Duplicate: same/similar item appears more than once and merge is uncertain.
+- Converted Unit: quantity was converted from dozen, pack size, case size, or similar.
+- If multiple statuses apply, choose the most important:
+Needs Review > Possible Duplicate > Missing Unit > Partial Quantity > Converted Unit > Clean.
+
+10. Manager notes
+- manager_note should be short and useful.
+- For clean rows, it can be empty string or "Ready to export."
+- For partial quantities, explain the normalization.
+- For converted units, explain the conversion.
+- For unclear rows, explain what the manager should check.
+- For duplicates, explain the possible duplicate.
+- Examples:
+"Converted 10 dozen eggs into 120 eggs."
+"Normalized one half-empty bottle as 0.5 bottle."
+"Quantity was vague; manager should confirm exact count."
+"Similar tomato entries appeared with different units."
+
+11. Manager insights
+- summary.manager_insights should contain 1-5 useful plain-English insights.
+- Do not overstate.
+- Do not invent business conclusions.
+- Base insights only on parsed rows and provided context.
+- Useful insight types: number of rows needing review, partial quantities detected, converted units detected, missing units detected, duplicate risk, whether data is ready to export.
+- Examples:
+"Four items were parsed and are ready for review."
+"One partial quantity was normalized; review it if exact inventory levels matter."
+"Two rows need manager review before export."
+"Several quantities were converted from package counts into individual units."
+
+12. Restaurant-specific memory
+- If restaurant-specific context is provided, use it.
+- Context may include preferred item names, common abbreviations, preferred units, previously corrected names, known area labels, common inventory categories.
+- If context says "OO means Olive oil", parse OO as Olive oil.
+- If context says "Tomatoes are usually counted in boxes", then if the user says "5 tomatoes" do not automatically change to boxes. Only use context to flag or suggest review, not override clear user input.
+
+13. Area context
+- If the request includes an area like Walk-in, Dry Storage, Bar, Kitchen, or Freezer, use it only for notes/context if needed.
+- Do not add area into item_name.
+- Do not invent items based on the area.
+
+14. Safety and reliability
+- Return JSON only.
+- No markdown.
+- No explanations outside JSON.
+- Make valid parseable JSON.
+- Do not include trailing commas.
+- If the transcript is empty or unrelated to inventory, return empty items and a manager insight saying no inventory items were detected.
+- If uncertain, mark Needs Review instead of guessing.
+""".strip()
+
+
+SYSTEM_PROMPT = RESTAURANT_INVENTORY_SYSTEM_PROMPT
+
+ALLOWED_STATUSES = {
+    "Clean",
+    "Partial Quantity",
+    "Missing Unit",
+    "Needs Review",
+    "Possible Duplicate",
+    "Converted Unit",
+}
+REVIEW_STATUSES = {"Needs Review", "Possible Duplicate", "Missing Unit"}
 
 
 def _extract_json_object(value: str) -> dict:
@@ -60,6 +246,111 @@ def _extract_json_object(value: str) -> dict:
     return parsed
 
 
+def _safe_string(value: object) -> str:
+    return str(value or "").strip()
+
+
+def _safe_float(value: object) -> float | None:
+    if value is None or value == "":
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _safe_int(value: object, fallback: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _normalize_status(value: object, *, quantity: float | None, unit: str | None) -> str:
+    status = _safe_string(value)
+    if status in ALLOWED_STATUSES:
+        return status
+    if quantity is None:
+        return "Needs Review"
+    if not unit:
+        return "Missing Unit"
+    return "Clean"
+
+
+def _normalize_claude_item(entry: dict) -> dict | None:
+    if not isinstance(entry, dict):
+        return None
+
+    item_name = _safe_string(entry.get("item_name") or entry.get("name")).strip(" ,.")
+    if not item_name:
+        return None
+
+    quantity = _safe_float(entry.get("quantity"))
+    raw_unit = entry.get("unit")
+    unit = normalize_unit(_safe_string(raw_unit)) if raw_unit is not None and _safe_string(raw_unit) else None
+    status = _normalize_status(entry.get("status"), quantity=quantity, unit=unit)
+    if not entry.get("status") and entry.get("partial_detail"):
+        status = "Partial Quantity"
+    if not entry.get("status") and entry.get("needs_review"):
+        status = "Needs Review"
+    original_phrase = _safe_string(entry.get("original_phrase") or entry.get("raw_phrase") or item_name)
+    manager_note = _safe_string(entry.get("manager_note") or entry.get("review_reason") or entry.get("partial_detail"))
+    if not manager_note and status == "Clean":
+        manager_note = "Ready to export."
+
+    return {
+        "item_name": item_name,
+        "quantity": quantity,
+        "unit": unit,
+        "status": status,
+        "original_phrase": original_phrase,
+        "manager_note": manager_note,
+    }
+
+
+def _summary_from_items(items: list[dict], summary: dict | None = None) -> dict:
+    source = summary if isinstance(summary, dict) else {}
+    partial_quantities = sum(1 for item in items if item["status"] == "Partial Quantity")
+    missing_units = sum(1 for item in items if item["status"] == "Missing Unit")
+    converted_units = sum(1 for item in items if item["status"] == "Converted Unit")
+    possible_duplicates = sum(1 for item in items if item["status"] == "Possible Duplicate")
+    rows_needing_review = sum(1 for item in items if item["status"] in REVIEW_STATUSES or item["quantity"] is None)
+
+    insights = source.get("manager_insights")
+    if not isinstance(insights, list):
+        insights = []
+    normalized_insights = [_safe_string(insight) for insight in insights if _safe_string(insight)][:5]
+    if not normalized_insights:
+        if not items:
+            normalized_insights = ["No inventory items were detected."]
+        elif rows_needing_review:
+            verb = "needs" if rows_needing_review == 1 else "need"
+            normalized_insights = [f"{rows_needing_review} row{'s' if rows_needing_review != 1 else ''} {verb} manager review before export."]
+        else:
+            normalized_insights = [f"{len(items)} item{'s' if len(items) != 1 else ''} parsed and ready for review."]
+
+    return {
+        "items_counted": _safe_int(source.get("items_counted"), len(items)),
+        "rows_needing_review": _safe_int(source.get("rows_needing_review"), rows_needing_review),
+        "partial_quantities": _safe_int(source.get("partial_quantities"), partial_quantities),
+        "missing_units": _safe_int(source.get("missing_units"), missing_units),
+        "converted_units": _safe_int(source.get("converted_units"), converted_units),
+        "possible_duplicates": _safe_int(source.get("possible_duplicates"), possible_duplicates),
+        "manager_insights": normalized_insights,
+    }
+
+
+def normalize_claude_inventory_payload(payload: dict) -> dict:
+    raw_items = payload.get("items")
+    if raw_items is None:
+        raw_items = payload.get("entries", [])
+    if not isinstance(raw_items, list):
+        raise ValueError("Claude response items must be a list")
+
+    items = [item for entry in raw_items if (item := _normalize_claude_item(entry))]
+    return {"items": items, "summary": _summary_from_items(items, payload.get("summary"))}
+
+
 def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
     if not isinstance(entry, dict):
         return None
@@ -68,26 +359,27 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
     if not item_name:
         return None
 
-    try:
-        quantity = float(entry.get("quantity"))
-    except (TypeError, ValueError):
-        return None
+    quantity = _safe_float(entry.get("quantity"))
+    if quantity is None:
+        quantity = 0.0
 
+    status = _safe_string(entry.get("status"))
     unit = normalize_unit(str(entry.get("unit") or "individual"))
-    partial_detail = entry.get("partial_detail")
-    review_reason = entry.get("review_reason")
+    manager_note = _safe_string(entry.get("manager_note"))
+    partial_detail = manager_note if status == "Partial Quantity" and manager_note else entry.get("partial_detail")
+    review_reason = manager_note if status in REVIEW_STATUSES and manager_note else entry.get("review_reason")
     return ParsedCandidate(
-        raw_phrase=str(entry.get("raw_phrase") or item_name),
+        raw_phrase=str(entry.get("original_phrase") or entry.get("raw_phrase") or item_name),
         quantity=quantity,
         unit=unit or "individual",
         item_name=item_name,
         partial_detail=str(partial_detail) if partial_detail else None,
-        needs_review=bool(entry.get("needs_review")),
+        needs_review=status in REVIEW_STATUSES or bool(entry.get("needs_review")),
         review_reason=str(review_reason) if review_reason else None,
     )
 
 
-def parse_inventory_with_claude(transcript: str) -> list[ParsedCandidate]:
+def parse_inventory_json_with_claude(transcript: str) -> dict:
     settings = get_settings()
     if not settings.enable_external_ai:
         raise RuntimeError("External AI integrations are disabled")
@@ -132,11 +424,12 @@ def parse_inventory_with_claude(transcript: str) -> list[ParsedCandidate]:
     content = payload.get("content") or []
     text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
     parsed = _extract_json_object("\n".join(text_parts))
-    raw_entries = parsed.get("entries", [])
-    if not isinstance(raw_entries, list):
-        raise ValueError("Claude response entries must be a list")
+    return normalize_claude_inventory_payload(parsed)
 
-    candidates = [_coerce_candidate(entry) for entry in raw_entries]
+
+def parse_inventory_with_claude(transcript: str) -> list[ParsedCandidate]:
+    parsed = parse_inventory_json_with_claude(transcript)
+    candidates = [_coerce_candidate(entry) for entry in parsed["items"]]
     return [candidate for candidate in candidates if candidate is not None]
 
 
@@ -149,15 +442,16 @@ def parse_inventory_with_claude_placeholder(transcript: str) -> dict:
             "Claude parsing is not configured yet. Add ANTHROPIC_API_KEY and set ENABLE_EXTERNAL_AI=true.",
         )
     try:
-        entries = parse_inventory_with_claude(transcript)
+        parsed = parse_inventory_json_with_claude(transcript)
     except RuntimeError as error:
         return {
             "configured": True,
             "provider": provider,
             "message": str(error),
-            "entries": [],
+            "items": [],
+            "summary": _summary_from_items([]),
         }
-    return {"configured": True, "provider": provider, "entries": [entry.__dict__ for entry in entries]}
+    return {"configured": True, "provider": provider, **parsed}
 
 
 def parse_inventory_with_llm_placeholder(text: str) -> dict:
