@@ -1290,7 +1290,6 @@ function renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabe
           <button class="mobile-mic-button mic-button ${state.isRecording ? "mic-button--recording" : ""}" id="mobile-mic-button" type="button" aria-label="${state.isRecording ? "Pause recording" : state.recordingMode === "paused" ? "Resume recording" : "Start recording"}" style="--voice-level: ${state.voiceLevel.toFixed(3)}">
             <span>${ProductIcon("mic")}</span>
           </button>
-          ${renderVoiceMeter()}
           <div class="mobile-recording-controls" aria-label="Recording controls">
             <button class="recording-button recording-button--primary" id="mobile-recording-start-action" type="button" ${state.isRecording ? "disabled" : ""}>${primaryRecordingLabel === "Record" ? "Record" : primaryRecordingLabel}</button>
             <button class="recording-button recording-button--secondary" id="mobile-recording-pause-action" type="button" ${state.recordingMode === "idle" && !state.isRecording ? "disabled" : ""}>${secondaryRecordingLabel === "Clear" ? "Reset" : secondaryRecordingLabel}</button>

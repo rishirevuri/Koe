@@ -5024,7 +5024,7 @@ button:disabled,
   }
 
   .mobile-recorder-card > p {
-    margin: 0 0 10px;
+    margin: 0 0 14px;
     color: #0f5132;
     font-size: 17px;
   }
@@ -5032,7 +5032,7 @@ button:disabled,
   .mobile-mic-button {
     width: 112px;
     height: 112px;
-    margin: 10px 0 8px;
+    margin: 20px 0 18px;
     background: #06132d;
     box-shadow:
       0 0 0 11px rgba(170, 132, 80, 0.08),
