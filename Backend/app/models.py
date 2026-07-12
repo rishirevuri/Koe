@@ -69,21 +69,37 @@ class CountEntry(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     count_session_id: Mapped[int] = mapped_column(ForeignKey("count_sessions.id"), index=True)
     inventory_item_id: Mapped[int | None] = mapped_column(ForeignKey("inventory_items.id"), nullable=True, index=True)
+    item_name_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
     item_name: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_item_name: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(80), nullable=False)
+    status: Mapped[str] = mapped_column(String(80), default="Clean", nullable=False)
     area: Mapped[str | None] = mapped_column(String(120), nullable=True)
     source: Mapped[str] = mapped_column(String(40), default="manual")
     raw_input: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original_phrase: Mapped[str | None] = mapped_column(Text, nullable=True)
     partial_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     needs_review: Mapped[bool] = mapped_column(Boolean, default=False)
     review_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    counted_by: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     count_session: Mapped[CountSession] = relationship(back_populates="entries")
     inventory_item: Mapped[InventoryItem | None] = relationship(back_populates="count_entries")
     issues: Mapped[list["Issue"]] = relationship(back_populates="count_entry")
+
+    @property
+    def count_id(self) -> int:
+        return self.count_session_id
+
+    @property
+    def restaurant_id(self) -> int | None:
+        return self.count_session.restaurant_id if self.count_session else None
+
+    @property
+    def item_name_clean(self) -> str:
+        return self.inventory_item.name if self.inventory_item else self.item_name
 
 
 class Issue(Base):

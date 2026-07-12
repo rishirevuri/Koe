@@ -152,18 +152,22 @@ def test_voice_parse_save_report_and_csv() -> None:
     )
     assert parse_response.status_code == 200
     entries = parse_response.json()["entries"]
-    assert [(entry["item_name"], entry["quantity"], entry["unit"]) for entry in entries] == [
+    assert [(entry["item_name_clean"], entry["quantity"], entry["unit"]) for entry in entries] == [
         ("Olive oil", 2.5, "bottles"),
         ("Lettuce", 3.0, "heads"),
         ("Tomatoes", 5.0, "boxes"),
         ("Cheese", 2.0, "boxes"),
     ]
+    assert all("needs_review" not in entry for entry in entries)
+    assert all("manager_note" not in entry for entry in entries)
+    assert entries[0]["status"] == "Partial Quantity"
+    assert entries[0]["counted_by"] == TEST_USER.email
 
     report_response = client.get(f"/reports/{count_id}")
     assert report_response.status_code == 200
     report = report_response.json()
     assert report["summary"] == {"total_items": 4, "items_needing_review": 0}
-    assert [(entry["name"], entry["quantity"], entry["unit"]) for entry in report["entries"]] == [
+    assert [(entry["item_name_clean"], entry["quantity"], entry["unit"]) for entry in report["entries"]] == [
         ("Olive oil", 2.5, "bottles"),
         ("Lettuce", 3.0, "heads"),
         ("Tomatoes", 5.0, "boxes"),
@@ -173,10 +177,13 @@ def test_voice_parse_save_report_and_csv() -> None:
     csv_response = client.get(f"/reports/{count_id}/csv")
     assert csv_response.status_code == 200
     csv_text = csv_response.text
-    assert "Olive oil,2.5,bottles" in csv_text
-    assert "Lettuce,3.0,heads" in csv_text
-    assert "Tomatoes,5.0,boxes" in csv_text
-    assert "Cheese,2.0,boxes" in csv_text
+    assert "Count ID,Restaurant ID,Area,Raw Item Name,Clean Item Name,Quantity,Unit,Status,Original Phrase,Created At,Counted By" in csv_text
+    assert "olive oil,Olive oil,2.5,bottles,Partial Quantity" in csv_text
+    assert "lettuce,Lettuce,3.0,heads,Clean" in csv_text
+    assert "tomatoes,Tomatoes,5.0,boxes,Clean" in csv_text
+    assert "cheese,Cheese,2.0,boxes,Clean" in csv_text
+    assert "Needs Review" not in csv_text
+    assert "Manager Note" not in csv_text
 
 
 def test_unknown_item_creates_issue() -> None:
@@ -203,8 +210,9 @@ def test_vague_partial_phrase_creates_review_flag() -> None:
     )
     assert response.status_code == 200
     entry = response.json()["entries"][0]
-    assert entry["needs_review"] is True
-    assert entry["review_reason"] == "Vague partial quantity: almost empty"
+    assert entry["status"] == "Needs Review"
+    assert "needs_review" not in entry
+    assert "review_reason" not in entry
 
 
 def test_ownership_checks_prevent_other_restaurant_count_and_report() -> None:

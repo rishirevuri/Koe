@@ -31,6 +31,7 @@ def create_db_and_tables() -> None:
 
     Base.metadata.create_all(bind=engine)
     _ensure_count_session_columns()
+    _ensure_count_entry_columns()
 
 
 def _ensure_count_session_columns() -> None:
@@ -46,3 +47,25 @@ def _ensure_count_session_columns() -> None:
             connection.execute(
                 text("ALTER TABLE count_sessions ADD COLUMN exported BOOLEAN NOT NULL DEFAULT 0")
             )
+
+
+def _ensure_count_entry_columns() -> None:
+    """Add tester count-entry fields to existing databases.
+
+    The app still keeps older columns for compatibility, but API responses and
+    exports use these lean inventory-cleaning fields.
+    """
+    inspector = inspect(engine)
+    if "count_entries" not in inspector.get_table_names():
+        return
+    existing = {column["name"] for column in inspector.get_columns("count_entries")}
+    column_sql = {
+        "item_name_raw": "ALTER TABLE count_entries ADD COLUMN item_name_raw VARCHAR(255)",
+        "status": "ALTER TABLE count_entries ADD COLUMN status VARCHAR(80) NOT NULL DEFAULT 'Clean'",
+        "original_phrase": "ALTER TABLE count_entries ADD COLUMN original_phrase TEXT",
+        "counted_by": "ALTER TABLE count_entries ADD COLUMN counted_by VARCHAR(255)",
+    }
+    with engine.begin() as connection:
+        for column, statement in column_sql.items():
+            if column not in existing:
+                connection.execute(text(statement))

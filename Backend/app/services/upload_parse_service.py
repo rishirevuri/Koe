@@ -29,6 +29,7 @@ def parse_upload_text(text: str) -> list[ParsedCandidate]:
                     partial_detail=partial.partial_detail,
                     needs_review=partial.needs_review,
                     review_reason=partial.review_reason,
+                    status="Needs Review" if partial.needs_review else "Partial Quantity" if partial.partial_detail else "Clean",
                 )
             )
             continue

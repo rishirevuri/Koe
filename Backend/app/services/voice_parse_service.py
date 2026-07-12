@@ -14,6 +14,7 @@ class ParsedCandidate:
     partial_detail: str | None
     needs_review: bool
     review_reason: str | None
+    status: str | None = None
 
 
 NUMBER_WORDS = {
@@ -132,6 +133,7 @@ def parse_voice_text(text: str) -> list[ParsedCandidate]:
                 partial_detail=partial.partial_detail,
                 needs_review=partial.needs_review,
                 review_reason=partial.review_reason,
+                status="Needs Review" if partial.needs_review else "Partial Quantity" if partial.partial_detail else "Clean",
             )
         )
     return candidates

@@ -36,12 +36,12 @@ Required JSON shape:
 {
   "items": [
     {
-      "item_name": "string",
+      "item_name_raw": "string",
+      "item_name_clean": "string",
       "quantity": number | null,
       "unit": "string" | null,
       "status": "Clean" | "Partial Quantity" | "Missing Unit" | "Needs Review" | "Possible Duplicate" | "Converted Unit",
-      "original_phrase": "string",
-      "manager_note": "string"
+      "original_phrase": "string"
     }
   ],
   "summary": {
@@ -93,7 +93,7 @@ Parsing rules:
 - "half dozen eggs" = 6 eggs.
 - "2 dozen buns" = 24 buns.
 - Mark status as "Converted Unit".
-- manager_note should explain the conversion.
+- original_phrase should preserve the phrase that caused the conversion.
 - Use common count conversions: 1 dozen = 12; 1 half dozen = 6; 1 gross = 144, if mentioned.
 - "case of 24" means 24 individual units if the item is counted individually.
 - "2 cases of 24 waters" means 48 waters.
@@ -108,9 +108,9 @@ Parsing rules:
 - "3 bottles of olive oil, one is half empty" -> 2.5 bottles, Partial Quantity.
 - "2 full boxes and one half box of tomatoes" -> 2.5 boxes, Partial Quantity.
 - "one case plus a quarter case" -> 1.25 cases, Partial Quantity.
-- "3 bags, one is almost empty" -> quantity 3, status Needs Review, manager_note says partial amount unclear.
+- "3 bags, one is almost empty" -> quantity 3, status Needs Review, original_phrase includes the unclear partial phrase.
 - "half a container of sauce" -> 0.5 containers, Partial Quantity.
-- "one open bottle and two sealed bottles" -> 3 bottles, Clean unless amount in open bottle is unclear; manager_note can mention one is open.
+- "one open bottle and two sealed bottles" -> 3 bottles, Clean unless amount in open bottle is unclear.
 
 5. Units
 - Normalize units into simple lowercase plural units when possible.
@@ -167,18 +167,12 @@ Status selection:
 - If multiple statuses apply, choose the most important:
 Needs Review > Possible Duplicate > Missing Unit > Partial Quantity > Converted Unit > Clean.
 
-10. Manager notes
-- manager_note should be short and useful.
-- For clean rows, it can be empty string or "Ready to export."
-- For partial quantities, explain the normalization.
-- For converted units, explain the conversion.
-- For unclear rows, explain what the manager should check.
-- For duplicates, explain the possible duplicate.
-- Examples:
-"Converted 10 dozen eggs into 120 eggs."
-"Normalized one half-empty bottle as 0.5 bottle."
-"Quantity was vague; manager should confirm exact count."
-"Similar tomato entries appeared with different units."
+10. Row fields
+- item_name_raw is the raw item name or best available item phrase before cleaning.
+- item_name_clean is the normalized clean item name in title case.
+- original_phrase is the exact phrase or best available source phrase from the transcript.
+- Do not include manager_note on row objects.
+- Do not include needs_review on row objects.
 
 11. Manager insights
 - summary.manager_insights should contain 1-5 useful plain-English insights.
@@ -281,8 +275,17 @@ def _normalize_claude_item(entry: dict) -> dict | None:
     if not isinstance(entry, dict):
         return None
 
-    item_name = _safe_string(entry.get("item_name") or entry.get("name")).strip(" ,.")
-    if not item_name:
+    item_name_raw = _safe_string(
+        entry.get("item_name_raw") or entry.get("raw_item_name") or entry.get("item_name") or entry.get("name")
+    ).strip(" ,.")
+    item_name_clean = _safe_string(
+        entry.get("item_name_clean") or entry.get("clean_item_name") or entry.get("item_name") or entry.get("name")
+    ).strip(" ,.")
+    if not item_name_raw and item_name_clean:
+        item_name_raw = item_name_clean
+    if not item_name_clean and item_name_raw:
+        item_name_clean = item_name_raw
+    if not item_name_clean:
         return None
 
     quantity = _safe_float(entry.get("quantity"))
@@ -293,18 +296,15 @@ def _normalize_claude_item(entry: dict) -> dict | None:
         status = "Partial Quantity"
     if not entry.get("status") and entry.get("needs_review"):
         status = "Needs Review"
-    original_phrase = _safe_string(entry.get("original_phrase") or entry.get("raw_phrase") or item_name)
-    manager_note = _safe_string(entry.get("manager_note") or entry.get("review_reason") or entry.get("partial_detail"))
-    if not manager_note and status == "Clean":
-        manager_note = "Ready to export."
+    original_phrase = _safe_string(entry.get("original_phrase") or entry.get("raw_phrase") or item_name_raw or item_name_clean)
 
     return {
-        "item_name": item_name,
+        "item_name_raw": item_name_raw,
+        "item_name_clean": item_name_clean,
         "quantity": quantity,
         "unit": unit,
         "status": status,
         "original_phrase": original_phrase,
-        "manager_note": manager_note,
     }
 
 
@@ -355,7 +355,7 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
     if not isinstance(entry, dict):
         return None
 
-    item_name = str(entry.get("item_name") or "").strip(" ,.")
+    item_name = str(entry.get("item_name_clean") or entry.get("item_name") or "").strip(" ,.")
     if not item_name:
         return None
 
@@ -365,17 +365,17 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
 
     status = _safe_string(entry.get("status"))
     unit = normalize_unit(str(entry.get("unit") or "individual"))
-    manager_note = _safe_string(entry.get("manager_note"))
-    partial_detail = manager_note if status == "Partial Quantity" and manager_note else entry.get("partial_detail")
-    review_reason = manager_note if status in REVIEW_STATUSES and manager_note else entry.get("review_reason")
+    partial_detail = entry.get("partial_detail") or (entry.get("original_phrase") if status == "Partial Quantity" else None)
+    review_reason = entry.get("review_reason") or (entry.get("original_phrase") if status in REVIEW_STATUSES else None)
     return ParsedCandidate(
-        raw_phrase=str(entry.get("original_phrase") or entry.get("raw_phrase") or item_name),
+        raw_phrase=str(entry.get("original_phrase") or entry.get("raw_phrase") or entry.get("item_name_raw") or item_name),
         quantity=quantity,
         unit=unit or "individual",
         item_name=item_name,
         partial_detail=str(partial_detail) if partial_detail else None,
         needs_review=status in REVIEW_STATUSES or bool(entry.get("needs_review")),
         review_reason=str(review_reason) if review_reason else None,
+        status=status or None,
     )
 
 

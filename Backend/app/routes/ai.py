@@ -4,10 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import CountEntry, CountSession, InventoryItem
+from app.models import CountEntry, CountSession
 from app.schemas import MatchResponse, NormalizeItemRequest, ParseResponse, ParseUploadRequest, ParseVoiceRequest, ParsedEntry
 from app.config import get_settings
-from app.auth import ensure_restaurant_id_matches, get_current_restaurant
+from app.auth import SupabaseUser, ensure_restaurant_id_matches, get_current_restaurant, get_current_supabase_user
 from app.services.issue_service import create_issue
 from app.services.matching_service import MatchResult, match_inventory_item
 from app.services.external_ai_service import parse_inventory_with_claude
@@ -17,6 +17,18 @@ from app.services.voice_parse_service import ParsedCandidate, parse_voice_text
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 logger = logging.getLogger(__name__)
+
+
+def _status_for_candidate(candidate: ParsedCandidate, match: MatchResult) -> str:
+    if candidate.needs_review or match.needs_review:
+        return "Needs Review"
+    if candidate.status in {"Clean", "Partial Quantity", "Missing Unit", "Possible Duplicate", "Converted Unit"}:
+        return candidate.status
+    if not candidate.unit:
+        return "Missing Unit"
+    if candidate.partial_detail:
+        return "Partial Quantity"
+    return "Clean"
 
 
 def _issue_type(match: MatchResult, candidate: ParsedCandidate) -> str | None:
@@ -39,6 +51,7 @@ def _handle_candidates(
     source: str,
     save: bool,
     candidates: list[ParsedCandidate],
+    counted_by: str | None,
 ) -> ParseResponse:
     count = db.get(CountSession, count_session_id)
     if not count or count.restaurant_id != restaurant_id:
@@ -49,28 +62,32 @@ def _handle_candidates(
         match = match_inventory_item(db, restaurant_id, candidate.item_name)
         needs_review = candidate.needs_review or match.needs_review
         review_reason = candidate.review_reason or match.review_reason
-        entry_id: int | None = None
         entry = None
+        created_at = None
         clean_name = match.matched_name or candidate.item_name
-        matched_item = db.get(InventoryItem, match.matched_item_id) if match.matched_item_id else None
+        status = _status_for_candidate(candidate, match)
         if save:
             entry = CountEntry(
                 count_session_id=count_session_id,
                 inventory_item_id=match.matched_item_id,
+                item_name_raw=candidate.item_name,
                 item_name=clean_name,
                 normalized_item_name=match.normalized_name,
                 quantity=candidate.quantity,
                 unit=candidate.unit,
+                status=status,
                 area=area or count.area,
                 source=source,
                 raw_input=text,
+                original_phrase=candidate.raw_phrase,
                 partial_detail=candidate.partial_detail,
                 needs_review=needs_review,
                 review_reason=review_reason,
+                counted_by=counted_by,
             )
             db.add(entry)
             db.flush()
-            entry_id = entry.id
+            created_at = entry.created_at
 
         issue_type = _issue_type(match, candidate)
         if issue_type:
@@ -79,7 +96,7 @@ def _handle_candidates(
                 restaurant_id=restaurant_id,
                 count_session_id=count_session_id,
                 inventory_item_id=match.matched_item_id,
-                count_entry_id=entry_id,
+                count_entry_id=entry.id if entry else None,
                 issue_type=issue_type,
                 title=review_reason or "Inventory count needs review",
                 description=f"Parsed phrase '{candidate.raw_phrase}' needs review.",
@@ -88,22 +105,17 @@ def _handle_candidates(
 
         parsed.append(
             ParsedEntry(
-                raw_phrase=candidate.raw_phrase,
-                item_name=clean_name,
-                normalized_item_name=match.normalized_name,
-                category=matched_item.category if matched_item else None,
+                count_id=count_session_id,
+                restaurant_id=restaurant_id,
                 quantity=candidate.quantity,
                 unit=candidate.unit,
                 area=area or count.area,
-                source=source,
-                raw_input=text,
-                partial_detail=candidate.partial_detail,
-                inventory_item_id=match.matched_item_id,
-                matched_name=match.matched_name,
-                match_type=match.match_type,
-                needs_review=needs_review,
-                review_reason=review_reason,
-                count_entry_id=entry_id,
+                item_name_raw=candidate.item_name,
+                item_name_clean=clean_name,
+                status=status,
+                original_phrase=candidate.raw_phrase,
+                created_at=created_at,
+                counted_by=counted_by,
             )
         )
 
@@ -117,6 +129,7 @@ def parse_voice(
     payload: ParseVoiceRequest,
     db: Session = Depends(get_db),
     current_restaurant=Depends(get_current_restaurant),
+    current_user: SupabaseUser = Depends(get_current_supabase_user),
 ) -> ParseResponse:
     ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
     settings = get_settings()
@@ -139,6 +152,7 @@ def parse_voice(
         source="voice",
         save=payload.save,
         candidates=candidates,
+        counted_by=current_user.email or current_user.user_id,
     )
 
 
@@ -147,6 +161,7 @@ def parse_upload(
     payload: ParseUploadRequest,
     db: Session = Depends(get_db),
     current_restaurant=Depends(get_current_restaurant),
+    current_user: SupabaseUser = Depends(get_current_supabase_user),
 ) -> ParseResponse:
     ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
     return _handle_candidates(
@@ -158,6 +173,7 @@ def parse_upload(
         source="upload",
         save=payload.save,
         candidates=parse_upload_text(payload.text),
+        counted_by=current_user.email or current_user.user_id,
     )
 
 

@@ -3,33 +3,41 @@ import io
 
 from sqlalchemy.orm import Session
 
-from app.models import CountSession
+from app.models import CountEntry, CountSession
+
+
+REVIEW_STATUSES = {"Needs Review", "Missing Unit", "Possible Duplicate"}
+
+
+def _entry_status(entry: CountEntry) -> str:
+    return entry.status or "Clean"
+
+
+def _entry_row(entry: CountEntry) -> dict:
+    return {
+        "count_id": entry.count_session_id,
+        "restaurant_id": entry.count_session.restaurant_id,
+        "area": entry.area,
+        "item_name_raw": entry.item_name_raw or entry.item_name,
+        "item_name_clean": entry.inventory_item.name if entry.inventory_item else entry.item_name,
+        "quantity": entry.quantity,
+        "unit": entry.unit,
+        "status": _entry_status(entry),
+        "original_phrase": entry.original_phrase or entry.raw_input or entry.item_name_raw or entry.item_name,
+        "created_at": entry.created_at,
+        "counted_by": entry.counted_by,
+    }
 
 
 def build_report(count: CountSession) -> dict:
-    entries = []
-    for entry in count.entries:
-        name = entry.inventory_item.name if entry.inventory_item else entry.item_name
-        entries.append(
-            {
-                "name": name,
-                "category": entry.inventory_item.category if entry.inventory_item else None,
-                "quantity": entry.quantity,
-                "unit": entry.unit,
-                "area": entry.area,
-                "source": entry.source,
-                "review_status": "needs_review" if entry.needs_review else "confirmed",
-                "raw_input": entry.raw_input,
-                "partial_detail": entry.partial_detail,
-            }
-        )
+    entries = [_entry_row(entry) for entry in count.entries]
     return {
         "count_id": count.id,
         "status": count.status,
         "entries": entries,
         "summary": {
             "total_items": len(entries),
-            "items_needing_review": sum(1 for entry in count.entries if entry.needs_review),
+            "items_needing_review": sum(1 for entry in entries if entry["status"] in REVIEW_STATUSES),
         },
     }
 
@@ -37,18 +45,35 @@ def build_report(count: CountSession) -> dict:
 def build_csv(count: CountSession) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["Name", "Quantity", "Unit", "Area", "Source", "Review Status", "Raw Input", "Partial Detail"])
+    writer.writerow(
+        [
+            "Count ID",
+            "Restaurant ID",
+            "Area",
+            "Raw Item Name",
+            "Clean Item Name",
+            "Quantity",
+            "Unit",
+            "Status",
+            "Original Phrase",
+            "Created At",
+            "Counted By",
+        ]
+    )
     for entry in build_report(count)["entries"]:
         writer.writerow(
             [
-                entry["name"],
+                entry["count_id"],
+                entry["restaurant_id"],
+                entry["area"] or "",
+                entry["item_name_raw"] or "",
+                entry["item_name_clean"],
                 entry["quantity"],
                 entry["unit"],
-                entry["area"] or "",
-                entry["source"],
-                entry["review_status"],
-                entry["raw_input"] or "",
-                entry["partial_detail"] or "",
+                entry["status"],
+                entry["original_phrase"] or "",
+                entry["created_at"].isoformat() if entry["created_at"] else "",
+                entry["counted_by"] or "",
             ]
         )
     return output.getvalue()

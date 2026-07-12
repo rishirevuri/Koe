@@ -16,6 +16,7 @@ import { bindSidebar, renderSidebar } from "./sidebar.js";
 const AREA_OPTIONS = ["Dry Storage", "Walk-in", "Freezer", "Bar", "Wine Storage", "Prep Station"];
 const MOBILE_AREA_OPTIONS = ["Walk-in", "Dry Storage", "Bar", "Kitchen", "Other"];
 const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
+const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 
 const state = {
   backendConnected: false,
@@ -299,13 +300,30 @@ function renderVoiceMeter() {
   `;
 }
 
+function getEntryCleanName(entry) {
+  return entry.item_name_clean || entry.item_name || entry.name || "";
+}
+
+function getEntryRawName(entry) {
+  return entry.item_name_raw || entry.raw_phrase || getEntryCleanName(entry);
+}
+
+function getEntryOriginalPhrase(entry) {
+  return entry.original_phrase || entry.raw_phrase || "";
+}
+
+function entryNeedsReview(entry) {
+  const status = getEntryStatus(entry).label;
+  return REVIEW_STATUSES.has(status);
+}
+
 function buildDataHealth(entries) {
   if (!entries.length) return [];
 
   const items = [];
-  const normalizedCount = entries.filter((entry) => entry.normalized_item_name).length;
-  const partialCount = entries.filter((entry) => entry.partial_detail).length;
-  const reviewCount = entries.filter((entry) => entry.needs_review).length;
+  const normalizedCount = entries.filter((entry) => getEntryCleanName(entry)).length;
+  const partialCount = entries.filter((entry) => getEntryStatus(entry).label === "Partial Quantity").length;
+  const reviewCount = entries.filter(entryNeedsReview).length;
 
   if (normalizedCount) items.push("Inventory names normalized");
   if (partialCount) items.push("Partial quantities resolved");
@@ -327,7 +345,7 @@ function inferCategory(entry) {
   const category = normalizeDisplayCategory(entry.category);
   if (category) return category;
 
-  const name = String(entry.item_name || entry.name || "").toLowerCase();
+  const name = String(getEntryCleanName(entry)).toLowerCase();
   const unit = String(entry.unit || "").toLowerCase();
   if (/\b(oil|vinegar|water|wine|beer|juice|syrup|sauce|stock|broth|milk)\b/.test(name) || ["bottles", "gallons", "ounces"].includes(unit)) {
     return "Liquids";
@@ -1008,14 +1026,15 @@ function renderInventoryTable() {
       const itemRows = group.entries
         .map((entry) => {
           const status = getEntryStatus(entry);
-          const detail = entry.partial_detail || entry.review_reason || entry.raw_phrase || "";
+          const detail = getEntryOriginalPhrase(entry);
+          const cleanName = getEntryCleanName(entry);
           return `
         <tr>
           <td class="drag-cell">⋮</td>
-          <td>${escapeHtml(entry.item_name)}</td>
+          <td>${escapeHtml(cleanName)}</td>
           <td>${escapeHtml(entry.quantity)}</td>
           <td>${escapeHtml(entry.unit)}</td>
-          <td>${escapeHtml(entry.source || "Voice")}</td>
+          <td>${escapeHtml(entry.area || state.selectedArea || "Count")}</td>
           <td><span class="status-pill ${status.className}">${escapeHtml(status.label)}</span></td>
         </tr>
         ${
@@ -1042,7 +1061,7 @@ function renderInventoryTable() {
           <th>Name</th>
           <th>Quantity</th>
           <th>Unit</th>
-          <th>Source</th>
+          <th>Area</th>
           <th>Status</th>
         </tr>
       </thead>
@@ -1053,9 +1072,13 @@ function renderInventoryTable() {
 }
 
 function getEntryStatus(entry) {
-  if (entry.needs_review) return { label: "Needs Review", className: "status-pill--review" };
+  const status = entry.status || "";
+  if (status === "Needs Review" || status === "Missing Unit" || status === "Possible Duplicate") {
+    return { label: status, className: "status-pill--review" };
+  }
+  if (status === "Partial Quantity") return { label: "Partial Quantity", className: "status-pill--partial" };
+  if (status === "Converted Unit") return { label: "Converted Unit", className: "status-pill--partial" };
   if (!entry.unit) return { label: "Missing Unit", className: "status-pill--review" };
-  if (entry.partial_detail) return { label: "Partial", className: "status-pill--partial" };
   return { label: "Clean", className: "" };
 }
 
@@ -1098,16 +1121,17 @@ function renderMobileInventoryCards() {
   const mobileCards = state.parsedEntries
     .map((entry) => {
       const status = getEntryStatus(entry);
-      const detail = entry.partial_detail || entry.review_reason || entry.raw_phrase || "";
+      const cleanName = getEntryCleanName(entry);
+      const detail = getEntryOriginalPhrase(entry);
       return `
         <article class="mobile-inventory-card">
           <div>
-            <h3>${escapeHtml(entry.item_name)}</h3>
+            <h3>${escapeHtml(cleanName)}</h3>
             <p>${escapeHtml(entry.quantity)} ${escapeHtml(entry.unit || "unit")}</p>
           </div>
           <span class="status-pill ${status.className}">${escapeHtml(status.label)}</span>
           ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
-          <button class="mobile-card-edit" type="button" aria-label="Edit ${escapeHtml(entry.item_name)}">Edit</button>
+          <button class="mobile-card-edit" type="button" aria-label="Edit ${escapeHtml(cleanName)}">Edit</button>
         </article>
       `;
     })
@@ -1164,11 +1188,11 @@ function renderReportPreview() {
             .map(
               (entry) => `
                 <tr>
-                  <td>${escapeHtml(entry.name)}</td>
+                  <td>${escapeHtml(getEntryCleanName(entry))}</td>
                   <td>${escapeHtml(entry.quantity)}</td>
                   <td>${escapeHtml(entry.unit)}</td>
                   <td>${escapeHtml(entry.area || "—")}</td>
-                  <td>${escapeHtml(entry.review_status)}</td>
+                  <td>${escapeHtml(getEntryStatus(entry).label)}</td>
                 </tr>
               `,
             )
@@ -1331,16 +1355,16 @@ function getMobileReportEntries() {
   const entries = state.report?.entries || [];
   if (entries.length) {
     return entries.map((entry) => ({
-      name: entry.name,
+      name: getEntryCleanName(entry),
       quantity: `${entry.quantity} ${entry.unit || ""}`.trim(),
-      status: entry.review_status || "Confirmed",
+      status: getEntryStatus(entry).label === "Clean" ? "Confirmed" : getEntryStatus(entry).label,
     }));
   }
   if (state.parsedEntries.length) {
     return state.parsedEntries.map((entry) => {
       const status = getEntryStatus(entry);
       return {
-        name: entry.item_name,
+        name: getEntryCleanName(entry),
         quantity: `${entry.quantity} ${entry.unit || ""}`.trim(),
         status: status.label === "Clean" ? "Confirmed" : status.label,
       };
@@ -1594,7 +1618,7 @@ function render() {
   }
 
   const totalItems = state.parsedEntries.length;
-  const needsReview = state.parsedEntries.filter((entry) => entry.needs_review).length;
+  const needsReview = state.parsedEntries.filter(entryNeedsReview).length;
   const source = state.activeCountId ? "Voice Count" : "Not started";
   const started = state.countStartedAt ? formatDateTime(state.countStartedAt) : "—";
   const selectedArea = state.selectedArea.trim();

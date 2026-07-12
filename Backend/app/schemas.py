@@ -86,20 +86,17 @@ class CountEntryCreate(BaseModel):
 class CountEntryRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    count_session_id: int
-    inventory_item_id: int | None
-    item_name: str
-    normalized_item_name: str
+    count_id: int
+    restaurant_id: int
+    area: str | None
+    item_name_raw: str | None
+    item_name_clean: str
     quantity: float
     unit: str
-    area: str | None
-    source: str
-    raw_input: str | None
-    partial_detail: str | None
-    needs_review: bool
-    review_reason: str | None
+    status: str
+    original_phrase: str | None
     created_at: datetime
+    counted_by: str | None
 
 
 class ParseVoiceRequest(BaseModel):
@@ -115,22 +112,17 @@ class ParseUploadRequest(ParseVoiceRequest):
 
 
 class ParsedEntry(BaseModel):
-    raw_phrase: str
-    item_name: str
-    normalized_item_name: str
-    category: str | None = None
+    count_id: int
+    restaurant_id: int
     quantity: float
     unit: str
     area: str | None = None
-    source: str
-    raw_input: str
-    partial_detail: str | None = None
-    inventory_item_id: int | None = None
-    matched_name: str | None = None
-    match_type: str
-    needs_review: bool
-    review_reason: str | None = None
-    count_entry_id: int | None = None
+    item_name_raw: str
+    item_name_clean: str
+    status: str
+    original_phrase: str
+    created_at: datetime | None = None
+    counted_by: str | None = None
 
 
 class ParseResponse(BaseModel):
@@ -191,15 +183,17 @@ class IssueResolveRequest(BaseModel):
 
 
 class ReportEntry(BaseModel):
-    name: str
-    category: str | None = None
+    count_id: int
+    restaurant_id: int
+    area: str | None
+    item_name_raw: str | None
+    item_name_clean: str
     quantity: float
     unit: str
-    area: str | None
-    source: str
-    review_status: str
-    raw_input: str | None = None
-    partial_detail: str | None = None
+    status: str
+    original_phrase: str | None = None
+    created_at: datetime
+    counted_by: str | None = None
 
 
 class ReportResponse(BaseModel):

@@ -4,7 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth import ensure_count_belongs_to_restaurant, ensure_restaurant_id_matches, get_current_restaurant
+from app.auth import (
+    SupabaseUser,
+    ensure_count_belongs_to_restaurant,
+    ensure_restaurant_id_matches,
+    get_current_restaurant,
+    get_current_supabase_user,
+)
 from app.database import get_db
 from app.models import CountEntry, CountSession, Restaurant
 from app.schemas import CountEntryCreate, CountEntryRead, CountSessionCreate, CountSessionRead, CountSessionSummary
@@ -19,7 +25,7 @@ router = APIRouter(prefix="/counts", tags=["counts"])
 def _summary(count: CountSession) -> dict[str, int]:
     return {
         "total_entries": len(count.entries),
-        "entries_needing_review": sum(1 for entry in count.entries if entry.needs_review),
+        "entries_needing_review": sum(1 for entry in count.entries if entry.status in {"Needs Review", "Missing Unit", "Possible Duplicate"}),
     }
 
 
@@ -66,24 +72,30 @@ def add_count_entry(
     payload: CountEntryCreate,
     db: Session = Depends(get_db),
     current_restaurant: Restaurant = Depends(get_current_restaurant),
+    current_user: SupabaseUser = Depends(get_current_supabase_user),
 ) -> CountEntry:
     count = db.get(CountSession, count_id)
     if not count:
         raise HTTPException(status_code=404, detail="Count session not found")
     ensure_count_belongs_to_restaurant(count.restaurant_id, current_restaurant)
     match = match_inventory_item(db, count.restaurant_id, payload.item_name)
+    status = "Needs Review" if match.needs_review else "Clean"
     entry = CountEntry(
         count_session_id=count.id,
         inventory_item_id=match.matched_item_id,
+        item_name_raw=payload.item_name,
         item_name=match.matched_name or payload.item_name,
         normalized_item_name=match.normalized_name,
         quantity=payload.quantity,
         unit=normalize_unit(payload.unit),
+        status=status,
         area=payload.area or count.area,
         source=payload.source,
         raw_input=payload.raw_input,
+        original_phrase=payload.raw_input or payload.item_name,
         needs_review=match.needs_review,
         review_reason=match.review_reason,
+        counted_by=current_user.email or current_user.user_id,
     )
     db.add(entry)
     db.flush()

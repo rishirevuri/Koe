@@ -12,10 +12,15 @@ router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 # Issue types that represent possible duplicate items (kept as a set so new
 # duplicate-style issue types can be recognised without code changes elsewhere).
 DUPLICATE_ISSUE_TYPES = ("possible_duplicate", "duplicate")
+REVIEW_STATUSES = {"Needs Review", "Missing Unit", "Possible Duplicate"}
 
 
 def _format_quantity(quantity: float) -> str:
     return str(int(quantity)) if float(quantity).is_integer() else str(quantity)
+
+
+def _entry_needs_review(entry: CountEntry) -> bool:
+    return entry.status in REVIEW_STATUSES
 
 
 def _latest_entry_per_item(entries: list[CountEntry], session_id: int | None = None) -> dict[int, CountEntry]:
@@ -95,7 +100,7 @@ def dashboard_summary(
             "completed_at": last.completed_at,
             "duration_seconds": duration_seconds,
             "total_items_counted": len(last_entries),
-            "needs_review_count": sum(1 for entry in last_entries if entry.needs_review),
+            "needs_review_count": sum(1 for entry in last_entries if _entry_needs_review(entry)),
         }
 
     # --- 3. Count-over-count changes (two most recent sessions) ---
