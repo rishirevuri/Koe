@@ -1566,6 +1566,88 @@ function renderWorkspaceSetup() {
   `;
 }
 
+function renderDesktopAreaSelector() {
+  const showCustomArea =
+    state.mobileAreaOtherActive || Boolean(state.selectedArea && !MOBILE_AREA_OPTIONS.includes(state.selectedArea));
+  return `
+    <section class="workspace-card area-select-card" aria-label="Kitchen area">
+      <span class="area-select-label">Kitchen area</span>
+      <div class="desktop-area-options">
+        ${MOBILE_AREA_OPTIONS.map((area) => {
+          const active = area === "Other" ? showCustomArea : state.selectedArea === area;
+          return `<button class="desktop-area-option ${active ? "is-active" : ""}" data-area="${escapeHtml(area)}" type="button">${escapeHtml(area)}</button>`;
+        }).join("")}
+      </div>
+      ${
+        showCustomArea
+          ? `<input class="desktop-area-custom" id="desktop-area-custom" value="${escapeHtml(MOBILE_AREA_OPTIONS.includes(state.selectedArea) ? "" : state.selectedArea)}" placeholder="Type a custom area name" />`
+          : ""
+      }
+    </section>
+  `;
+}
+
+function renderDesktopSummaryPanel({ totalItems, needsReview, source, started, countId, selectedArea }) {
+  const hasCount = Boolean(state.activeCountId);
+  const hasData = totalItems > 0;
+
+  const metaRows = [];
+  if (selectedArea) metaRows.push(["Area", escapeHtml(selectedArea)]);
+  if (hasCount) {
+    metaRows.push(["Source", escapeHtml(source)]);
+    if (state.countStartedAt) metaRows.push(["Started", escapeHtml(started)]);
+    metaRows.push(["Count ID", escapeHtml(String(countId))]);
+  }
+
+  const summaryBody =
+    hasCount || hasData
+      ? `
+        <div class="summary-stats">
+          <div class="summary-stat">
+            <strong>${totalItems}</strong>
+            <span>Total items</span>
+          </div>
+          <div class="summary-stat ${needsReview ? "summary-stat--flag" : ""}">
+            <strong>${needsReview}</strong>
+            <span>Needs review</span>
+          </div>
+        </div>
+        ${
+          metaRows.length
+            ? `<dl class="summary-meta">${metaRows
+                .map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`)
+                .join("")}</dl>`
+            : ""
+        }
+      `
+      : `
+        <div class="summary-empty">
+          <strong>No count in progress</strong>
+          <span>Start a count to see live totals and details here.</span>
+        </div>
+      `;
+
+  return `
+    <section class="workspace-card summary-panel">
+      <div class="summary-section">
+        <h2>${ProductIcon("file")} Count Summary</h2>
+        ${summaryBody}
+      </div>
+      <div class="summary-section">
+        <h3>${ProductIcon("heart")} Data Health</h3>
+        ${renderDataHealth()}
+      </div>
+      <div class="summary-section summary-section--actions">
+        <button class="report-button report-button--primary" id="generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId ? "disabled" : ""}>
+          ${ProductIcon("file")} ${state.isGeneratingReport ? "Creating" : "Report"} <span>→</span>
+        </button>
+        <button class="report-button" id="export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export</button>
+        <button class="report-button report-button--disabled" id="send-sheets-button" type="button" disabled>${ProductIcon("sheet")} Sheets</button>
+      </div>
+    </section>
+  `;
+}
+
 function render() {
   if (!state.authReady) {
     app.innerHTML = `
@@ -1652,6 +1734,8 @@ function render() {
 
         <section class="product-grid" aria-label="Inventory count workspace">
           <div class="workspace-column">
+            ${renderDesktopAreaSelector()}
+
             <section class="workspace-card voice-card">
               <div class="section-heading">
                 <div>
@@ -1666,6 +1750,7 @@ function render() {
                     <div class="mic-core">${ProductIcon("mic")}</div>
                   </button>
                   <strong>${formatTimer(state.recordingSeconds)}</strong>
+                  <p class="mic-status">${state.isRecording ? "Recording…" : state.recordingMode === "paused" ? "Paused" : "Ready to record"}</p>
                   ${renderVoiceMeter()}
                   <div class="recording-controls" aria-label="Recording controls">
                     <button class="recording-button recording-button--primary" id="recording-start-action" type="button" ${state.isRecording ? "disabled" : ""}>${primaryRecordingLabel}</button>
@@ -1713,42 +1798,8 @@ function render() {
             ${renderReportPreview()}
           </div>
 
-          <aside class="insight-column" aria-label="Count tools">
-            <section class="workspace-card summary-card">
-              <h2>${ProductIcon("file")} Count Summary</h2>
-              <div class="area-control">
-                <label for="area-input">Kitchen area</label>
-                <div class="area-input-shell">
-                  <input id="area-input" list="area-options" value="${escapeHtml(state.selectedArea)}" placeholder="Type or choose an area" />
-                  <span aria-hidden="true"></span>
-                </div>
-                <datalist id="area-options">
-                  ${AREA_OPTIONS.map((area) => `<option value="${escapeHtml(area)}"></option>`).join("")}
-                </datalist>
-              </div>
-              <dl>
-                <div><dt>Total Items</dt><dd>${totalItems}</dd></div>
-                <div><dt>Needs Review</dt><dd>${needsReview}</dd></div>
-                <div><dt>Source</dt><dd>${source}</dd></div>
-                <div><dt>Area</dt><dd>${escapeHtml(selectedArea || "Not set")}</dd></div>
-                <div><dt>Started</dt><dd>${started}</dd></div>
-                <div><dt>Count ID</dt><dd>${escapeHtml(countId)}</dd></div>
-              </dl>
-            </section>
-
-            <section class="workspace-card data-card">
-              <h2>${ProductIcon("heart")} Data Health</h2>
-              <p>We clean and normalize your data after backend parsing.</p>
-              ${renderDataHealth()}
-            </section>
-
-            <div class="report-actions">
-              <button class="report-button report-button--primary" id="generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId ? "disabled" : ""}>
-                ${ProductIcon("file")} ${state.isGeneratingReport ? "Creating" : "Report"} <span>→</span>
-              </button>
-              <button class="report-button" id="export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export</button>
-              <button class="report-button report-button--disabled" id="send-sheets-button" type="button" disabled>${ProductIcon("sheet")} Sheets</button>
-            </div>
+          <aside class="insight-column" aria-label="Count summary">
+            ${renderDesktopSummaryPanel({ totalItems, needsReview, source, started, countId, selectedArea })}
           </aside>
         </section>
       </div>
@@ -1864,9 +1915,20 @@ function bindEvents() {
       event.target.scrollTop = event.target.scrollHeight;
     });
   });
-  document.querySelector("#area-input")?.addEventListener("input", (event) => {
+  document.querySelectorAll(".desktop-area-option").forEach((button) => {
+    button.addEventListener("click", () => {
+      const area = button.dataset.area || "";
+      state.mobileAreaOtherActive = area === "Other";
+      state.selectedArea = area === "Other" ? "" : area;
+      render();
+      if (area === "Other") {
+        document.querySelector("#desktop-area-custom")?.focus();
+      }
+    });
+  });
+  document.querySelector("#desktop-area-custom")?.addEventListener("input", (event) => {
     state.selectedArea = event.target.value;
-    state.mobileAreaOtherActive = false;
+    state.mobileAreaOtherActive = true;
   });
   document.querySelectorAll(".mobile-area-option").forEach((button) => {
     button.addEventListener("click", () => {
