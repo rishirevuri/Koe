@@ -7,6 +7,16 @@ from app.models import CountEntry, CountSession
 
 
 REVIEW_STATUSES = {"Needs Review", "Missing Unit", "Possible Duplicate"}
+INVALID_EXPORT_ITEM_NAMES = {
+    "of",
+    "and",
+    "then",
+    "packs of",
+    "cases of",
+    "bunches wait no scratch that",
+    "is half empty",
+    "more on the bottom shelf",
+}
 
 
 def _entry_status(entry: CountEntry) -> str:
@@ -29,8 +39,14 @@ def _entry_row(entry: CountEntry) -> dict:
     }
 
 
+def _is_exportable_entry(row: dict) -> bool:
+    clean_name = " ".join(str(row.get("item_name_clean") or "").lower().strip(" ,.").split())
+    raw_name = " ".join(str(row.get("item_name_raw") or "").lower().strip(" ,.").split())
+    return clean_name not in INVALID_EXPORT_ITEM_NAMES and raw_name not in INVALID_EXPORT_ITEM_NAMES
+
+
 def build_report(count: CountSession) -> dict:
-    entries = [_entry_row(entry) for entry in count.entries]
+    entries = [row for entry in count.entries if _is_exportable_entry(row := _entry_row(entry))]
     return {
         "count_id": count.id,
         "status": count.status,

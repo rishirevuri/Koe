@@ -77,3 +77,11 @@ def test_voice_parse_metric_units_are_units() -> None:
     assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
         ("salt", 20, "grams"),
     ]
+
+
+def test_voice_parse_pack_and_bunch_units_are_not_item_fragments() -> None:
+    parsed = parse_voice_text("i have 3 packs of buns and 4 bunches cilantro")
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("buns", 3, "packs"),
+        ("cilantro", 4, "bunches"),
+    ]

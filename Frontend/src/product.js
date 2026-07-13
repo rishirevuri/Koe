@@ -17,6 +17,17 @@ const AREA_OPTIONS = ["Dry Storage", "Walk-in", "Freezer", "Bar", "Wine Storage"
 const MOBILE_AREA_OPTIONS = ["Walk-in", "Dry Storage", "Bar", "Kitchen", "Other"];
 const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
+const VALID_STATUSES = new Set(["Clean", "Partial Quantity", "Missing Unit", "Needs Review", "Possible Duplicate", "Converted Unit"]);
+const INVALID_FALLBACK_ITEM_NAMES = new Set([
+  "of",
+  "and",
+  "then",
+  "packs of",
+  "cases of",
+  "bunches wait no scratch that",
+  "is half empty",
+  "more on the bottom shelf",
+]);
 
 const state = {
   backendConnected: false,
@@ -45,6 +56,7 @@ const state = {
   countStartedAt: null,
   transcript: "",
   parsedEntries: [],
+  parserDebug: null,
   report: null,
   dataHealthItems: [],
   isCreatingCount: false,
@@ -280,6 +292,7 @@ function resetWorkspaceState() {
   state.activeCountId = null;
   state.countStartedAt = null;
   state.parsedEntries = [];
+  state.parserDebug = null;
   state.report = null;
   state.dataHealthItems = [];
   state.status = "Ready";
@@ -300,21 +313,87 @@ function renderVoiceMeter() {
   `;
 }
 
+function normalizeItemName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function normalizeItemNameKey(value) {
+  return normalizeItemName(value).toLowerCase().replace(/[.,]+$/g, "");
+}
+
+function normalizeStatus(entry) {
+  const status = String(entry.status || "").trim();
+  if (VALID_STATUSES.has(status)) return status;
+  if (entry.quantity === null || entry.quantity === undefined || entry.quantity === "") return "Needs Review";
+  if (!entry.unit) return "Missing Unit";
+  return "Clean";
+}
+
+function getEntryArea(entry) {
+  return normalizeItemName(entry.area || state.selectedArea || "");
+}
+
+function isInvalidFallbackEntry(entry) {
+  if (state.parserDebug?.parser_source !== "deterministic_fallback") return false;
+  const cleanName = normalizeItemNameKey(entry.item_name_clean || entry.item_name || entry.name);
+  const rawName = normalizeItemNameKey(entry.item_name_raw || entry.raw_phrase || entry.original_phrase);
+  return INVALID_FALLBACK_ITEM_NAMES.has(cleanName) || INVALID_FALLBACK_ITEM_NAMES.has(rawName);
+}
+
+function normalizeParsedEntry(entry, fallbackArea = "") {
+  const itemNameClean = normalizeItemName(entry.item_name_clean || entry.item_name || entry.name);
+  const itemNameRaw = normalizeItemName(entry.item_name_raw || entry.raw_phrase || itemNameClean);
+  return {
+    ...entry,
+    count_id: entry.count_id ?? state.activeCountId ?? null,
+    restaurant_id: entry.restaurant_id ?? state.selectedRestaurantId ?? null,
+    area: normalizeItemName(entry.area || fallbackArea || state.selectedArea || ""),
+    item_name_raw: itemNameRaw,
+    item_name_clean: itemNameClean,
+    quantity: entry.quantity,
+    unit: entry.unit || "",
+    status: normalizeStatus(entry),
+    original_phrase: entry.original_phrase || entry.raw_phrase || itemNameRaw,
+    created_at: entry.created_at || null,
+    counted_by: entry.counted_by || null,
+  };
+}
+
+function normalizeParsedEntries(entries, fallbackArea = "") {
+  return (entries || [])
+    .map((entry) => normalizeParsedEntry(entry, fallbackArea))
+    .filter((entry) => normalizeItemName(entry.item_name_clean))
+    .filter((entry) => !isInvalidFallbackEntry(entry));
+}
+
 function getEntryCleanName(entry) {
-  return entry.item_name_clean || entry.item_name || entry.name || "";
+  return entry.item_name_clean || "";
 }
 
 function getEntryRawName(entry) {
-  return entry.item_name_raw || entry.raw_phrase || getEntryCleanName(entry);
+  return entry.item_name_raw || getEntryCleanName(entry);
 }
 
 function getEntryOriginalPhrase(entry) {
-  return entry.original_phrase || entry.raw_phrase || "";
+  return entry.original_phrase || getEntryRawName(entry);
 }
 
 function entryNeedsReview(entry) {
   const status = getEntryStatus(entry).label;
   return REVIEW_STATUSES.has(status);
+}
+
+function formatParserSource() {
+  const source = state.parserDebug?.parser_source;
+  if (source === "claude") return "Claude";
+  if (source === "deterministic_fallback") return "Deterministic fallback";
+  return "";
+}
+
+function renderParserDebugLine() {
+  const parser = formatParserSource();
+  if (!parser) return "";
+  return `<div class="parser-debug-line">Parser: <strong>${escapeHtml(parser)}</strong></div>`;
 }
 
 function buildDataHealth(entries) {
@@ -740,6 +819,7 @@ async function ensureCountSession() {
     state.countStartedAt = new Date(count.started_at || Date.now());
     state.status = "In Progress";
     state.parsedEntries = [];
+    state.parserDebug = null;
     state.report = null;
     state.dataHealthItems = [];
     setNotice(`Count #${count.id} started.`);
@@ -755,6 +835,7 @@ async function startNewCount() {
   state.countStartedAt = null;
   state.status = "Ready";
   state.parsedEntries = [];
+  state.parserDebug = null;
   state.report = null;
   state.dataHealthItems = [];
   try {
@@ -788,7 +869,25 @@ async function processCount() {
       area: state.selectedArea,
       save: true,
     });
-    state.parsedEntries = result.entries || [];
+    state.parserDebug = {
+      parser_source: result.parser_source || "deterministic_fallback",
+      external_ai_enabled: Boolean(result.external_ai_enabled),
+      text_ai_provider: result.text_ai_provider || "",
+      anthropic_model: result.anthropic_model || "",
+      anthropic_key_present: Boolean(result.anthropic_key_present),
+    };
+    state.parsedEntries = normalizeParsedEntries(result.entries || [], state.selectedArea);
+    const firstArea = state.parsedEntries.find((entry) => entry.area)?.area;
+    if (!state.selectedArea && firstArea) {
+      state.selectedArea = firstArea;
+    }
+    console.log({
+      parser_source: state.parserDebug.parser_source,
+      item_count: state.parsedEntries.length,
+      first_item: state.parsedEntries[0] || null,
+      count_id: countId,
+      area: state.selectedArea || firstArea || "",
+    });
     state.dataHealthItems = buildDataHealth(state.parsedEntries);
     state.report = null;
     state.status = "In Progress";
@@ -830,12 +929,7 @@ async function generateReport() {
 async function exportCsv() {
   clearMessages();
   if (!state.activeCountId) {
-    setError("Start and process a count first.");
-    render();
-    return;
-  }
-  if (!state.selectedArea.trim()) {
-    setError("Pick or type a kitchen area before exporting CSV.");
+    setError("CSV export failed. Missing count id.");
     render();
     return;
   }
@@ -843,7 +937,13 @@ async function exportCsv() {
     if (!state.session || state.view !== "ready") throw new Error("Sign in before exporting CSV.");
     await downloadCsv(state.activeCountId);
   } catch (error) {
-    setError(error.message);
+    console.error("CSV export failed", {
+      message: error.message,
+      status: error.status,
+      count_id: state.activeCountId,
+      area: state.selectedArea || state.parsedEntries[0]?.area || "",
+    });
+    setError(error.status === 404 ? "CSV export failed. Please generate a report first." : `CSV export failed. ${error.message}`);
     render();
   }
 }
@@ -1028,13 +1128,14 @@ function renderInventoryTable() {
           const status = getEntryStatus(entry);
           const detail = getEntryOriginalPhrase(entry);
           const cleanName = getEntryCleanName(entry);
+          const area = getEntryArea(entry) || "Not set";
           return `
         <tr>
           <td class="drag-cell">⋮</td>
           <td>${escapeHtml(cleanName)}</td>
           <td>${escapeHtml(entry.quantity)}</td>
           <td>${escapeHtml(entry.unit)}</td>
-          <td>${escapeHtml(entry.area || state.selectedArea || "Count")}</td>
+          <td>${escapeHtml(area)}</td>
           <td><span class="status-pill ${status.className}">${escapeHtml(status.label)}</span></td>
         </tr>
         ${
@@ -1072,7 +1173,7 @@ function renderInventoryTable() {
 }
 
 function getEntryStatus(entry) {
-  const status = entry.status || "";
+  const status = normalizeStatus(entry);
   if (status === "Needs Review" || status === "Missing Unit" || status === "Possible Duplicate") {
     return { label: status, className: "status-pill--review" };
   }
@@ -1338,6 +1439,7 @@ function renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabe
           <h2>Parsed Items</h2>
           <span>${totalItems} total · ${needsReview} review</span>
         </div>
+        ${renderParserDebugLine()}
         ${renderMobileInventoryCards()}
       </section>
 
@@ -1775,6 +1877,7 @@ function render() {
                   <span class="step-number">02</span>
                   <h2>Parsed Inventory</h2>
                   <p>Koe turns your transcript into structured, clean data from the local backend.</p>
+                  ${renderParserDebugLine()}
                 </div>
                 <button class="ghost-button" id="edit-items-button" type="button">${ProductIcon("edit")} Edit</button>
               </div>

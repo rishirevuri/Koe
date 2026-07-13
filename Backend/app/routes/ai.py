@@ -17,6 +17,16 @@ from app.services.voice_parse_service import ParsedCandidate, parse_voice_text
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 logger = logging.getLogger(__name__)
+INVALID_FALLBACK_ITEM_NAMES = {
+    "of",
+    "and",
+    "then",
+    "packs of",
+    "cases of",
+    "bunches wait no scratch that",
+    "is half empty",
+    "more on the bottom shelf",
+}
 
 
 def _has_anthropic_key(settings) -> bool:
@@ -37,7 +47,14 @@ def _parser_debug(settings, parser_source: str) -> dict:
     }
 
 
-def _status_for_candidate(candidate: ParsedCandidate, match: MatchResult) -> str:
+def _is_invalid_fallback_candidate(candidate: ParsedCandidate) -> bool:
+    name = " ".join(candidate.item_name.lower().strip(" ,.").split())
+    return name in INVALID_FALLBACK_ITEM_NAMES
+
+
+def _status_for_candidate(candidate: ParsedCandidate, match: MatchResult, parser_source: str | None = None) -> str:
+    if parser_source == "claude" and candidate.status in {"Clean", "Partial Quantity", "Missing Unit", "Possible Duplicate", "Converted Unit"}:
+        return candidate.status
     if candidate.needs_review or match.needs_review:
         return "Needs Review"
     if candidate.status in {"Clean", "Partial Quantity", "Missing Unit", "Possible Duplicate", "Converted Unit"}:
@@ -76,15 +93,19 @@ def _handle_candidates(
     if not count or count.restaurant_id != restaurant_id:
         raise HTTPException(status_code=404, detail="Count session not found for restaurant")
 
+    parser_source = (parser_debug or {}).get("parser_source")
     parsed: list[ParsedEntry] = []
     for candidate in candidates:
+        if parser_source == "deterministic_fallback" and _is_invalid_fallback_candidate(candidate):
+            logger.info("parse_voice: dropped invalid deterministic_fallback row name=%s", candidate.item_name)
+            continue
         match = match_inventory_item(db, restaurant_id, candidate.item_name)
         needs_review = candidate.needs_review or match.needs_review
         review_reason = candidate.review_reason or match.review_reason
         entry = None
         created_at = None
         clean_name = match.matched_name or candidate.item_name
-        status = _status_for_candidate(candidate, match)
+        status = _status_for_candidate(candidate, match, parser_source)
         if save:
             entry = CountEntry(
                 count_session_id=count_session_id,

@@ -263,6 +263,7 @@ def test_voice_parse_mocked_claude_success_returns_claude_source(monkeypatch) ->
     assert [(entry["item_name_clean"], entry["quantity"], entry["unit"]) for entry in payload["entries"]] == [
         ("Duck fat", 7.0, "jars")
     ]
+    assert payload["entries"][0]["status"] == "Clean"
 
 
 def test_voice_parse_mocked_claude_failure_returns_fallback_source(monkeypatch) -> None:

@@ -1774,6 +1774,27 @@ button:disabled,
   background: rgba(255, 250, 242, 0.45);
 }
 
+.parser-debug-line {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  min-height: 28px;
+  margin-top: 8px;
+  padding: 0 10px;
+  color: rgba(16, 35, 31, 0.72);
+  font-size: 12px;
+  font-weight: 500;
+  background: rgba(255, 250, 242, 0.74);
+  border: 1px solid rgba(170, 132, 80, 0.16);
+  border-radius: 999px;
+}
+
+.parser-debug-line strong {
+  margin-left: 4px;
+  color: var(--product-accent-strong);
+  font-weight: 650;
+}
+
 .food-icon {
   display: inline-flex;
   width: 30px;
