@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -128,6 +129,11 @@ class ParsedEntry(BaseModel):
 class ParseResponse(BaseModel):
     entries: list[ParsedEntry]
     saved: bool
+    parser_source: Literal["claude", "deterministic_fallback"] = "deterministic_fallback"
+    external_ai_enabled: bool = False
+    text_ai_provider: str = ""
+    anthropic_model: str = ""
+    anthropic_key_present: bool = False
 
 
 class NormalizeItemRequest(BaseModel):

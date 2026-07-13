@@ -10,6 +10,7 @@ from app.routes import ai, integrations
 from app.routes import auth as auth_routes
 from app.seed import seed
 from app.services import external_ai_service, google_sheets_service, speech_to_text_service
+from app.services.voice_parse_service import ParsedCandidate
 
 
 client = TestClient(app)
@@ -49,6 +50,7 @@ class DisabledIntegrationSettings:
     gemini_api_key = None
     google_api_key = None
     anthropic_api_key = "test-anthropic-key"
+    anthropic_model = "claude-test-model"
     google_sheets_client_id = None
     google_sheets_client_secret = None
     google_sheets_redirect_uri = "http://localhost:8000/integrations/google/callback"
@@ -85,6 +87,10 @@ def use_disabled_integration_settings(monkeypatch) -> None:
     monkeypatch.setattr(speech_to_text_service, "get_settings", lambda: settings)
     monkeypatch.setattr(external_ai_service, "get_settings", lambda: settings)
     monkeypatch.setattr(google_sheets_service, "get_settings", lambda: settings)
+
+
+class EnabledClaudeSettings(DisabledIntegrationSettings):
+    enable_external_ai = True
 
 
 @pytest.fixture(autouse=True)
@@ -162,6 +168,12 @@ def test_voice_parse_save_report_and_csv() -> None:
     assert all("manager_note" not in entry for entry in entries)
     assert entries[0]["status"] == "Partial Quantity"
     assert entries[0]["counted_by"] == TEST_USER.email
+    payload = parse_response.json()
+    assert payload["parser_source"] == "deterministic_fallback"
+    assert payload["external_ai_enabled"] is False
+    assert payload["text_ai_provider"] == "claude"
+    assert payload["anthropic_model"] == "claude-test-model"
+    assert payload["anthropic_key_present"] is True
 
     report_response = client.get(f"/reports/{count_id}")
     assert report_response.status_code == 200
@@ -213,6 +225,71 @@ def test_vague_partial_phrase_creates_review_flag() -> None:
     assert entry["status"] == "Needs Review"
     assert "needs_review" not in entry
     assert "review_reason" not in entry
+
+
+def test_voice_parse_mocked_claude_success_returns_claude_source(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        return [
+            ParsedCandidate(
+                raw_phrase="claude saw seven jars of duck fat",
+                quantity=7,
+                unit="jars",
+                item_name="Duck fat",
+                partial_detail=None,
+                needs_review=False,
+                review_reason=None,
+                status="Clean",
+            )
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": "three bottles olive oil", "area": "Walk-in", "save": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parser_source"] == "claude"
+    assert payload["external_ai_enabled"] is True
+    assert payload["text_ai_provider"] == "claude"
+    assert payload["anthropic_model"] == "claude-test-model"
+    assert payload["anthropic_key_present"] is True
+    assert [(entry["item_name_clean"], entry["quantity"], entry["unit"]) for entry in payload["entries"]] == [
+        ("Duck fat", 7.0, "jars")
+    ]
+
+
+def test_voice_parse_mocked_claude_failure_returns_fallback_source(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        raise TimeoutError("mock Claude timeout")
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": "3 bottles olive oil", "area": "Dry Storage", "save": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parser_source"] == "deterministic_fallback"
+    assert payload["external_ai_enabled"] is True
+    assert payload["text_ai_provider"] == "claude"
+    assert payload["anthropic_model"] == "claude-test-model"
+    assert payload["anthropic_key_present"] is True
+    assert [(entry["item_name_clean"], entry["quantity"], entry["unit"]) for entry in payload["entries"]] == [
+        ("Olive oil", 3.0, "bottles")
+    ]
 
 
 def test_ownership_checks_prevent_other_restaurant_count_and_report() -> None:

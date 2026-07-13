@@ -19,6 +19,24 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 logger = logging.getLogger(__name__)
 
 
+def _has_anthropic_key(settings) -> bool:
+    checker = getattr(settings, "_has_real_value", None)
+    if callable(checker):
+        return bool(checker(getattr(settings, "anthropic_api_key", None)))
+    value = getattr(settings, "anthropic_api_key", None)
+    return bool(value and str(value).strip() and not str(value).strip().startswith("your_"))
+
+
+def _parser_debug(settings, parser_source: str) -> dict:
+    return {
+        "parser_source": parser_source,
+        "external_ai_enabled": bool(getattr(settings, "enable_external_ai", False)),
+        "text_ai_provider": getattr(settings, "text_ai_provider", None) or "",
+        "anthropic_model": getattr(settings, "anthropic_model", None) or "",
+        "anthropic_key_present": _has_anthropic_key(settings),
+    }
+
+
 def _status_for_candidate(candidate: ParsedCandidate, match: MatchResult) -> str:
     if candidate.needs_review or match.needs_review:
         return "Needs Review"
@@ -52,6 +70,7 @@ def _handle_candidates(
     save: bool,
     candidates: list[ParsedCandidate],
     counted_by: str | None,
+    parser_debug: dict | None = None,
 ) -> ParseResponse:
     count = db.get(CountSession, count_session_id)
     if not count or count.restaurant_id != restaurant_id:
@@ -121,7 +140,7 @@ def _handle_candidates(
 
     if save:
         db.commit()
-    return ParseResponse(entries=parsed, saved=save)
+    return ParseResponse(entries=parsed, saved=save, **(parser_debug or {}))
 
 
 @router.post("/parse-voice", response_model=ParseResponse)
@@ -133,15 +152,35 @@ def parse_voice(
 ) -> ParseResponse:
     ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
     settings = get_settings()
+    provider = settings.text_ai_provider or "claude"
+    model = getattr(settings, "anthropic_model", "") or ""
+    anthropic_key_present = _has_anthropic_key(settings)
+    parser_source = "deterministic_fallback"
+
+    logger.info(
+        "parse_voice: external_ai_enabled=%s provider=%s anthropic_key_present=%s model=%s",
+        settings.enable_external_ai,
+        provider,
+        anthropic_key_present,
+        model,
+    )
+
     candidates = parse_voice_text(payload.text)
     if settings.enable_external_ai and settings.is_claude_configured and (settings.text_ai_provider or "claude").lower() == "claude":
         try:
+            logger.info("parse_voice: attempting Claude parse")
             claude_candidates = parse_inventory_with_claude(payload.text)
-            if claude_candidates:
-                candidates = claude_candidates
+            candidates = claude_candidates
+            parser_source = "claude"
+            logger.info("parse_voice: Claude parse succeeded")
         except Exception as error:
-            logger.warning("Claude inventory parsing failed; using deterministic parser fallback: %s", error)
+            logger.warning(
+                "parse_voice: Claude parse failed; using deterministic_fallback; error_type=%s; model=%s",
+                type(error).__name__,
+                model,
+            )
             candidates = parse_voice_text(payload.text)
+    logger.info("parse_voice: using parser_source=%s", parser_source)
 
     return _handle_candidates(
         db,
@@ -153,6 +192,7 @@ def parse_voice(
         save=payload.save,
         candidates=candidates,
         counted_by=current_user.email or current_user.user_id,
+        parser_debug=_parser_debug(settings, parser_source),
     )
 
 
