@@ -115,11 +115,12 @@ class ParseUploadRequest(ParseVoiceRequest):
 class ParsedEntry(BaseModel):
     count_id: int
     restaurant_id: int
-    quantity: float
-    unit: str
+    quantity: float | None
+    unit: str | None
     area: str | None = None
     item_name_raw: str
     item_name_clean: str
+    category: str | None = None
     status: str
     original_phrase: str
     created_at: datetime | None = None

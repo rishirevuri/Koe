@@ -104,7 +104,7 @@ def _handle_candidates(
         review_reason = candidate.review_reason or match.review_reason
         entry = None
         created_at = None
-        clean_name = match.matched_name or candidate.item_name
+        clean_name = candidate.item_name if parser_source == "claude" else match.matched_name or candidate.item_name
         status = _status_for_candidate(candidate, match, parser_source)
         if save:
             entry = CountEntry(
@@ -113,8 +113,8 @@ def _handle_candidates(
                 item_name_raw=candidate.item_name,
                 item_name=clean_name,
                 normalized_item_name=match.normalized_name,
-                quantity=candidate.quantity,
-                unit=candidate.unit,
+                quantity=candidate.quantity if candidate.quantity is not None else 0.0,
+                unit=candidate.unit or "",
                 status=status,
                 area=area or count.area,
                 source=source,
@@ -152,6 +152,7 @@ def _handle_candidates(
                 area=area or count.area,
                 item_name_raw=candidate.item_name,
                 item_name_clean=clean_name,
+                category=candidate.category,
                 status=status,
                 original_phrase=candidate.raw_phrase,
                 created_at=created_at,

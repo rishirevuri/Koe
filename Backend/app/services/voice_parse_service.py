@@ -8,13 +8,14 @@ from app.utils.units import UNIT_ALIASES, UNITS_PATTERN, normalize_unit
 @dataclass
 class ParsedCandidate:
     raw_phrase: str
-    quantity: float
-    unit: str
+    quantity: float | None
+    unit: str | None
     item_name: str
     partial_detail: str | None
     needs_review: bool
     review_reason: str | None
     status: str | None = None
+    category: str | None = None
 
 
 NUMBER_WORDS = {

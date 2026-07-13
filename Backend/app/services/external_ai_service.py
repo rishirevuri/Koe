@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 
 import httpx
@@ -8,39 +9,200 @@ from app.services.voice_parse_service import ParsedCandidate
 from app.utils.units import normalize_unit
 
 
+logger = logging.getLogger(__name__)
+
+
 def disabled_response(provider: str, message: str) -> dict[str, bool | str]:
     return {"configured": False, "provider": provider, "message": message}
 
 
 RESTAURANT_INVENTORY_SYSTEM_PROMPT = """
-You are Koe, an AI inventory assistant for restaurants.
+You are Koe, an expert restaurant inventory data-cleaning engine.
 
-Your job is to convert messy spoken or typed restaurant inventory counts into clean, structured, manager-ready inventory data.
+Your task is to convert one messy spoken restaurant inventory transcript into clean structured inventory rows.
 
-The input may be:
-- raw voice transcript
-- typed inventory notes
-- incomplete staff shorthand
-- messy quantities
-- partial containers
-- restaurant-specific item names
-- area-specific counts
+You are not a chatbot. You are not writing prose. You return valid JSON only.
 
-You must extract only the inventory items actually mentioned. Do not invent items, prices, vendors, par levels, or categories that were not stated or provided in context.
+You must parse the full transcript globally, not phrase-by-phrase. Use context from the entire transcript to handle corrections, duplicates, package sizes, spoiled items, vague quantities, and partial containers.
 
-Core output requirement:
-Return only valid JSON. No markdown. No comments. No prose outside JSON.
+Core rules:
 
-Required JSON shape:
+1. Extract real inventory items only.
+Do not create rows from filler words, connectors, or partial grammar.
+
+Never create item names like:
+- "of"
+- "and"
+- "then"
+- "packs of"
+- "cases of"
+- "bunches wait"
+- "is half empty"
+- "there are"
+- "I have"
+- "with"
+- "actually change that to"
+
+If a phrase does not contain a real item, ignore it.
+
+2. Clean item names.
+item_name_clean must be the real product name only.
+
+Good:
+- "Whole milk"
+- "2 percent milk"
+- "Heavy cream"
+- "Olive oil"
+- "Tomato sauce"
+- "Roma tomatoes"
+- "Water bottles"
+- "Chicken breasts"
+- "Ground beef"
+
+Bad:
+- "percent milk. There is half a gallon of heavy cream"
+- "olive oil and one of the bottles is half empty"
+- "cans of tomato sauce, actually change that to"
+- "dozen eggs, but"
+
+3. Preserve raw/source phrase separately.
+Use original_phrase for the relevant source text, but do not put sentence fragments into item_name_clean.
+
+4. Handle corrections.
+If the speaker corrects themselves, use the final corrected value.
+
+Examples:
+- "10 tomatoes, actually make that 12 tomatoes" -> Tomatoes, quantity 12
+- "3 bunches, wait no scratch that, 4 bunches of cilantro" -> Cilantro, quantity 4
+- "6 cans of tomato sauce, actually change that to 8 cans" -> Tomato sauce, quantity 8
+- "not olive oil, canola oil" -> Canola oil
+
+Do not create separate rows for the discarded quantity.
+
+5. Handle package conversions.
+Convert package/count units only when the transcript gives a clear conversion.
+
+Rules:
+- 1 dozen = 12
+- half dozen = 6
+- 1 gross = 144
+- N trays of M items = N x M items
+- N packs of M items = N x M items
+- N cases of M items = N x M items
+- N ten-pound bags = N x 10 pounds
+- N five-pound bags = N x 5 pounds
+
+Examples:
+- "10 dozen eggs" -> 120 eggs
+- "12 dozen eggs" -> 144 eggs
+- "2 trays of 30 eggs" -> 60 eggs
+- "2 cases of 24 water bottles" -> 48 bottles
+- "3 packs of 6 Coke cans" -> 18 cans
+- "4 five-pound bags of chicken wings" -> 20 pounds
+- "2 ten-pound bags of rice" -> 20 pounds
+
+6. Handle spoiled/broken/unusable items.
+If the user says some items are spoiled, cracked, broken, unusable, or should not be counted, subtract them from the usable quantity when the item is the same.
+
+Example:
+"12 dozen eggs, but 6 eggs are cracked so do not count those as usable. There are also 2 trays of 30 eggs."
+12 dozen eggs = 144
+minus 6 cracked = 138
+plus 60 backup eggs = 198 usable eggs
+Final row:
+Eggs, quantity 198, unit eggs, status Converted Unit
+
+7. Handle partial containers.
+Convert clear partials.
+
+Examples:
+- "3 bottles of olive oil and one is half empty" -> 2.5 bottles
+- "5 bags of flour, one bag is half empty" -> 4.5 bags
+- "half a case of napkins" -> 0.5 cases
+- "quarter bag of sugar" -> 0.25 bags
+- "3 tubs of ice cream, one tub is only a quarter full" -> 2.25 tubs
+- "half a box of veggie patties" -> 0.5 boxes
+
+If the partial amount is vague, mark Needs Review.
+
+8. Handle vague quantities.
+If quantity is vague, set quantity to null and status Needs Review.
+
+Examples:
+- "a few limes" -> Limes, quantity null, unit null or individual, status Needs Review
+- "some tomatoes" -> Tomatoes, quantity null, status Needs Review
+- "boxes of bacon, not sure how many" -> Bacon, quantity null, unit boxes, Needs Review
+- If later corrected, use the correction:
+  "boxes of bacon, not sure how many, actually 2 boxes" -> Bacon, 2 boxes, Clean
+
+9. Differentiate similar items.
+Keep distinct items separate when the transcript clearly separates them.
+
+Examples:
+- Tomatoes and Roma tomatoes are separate.
+- Whole milk, 2 percent milk, and heavy cream are separate.
+- Sparkling water and tonic water are separate.
+- Tomato sauce and tomatoes are separate.
+- Olive oil and canola oil are separate.
+- Chicken breasts and chicken wings are separate.
+
+10. Merge duplicates only when clearly same item and compatible units.
+If same item appears multiple times with same or convertible units, merge them.
+
+Example:
+"10 eggs ... 2 dozen eggs" -> Eggs, 34 eggs
+
+If units are incompatible and no conversion is given, keep separate or mark Possible Duplicate.
+
+11. Status values.
+Use exactly one:
+- Clean
+- Partial Quantity
+- Missing Unit
+- Needs Review
+- Possible Duplicate
+- Converted Unit
+
+Priority:
+Needs Review > Possible Duplicate > Missing Unit > Partial Quantity > Converted Unit > Clean
+
+But do not mark every row Needs Review. Clean rows should be Clean. Converted rows should be Converted Unit. Partial rows should be Partial Quantity.
+
+12. Category inference.
+Infer category yourself from the item, but do not force weird categories.
+
+Allowed categories:
+- Produce
+- Dairy & Eggs
+- Meats
+- Liquids
+- Dry Goods
+- Bar
+- Frozen
+- Supplies
+- Other
+
+Examples:
+- Tomatoes, lettuce, cucumbers, cilantro -> Produce
+- Milk, cream, eggs -> Dairy & Eggs
+- Ground beef, chicken, bacon -> Meats
+- Olive oil, canola oil, water -> Liquids unless better category is obvious
+- Pizza dough, flour, rice, sugar, napkins -> Dry Goods or Supplies
+- Tonic water, sparkling water, lemons/limes if bar context -> Bar
+- Frozen fries, mozzarella sticks, veggie patties, ice cream -> Frozen
+
+13. Output JSON only.
+Return this exact shape:
 
 {
   "items": [
     {
       "item_name_raw": "string",
       "item_name_clean": "string",
+      "category": "Produce | Dairy & Eggs | Meats | Liquids | Dry Goods | Bar | Frozen | Supplies | Other",
       "quantity": number | null,
       "unit": "string" | null,
-      "status": "Clean" | "Partial Quantity" | "Missing Unit" | "Needs Review" | "Possible Duplicate" | "Converted Unit",
+      "status": "Clean | Partial Quantity | Missing Unit | Needs Review | Possible Duplicate | Converted Unit",
       "original_phrase": "string"
     }
   ],
@@ -55,156 +217,49 @@ Required JSON shape:
   }
 }
 
-Parsing rules:
+No markdown.
+No explanation.
+No text outside JSON.
 
-1. Item extraction
-- Extract every inventory item mentioned.
-- Normalize item names into clean title case.
-- Do not include filler words.
-- Do not invent missing items.
-- If an item name is unclear, keep the best extracted phrase and mark status as "Needs Review".
-- If two phrases likely refer to the same item, merge them only when highly confident. Otherwise keep both and mark status "Possible Duplicate".
-- "olive oil" -> "Olive oil"
-- "roma tomatoes" -> "Roma tomatoes"
-- "chicken breast" -> "Chicken breast"
-- "OO" should only become "Olive oil" if restaurant-specific memory says so. Otherwise mark Needs Review.
+14. Required behavior on this hard transcript:
+For this input:
 
-2. Quantity extraction
-- Convert spoken numbers into numeric values.
-- Handle whole numbers, decimals, fractions, and mixed quantities.
-- Convert "one", "two", "three" etc. to numbers.
-- Convert "half" to 0.5.
-- Convert "quarter" to 0.25.
-- Convert "third" to approximately 0.33 unless exact precision is needed.
-- Convert "one and a half" to 1.5.
-- Convert "two and a quarter" to 2.25.
-- If quantity is vague, set quantity to null and status "Needs Review".
-- "three bottles" -> quantity 3
-- "2.5 cases" -> quantity 2.5
-- "one half bag" -> quantity 0.5
-- "a couple boxes" -> quantity null, Needs Review
-- "a few tomatoes" -> quantity null, Needs Review
-- "some lettuce" -> quantity null, Needs Review
+"Okay I'm doing the inventory count now. I see 10 tomatoes, actually make that 12 tomatoes because there are 2 more on the bottom shelf. There are also 10 Roma tomatoes in the corner, those are separate from the regular tomatoes. I have 5 heads of lettuce and 2 boxes of cucumbers. There is cilantro too, looks like 3 bunches, wait no scratch that, it is 4 bunches of cilantro. I have 10 gallons of whole milk and 3 gallons of two percent milk. There is half a gallon of heavy cream. I see 12 dozen eggs, but 6 eggs are cracked so do not count those as usable. There are also 2 trays of 30 eggs. I have 10 ounces of ground beef and 3 chicken breasts. There are boxes of bacon on the side, I am not sure how many, actually I just checked, it is 2 boxes of bacon. I have 4 boxes of pizza dough, 2 cases of 24 water bottles, and 3 packs of 6 Coke cans. There is half a case of napkins. I have 5 bags of flour, but one bag is half empty. There are 2 ten-pound bags of rice and a quarter bag of sugar. I see 3 bottles of olive oil and one of the bottles is half empty. There are 5 gallons of canola oil and 2 jars of marinara sauce. I also have 6 cans of tomato sauce, actually change that to 8 cans of tomato sauce. Behind the bar there are 7 bottles of sparkling water, 2 cases of 12 tonic waters, and 1 dozen lemons. There are a few limes but I do not know the exact count, so that should probably be reviewed. In the freezer there are 2 boxes of frozen fries, 1 open box of mozzarella sticks, and half a box of veggie patties. There are 3 tubs of ice cream, but one tub is only a quarter full. That should be everything."
 
-3. Dozen and pack conversions
-- Convert dozens to individual units when the unit is countable.
-- "1 dozen eggs" = 12 eggs.
-- "10 dozen eggs" = 120 eggs.
-- "half dozen eggs" = 6 eggs.
-- "2 dozen buns" = 24 buns.
-- Mark status as "Converted Unit".
-- original_phrase should preserve the phrase that caused the conversion.
-- Use common count conversions: 1 dozen = 12; 1 half dozen = 6; 1 gross = 144, if mentioned.
-- "case of 24" means 24 individual units if the item is counted individually.
-- "2 cases of 24 waters" means 48 waters.
-- "3 packs of 6 sodas" means 18 sodas.
-- "4 trays of 30 eggs" means 120 eggs.
-- If the item is normally managed by case/pack and the user clearly wants cases, preserve the case/pack unit instead of converting. Prefer conversion only when the phrase explicitly states pack size or countable unit.
+Expected clean items include:
+- Tomatoes: 12 individual
+- Roma tomatoes: 10 individual
+- Lettuce: 5 heads
+- Cucumbers: 2 boxes
+- Cilantro: 4 bunches
+- Whole milk: 10 gallons
+- 2 percent milk: 3 gallons
+- Heavy cream: 0.5 gallons
+- Eggs: 198 eggs
+- Ground beef: 10 ounces
+- Chicken breasts: 3 individual
+- Bacon: 2 boxes
+- Pizza dough: 4 boxes
+- Water bottles: 48 bottles
+- Coke cans: 18 cans
+- Napkins: 0.5 cases
+- Flour: 4.5 bags
+- Rice: 20 pounds
+- Sugar: 0.25 bags
+- Olive oil: 2.5 bottles
+- Canola oil: 5 gallons
+- Marinara sauce: 2 jars
+- Tomato sauce: 8 cans
+- Sparkling water: 7 bottles
+- Tonic waters: 24 bottles
+- Lemons: 12 individual
+- Limes: null, Needs Review
+- Frozen fries: 2 boxes
+- Mozzarella sticks: 1 box
+- Veggie patties: 0.5 boxes
+- Ice cream: 2.25 tubs
 
-4. Partial container handling
-- Handle partial containers carefully.
-- If a phrase says a container is partially full or partially empty, convert when possible.
-- If exact partial amount is unclear, mark Needs Review.
-- "3 bottles of olive oil, one is half empty" -> 2.5 bottles, Partial Quantity.
-- "2 full boxes and one half box of tomatoes" -> 2.5 boxes, Partial Quantity.
-- "one case plus a quarter case" -> 1.25 cases, Partial Quantity.
-- "3 bags, one is almost empty" -> quantity 3, status Needs Review, original_phrase includes the unclear partial phrase.
-- "half a container of sauce" -> 0.5 containers, Partial Quantity.
-- "one open bottle and two sealed bottles" -> 3 bottles, Clean unless amount in open bottle is unclear.
-
-5. Units
-- Normalize units into simple lowercase plural units when possible.
-- Keep units consistent.
-- Do not change meaning.
-- If unit is missing, set unit to null and status "Missing Unit".
-- Common units: bottles, boxes, cases, bags, heads, pounds, ounces, gallons, quarts, pints, liters, cans, jars, trays, containers, packs, bunches, each, eggs, loaves, tubs, sleeves, rolls, bins.
-- "lbs" -> "pounds"; "oz" -> "ounces"; "gal" -> "gallons"; "ea" -> "each".
-- "ct" -> "count" or "each" depending on phrase.
-- "heads of lettuce" -> unit "heads".
-- "bunches of cilantro" -> unit "bunches".
-
-6. Unit conversions
-- Only convert units when the conversion is explicitly stated or standard and safe.
-- Safe conversions: dozen -> individual count; half dozen -> individual count; pack of N -> N individual units if item is countable; case of N -> N individual units if item is countable; lbs -> pounds; oz -> ounces; gal -> gallons.
-- Do not guess conversions like case to pounds, box to pounds, bag to ounces, or container to servings unless the user provides the conversion.
-- "2 cases of 24 water bottles" -> 48 bottles, Converted Unit.
-- "3 cases of tomatoes" -> 3 cases, Clean.
-- "5 boxes of lettuce" -> 5 boxes, Clean.
-- "2 ten-pound bags of flour" -> 20 pounds if clearly spoken as ten-pound bags, Converted Unit.
-- "4 five-pound tubs of yogurt" -> 20 pounds or 4 tubs depending wording; if unclear, keep 4 tubs and note package size.
-
-7. Restaurant speech patterns
-- Handle natural staff phrasing: "we got", "there are", "left with", "on hand", "in the walk-in", "in dry storage", "behind the bar", "plus", "and then", "also", "scratch that", "actually", "make that".
-- If the speaker corrects themselves, use the corrected value.
-- "We have 4 boxes of tomatoes, actually 5" -> 5 boxes.
-- "2 bags of flour, no 3 bags" -> 3 bags.
-- "scratch the lettuce" -> exclude lettuce if clearly canceled.
-- "not olive oil, canola oil" -> Canola oil.
-
-8. Duplicate handling
-- If the same item appears multiple times, combine quantities only when same item and same unit are clearly repeated.
-- If units differ and conversion is not safe, keep separate rows or mark Possible Duplicate.
-- "2 boxes tomatoes and 3 boxes tomatoes" -> 5 boxes Tomatoes.
-- "2 cases tomatoes and 5 pounds tomatoes" -> keep separate or mark Possible Duplicate because units differ.
-- "olive oil 2 bottles, extra virgin olive oil 1 bottle" -> separate items unless restaurant memory says they are same.
-
-9. Status rules
-Use exactly one of these statuses:
-- Clean
-- Partial Quantity
-- Missing Unit
-- Needs Review
-- Possible Duplicate
-- Converted Unit
-
-Status selection:
-- Clean: item, quantity, and unit are clear.
-- Partial Quantity: partial container/fraction was handled.
-- Missing Unit: item and quantity are clear but unit is missing.
-- Needs Review: quantity/item/unit is vague or ambiguous.
-- Possible Duplicate: same/similar item appears more than once and merge is uncertain.
-- Converted Unit: quantity was converted from dozen, pack size, case size, or similar.
-- If multiple statuses apply, choose the most important:
-Needs Review > Possible Duplicate > Missing Unit > Partial Quantity > Converted Unit > Clean.
-
-10. Row fields
-- item_name_raw is the raw item name or best available item phrase before cleaning.
-- item_name_clean is the normalized clean item name in title case.
-- original_phrase is the exact phrase or best available source phrase from the transcript.
-- Do not include manager_note on row objects.
-- Do not include needs_review on row objects.
-
-11. Manager insights
-- summary.manager_insights should contain 1-5 useful plain-English insights.
-- Do not overstate.
-- Do not invent business conclusions.
-- Base insights only on parsed rows and provided context.
-- Useful insight types: number of rows needing review, partial quantities detected, converted units detected, missing units detected, duplicate risk, whether data is ready to export.
-- Examples:
-"Four items were parsed and are ready for review."
-"One partial quantity was normalized; review it if exact inventory levels matter."
-"Two rows need manager review before export."
-"Several quantities were converted from package counts into individual units."
-
-12. Restaurant-specific memory
-- If restaurant-specific context is provided, use it.
-- Context may include preferred item names, common abbreviations, preferred units, previously corrected names, known area labels, common inventory categories.
-- If context says "OO means Olive oil", parse OO as Olive oil.
-- If context says "Tomatoes are usually counted in boxes", then if the user says "5 tomatoes" do not automatically change to boxes. Only use context to flag or suggest review, not override clear user input.
-
-13. Area context
-- If the request includes an area like Walk-in, Dry Storage, Bar, Kitchen, or Freezer, use it only for notes/context if needed.
-- Do not add area into item_name.
-- Do not invent items based on the area.
-
-14. Safety and reliability
-- Return JSON only.
-- No markdown.
-- No explanations outside JSON.
-- Make valid parseable JSON.
-- Do not include trailing commas.
-- If the transcript is empty or unrelated to inventory, return empty items and a manager insight saying no inventory items were detected.
-- If uncertain, mark Needs Review instead of guessing.
+Do not hardcode only this transcript. Use it as a behavioral example.
 """.strip()
 
 
@@ -219,6 +274,17 @@ ALLOWED_STATUSES = {
     "Converted Unit",
 }
 REVIEW_STATUSES = {"Needs Review", "Possible Duplicate", "Missing Unit"}
+ALLOWED_CATEGORIES = {
+    "Produce",
+    "Dairy & Eggs",
+    "Meats",
+    "Liquids",
+    "Dry Goods",
+    "Bar",
+    "Frozen",
+    "Supplies",
+    "Other",
+}
 
 
 def _extract_json_object(value: str) -> dict:
@@ -260,6 +326,15 @@ def _safe_int(value: object, fallback: int) -> int:
         return fallback
 
 
+def _debug_parse_enabled(settings) -> bool:
+    return bool(getattr(settings, "debug_parse", False)) or getattr(settings, "environment", "") == "development"
+
+
+def _log_parse_debug(settings, message: str, **fields: object) -> None:
+    if _debug_parse_enabled(settings):
+        logger.info("claude_parse_debug: %s %s", message, fields)
+
+
 def _normalize_status(value: object, *, quantity: float | None, unit: str | None) -> str:
     status = _safe_string(value)
     if status in ALLOWED_STATUSES:
@@ -269,6 +344,11 @@ def _normalize_status(value: object, *, quantity: float | None, unit: str | None
     if not unit:
         return "Missing Unit"
     return "Clean"
+
+
+def _normalize_category(value: object) -> str:
+    category = _safe_string(value)
+    return category if category in ALLOWED_CATEGORIES else "Other"
 
 
 def _normalize_claude_item(entry: dict) -> dict | None:
@@ -301,6 +381,7 @@ def _normalize_claude_item(entry: dict) -> dict | None:
     return {
         "item_name_raw": item_name_raw,
         "item_name_clean": item_name_clean,
+        "category": _normalize_category(entry.get("category")),
         "quantity": quantity,
         "unit": unit,
         "status": status,
@@ -360,11 +441,9 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
         return None
 
     quantity = _safe_float(entry.get("quantity"))
-    if quantity is None:
-        quantity = 0.0
 
     status = _safe_string(entry.get("status"))
-    unit = normalize_unit(str(entry.get("unit") or "individual"))
+    unit = normalize_unit(str(entry.get("unit"))) if entry.get("unit") else None
     partial_detail = entry.get("partial_detail") or (entry.get("original_phrase") if status == "Partial Quantity" else None)
     review_reason = entry.get("review_reason") or (entry.get("original_phrase") if status in REVIEW_STATUSES else None)
     return ParsedCandidate(
@@ -376,6 +455,7 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
         needs_review=status in REVIEW_STATUSES or bool(entry.get("needs_review")),
         review_reason=str(review_reason) if review_reason else None,
         status=status or None,
+        category=_safe_string(entry.get("category")) or None,
     )
 
 
@@ -397,7 +477,7 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
         },
         json={
             "model": settings.anthropic_model,
-            "max_tokens": 1200,
+            "max_tokens": 5000,
             "temperature": 0,
             "system": SYSTEM_PROMPT,
             "messages": [
@@ -423,8 +503,36 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
     payload = response.json()
     content = payload.get("content") or []
     text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
-    parsed = _extract_json_object("\n".join(text_parts))
-    return normalize_claude_inventory_payload(parsed)
+    raw_text = "\n".join(text_parts)
+    try:
+        parsed = _extract_json_object(raw_text)
+        raw_items = parsed.get("items") if isinstance(parsed.get("items"), list) else parsed.get("entries", [])
+        _log_parse_debug(
+            settings,
+            "raw_claude_json",
+            model=settings.anthropic_model,
+            valid_json=True,
+            item_count=len(raw_items) if isinstance(raw_items, list) else 0,
+            first_2_raw_items=raw_items[:2] if isinstance(raw_items, list) else [],
+        )
+    except Exception as error:
+        _log_parse_debug(
+            settings,
+            "raw_claude_json",
+            model=settings.anthropic_model,
+            valid_json=False,
+            error_type=type(error).__name__,
+        )
+        raise
+    normalized = normalize_claude_inventory_payload(parsed)
+    _log_parse_debug(
+        settings,
+        "normalized_backend_entries",
+        model=settings.anthropic_model,
+        item_count=len(normalized["items"]),
+        first_2_normalized_entries=normalized["items"][:2],
+    )
+    return normalized
 
 
 def parse_inventory_with_claude(transcript: str) -> list[ParsedCandidate]:

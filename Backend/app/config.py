@@ -16,6 +16,7 @@ class Settings(BaseSettings):
     environment: str = "development"
     database_url: str = Field(default="sqlite:///./data/koe.db")
     enable_external_ai: bool = False
+    debug_parse: bool = False
 
     supabase_url: str | None = None
     supabase_anon_key: str | None = None

@@ -18,6 +18,7 @@ const MOBILE_AREA_OPTIONS = ["Walk-in", "Dry Storage", "Bar", "Kitchen", "Other"
 const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const VALID_STATUSES = new Set(["Clean", "Partial Quantity", "Missing Unit", "Needs Review", "Possible Duplicate", "Converted Unit"]);
+const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Liquids", "Dry Goods", "Bar", "Frozen", "Supplies", "Other"];
 const INVALID_FALLBACK_ITEM_NAMES = new Set([
   "of",
   "and",
@@ -350,6 +351,7 @@ function normalizeParsedEntry(entry, fallbackArea = "") {
     area: normalizeItemName(entry.area || fallbackArea || state.selectedArea || ""),
     item_name_raw: itemNameRaw,
     item_name_clean: itemNameClean,
+    category: entry.category || "",
     quantity: entry.quantity,
     unit: entry.unit || "",
     status: normalizeStatus(entry),
@@ -412,11 +414,17 @@ function buildDataHealth(entries) {
 }
 
 function normalizeDisplayCategory(category) {
-  const value = String(category || "").toLowerCase();
+  const raw = String(category || "").trim();
+  if (CATEGORY_ORDER.includes(raw)) return raw;
+  const value = raw.toLowerCase();
   if (["oils", "beverages", "liquid", "liquids", "bar", "wine"].includes(value)) return "Liquids";
   if (value === "produce") return "Produce";
   if (["meat", "meats", "seafood"].includes(value)) return "Meats";
   if (["dairy", "eggs", "dairy & eggs"].includes(value)) return "Dairy & Eggs";
+  if (["dry goods", "dry"].includes(value)) return "Dry Goods";
+  if (value === "frozen") return "Frozen";
+  if (value === "supplies") return "Supplies";
+  if (value === "other") return "Other";
   return "";
 }
 
@@ -442,8 +450,7 @@ function inferCategory(entry) {
 }
 
 function groupEntriesByCategory(entries) {
-  const order = ["Liquids", "Produce", "Meats", "Dairy & Eggs", "Other"];
-  return order
+  return CATEGORY_ORDER
     .map((category) => ({
       category,
       entries: entries.filter((entry) => inferCategory(entry) === category),
@@ -885,6 +892,7 @@ async function processCount() {
       parser_source: state.parserDebug.parser_source,
       item_count: state.parsedEntries.length,
       first_item: state.parsedEntries[0] || null,
+      first_2_table_rows: state.parsedEntries.slice(0, 2),
       count_id: countId,
       area: state.selectedArea || firstArea || "",
     });
