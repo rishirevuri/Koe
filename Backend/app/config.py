@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     speech_provider: str = "elevenlabs"
 
     anthropic_api_key: str | None = None
-    anthropic_model: str = "claude-3-5-haiku-latest"
+    anthropic_model: str = "claude-haiku-4-5-20251001"
     text_ai_provider: str = "claude"
 
     google_sheets_client_id: str | None = None
