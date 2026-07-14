@@ -334,6 +334,18 @@ function getEntryArea(entry) {
   return normalizeItemName(entry.area || state.selectedArea || "");
 }
 
+function getCurrentSelectedArea() {
+  const customInput = document.querySelector("#mobile-area-custom") || document.querySelector("#desktop-area-custom");
+  const customArea = normalizeItemName(customInput?.value || "");
+  if (customArea) return customArea;
+
+  const activeAreaButton = document.querySelector(".mobile-area-option.is-active, .desktop-area-option.is-active");
+  const activeArea = normalizeItemName(activeAreaButton?.dataset?.area || "");
+  if (activeArea && activeArea !== "Other") return activeArea;
+
+  return normalizeItemName(state.selectedArea);
+}
+
 function isInvalidFallbackEntry(entry) {
   if (state.parserDebug?.parser_source !== "deterministic_fallback") return false;
   const cleanName = normalizeItemNameKey(entry.item_name_clean || entry.item_name || entry.name);
@@ -815,6 +827,7 @@ async function ensureCountSession() {
   if (!state.session || state.view !== "ready") throw new Error("Sign in before starting a count.");
   if (!state.backendConnected) throw new Error("Backend not connected. Start FastAPI on port 8000.");
 
+  state.selectedArea = getCurrentSelectedArea();
   state.isCreatingCount = true;
   render();
   try {
@@ -858,6 +871,7 @@ async function processCount() {
   const transcriptInput = document.querySelector("#mobile-transcript-input") || document.querySelector("#transcript-input");
   const transcript = (transcriptInput?.value || state.transcript).trim();
   state.transcript = transcript;
+  state.selectedArea = getCurrentSelectedArea();
   if (!transcript) {
     setError("Add a transcript before processing the count.");
     render();
@@ -954,6 +968,21 @@ async function exportCsv() {
     setError(error.status === 404 ? "CSV export failed. Please generate a report first." : `CSV export failed. ${error.message}`);
     render();
   }
+}
+
+function handleClearParsedInventory() {
+  const hadRows = state.parsedEntries.length > 0;
+  clearMessages();
+  state.parsedEntries = [];
+  state.parserDebug = null;
+  state.dataHealthItems = [];
+  state.report = null;
+  state.activeCountId = null;
+  state.countStartedAt = null;
+  state.isGeneratingReport = false;
+  state.status = "Ready";
+  setNotice(hadRows ? "Parsed inventory cleared. Transcript and area were kept." : "Parsed inventory is already clear.");
+  render();
 }
 
 async function startRecording() {
@@ -1748,10 +1777,10 @@ function renderDesktopSummaryPanel({ totalItems, needsReview, source, started, c
         ${renderDataHealth()}
       </div>
       <div class="summary-section summary-section--actions">
-        <button class="report-button report-button--primary" id="generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId ? "disabled" : ""}>
+        <button class="report-button report-button--primary" id="generate-report-button" type="button" ${state.isGeneratingReport || !state.activeCountId || !totalItems ? "disabled" : ""}>
           ${ProductIcon("file")} ${state.isGeneratingReport ? "Creating" : "Report"} <span>→</span>
         </button>
-        <button class="report-button" id="export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export</button>
+        <button class="report-button" id="export-csv-button" type="button" ${!state.activeCountId || !totalItems ? "disabled" : ""}>${ProductIcon("export")} Export</button>
         <button class="report-button report-button--disabled" id="send-sheets-button" type="button" disabled>${ProductIcon("sheet")} Sheets</button>
       </div>
     </section>
@@ -1887,7 +1916,10 @@ function render() {
                   <p>Koe turns your transcript into structured, clean data from the local backend.</p>
                   ${renderParserDebugLine()}
                 </div>
-                <button class="ghost-button" id="edit-items-button" type="button">${ProductIcon("edit")} Edit</button>
+                <div class="parsed-header-actions">
+                  <button class="ghost-button" id="edit-items-button" type="button">${ProductIcon("edit")} Edit</button>
+                  <button class="clear-parsed-button" id="clear-parsed-button" type="button">Clear</button>
+                </div>
               </div>
               ${renderInventoryTable()}
               <div class="table-footer">
@@ -2012,6 +2044,7 @@ function bindEvents() {
     setNotice("Manual row editing coming next.");
     render();
   });
+  document.querySelector("#clear-parsed-button")?.addEventListener("click", handleClearParsedInventory);
   document.querySelector("#add-item-button")?.addEventListener("click", () => {
     setNotice("Manual item entry coming next.");
     render();

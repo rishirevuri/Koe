@@ -1704,6 +1704,56 @@ button:disabled,
   border-radius: 8px;
 }
 
+.parsed-header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex: 0 0 auto;
+}
+
+.clear-parsed-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 18px;
+  color: #fffaf2;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.1), transparent 46%),
+    #06132d;
+  border: 1px solid rgba(6, 19, 45, 0.92);
+  border-radius: 12px;
+  box-shadow:
+    0 10px 20px rgba(6, 19, 45, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.13);
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.clear-parsed-button:hover {
+  transform: translateY(-1px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.13), transparent 46%),
+    #0b1b36;
+  border-color: rgba(6, 19, 45, 1);
+  box-shadow:
+    0 13px 24px rgba(6, 19, 45, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.16);
+}
+
+.clear-parsed-button:focus-visible {
+  outline: 3px solid rgba(170, 132, 80, 0.32);
+  outline-offset: 2px;
+}
+
 .product-table {
   width: 100%;
   border-collapse: separate;
@@ -3997,6 +4047,21 @@ button:disabled,
     width: 100%;
     min-height: 46px;
     padding-inline: 14px;
+  }
+
+  .parsed-header-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    width: 100%;
+    gap: 8px;
+  }
+
+  .product-shell .parsed-header-actions .ghost-button,
+  .product-shell .parsed-header-actions .clear-parsed-button {
+    width: 100%;
+    min-width: 0;
+    min-height: 46px;
+    padding-inline: 12px;
   }
 
   .parsed-card {
