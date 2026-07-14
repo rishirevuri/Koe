@@ -168,6 +168,7 @@ def test_voice_parse_save_report_and_csv() -> None:
     assert all("manager_note" not in entry for entry in entries)
     assert entries[0]["status"] == "Partial Quantity"
     assert entries[0]["counted_by"] == TEST_USER.email
+    assert {entry["area"] for entry in entries} == {"Dry Storage"}
     payload = parse_response.json()
     assert payload["parser_source"] == "deterministic_fallback"
     assert payload["external_ai_enabled"] is False
@@ -185,12 +186,14 @@ def test_voice_parse_save_report_and_csv() -> None:
         ("Tomatoes", 5.0, "boxes"),
         ("Cheese", 2.0, "boxes"),
     ]
+    assert {entry["area"] for entry in report["entries"]} == {"Dry Storage"}
 
     csv_response = client.get(f"/reports/{count_id}/csv")
     assert csv_response.status_code == 200
     csv_text = csv_response.text
     assert "Count ID,Restaurant ID,Area,Raw Item Name,Clean Item Name,Quantity,Unit,Status,Original Phrase,Created At,Counted By" in csv_text
     assert "olive oil,Olive oil,2.5,bottles,Partial Quantity" in csv_text
+    assert ",Dry Storage,olive oil,Olive oil," in csv_text
     assert "lettuce,Lettuce,3.0,heads,Clean" in csv_text
     assert "tomatoes,Tomatoes,5.0,boxes,Clean" in csv_text
     assert "cheese,Cheese,2.0,boxes,Clean" in csv_text
@@ -291,6 +294,25 @@ def test_voice_parse_mocked_claude_failure_returns_fallback_source(monkeypatch) 
     assert [(entry["item_name_clean"], entry["quantity"], entry["unit"]) for entry in payload["entries"]] == [
         ("Olive oil", 3.0, "bottles")
     ]
+
+
+def test_parse_voice_area_updates_entries_report_and_csv_when_count_started_without_area() -> None:
+    count_id = client.post("/counts", json={"notes": "No area at start"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": "3 bottles olive oil", "area": "Walk-in", "save": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["entries"][0]["area"] == "Walk-in"
+
+    report = client.get(f"/reports/{count_id}").json()
+    assert report["entries"][0]["area"] == "Walk-in"
+
+    csv_text = client.get(f"/reports/{count_id}/csv").text
+    assert ",Walk-in,olive oil,Olive oil," in csv_text
 
 
 def test_ownership_checks_prevent_other_restaurant_count_and_report() -> None:

@@ -93,6 +93,11 @@ def _handle_candidates(
     if not count or count.restaurant_id != restaurant_id:
         raise HTTPException(status_code=404, detail="Count session not found for restaurant")
 
+    resolved_area = area.strip() if isinstance(area, str) and area.strip() else count.area
+    if save and resolved_area and count.area != resolved_area:
+        count.area = resolved_area
+        db.add(count)
+
     parser_source = (parser_debug or {}).get("parser_source")
     parsed: list[ParsedEntry] = []
     for candidate in candidates:
@@ -116,7 +121,7 @@ def _handle_candidates(
                 quantity=candidate.quantity if candidate.quantity is not None else 0.0,
                 unit=candidate.unit or "",
                 status=status,
-                area=area or count.area,
+                area=resolved_area,
                 source=source,
                 raw_input=text,
                 original_phrase=candidate.raw_phrase,
@@ -149,7 +154,7 @@ def _handle_candidates(
                 restaurant_id=restaurant_id,
                 quantity=candidate.quantity,
                 unit=candidate.unit,
-                area=area or count.area,
+                area=resolved_area,
                 item_name_raw=candidate.item_name,
                 item_name_clean=clean_name,
                 category=candidate.category,
