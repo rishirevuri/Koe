@@ -985,6 +985,17 @@ function handleClearParsedInventory() {
   render();
 }
 
+function handleClearTranscript() {
+  clearMessages();
+  state.transcript = "";
+  state.recognitionBaseTranscript = "";
+  document.querySelectorAll("#transcript-input, #mobile-transcript-input").forEach((input) => {
+    input.value = "";
+  });
+  setNotice("Transcript cleared.");
+  render();
+}
+
 async function startRecording() {
   clearMessages();
 
@@ -1466,9 +1477,12 @@ function renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabe
           <textarea id="mobile-transcript-input" placeholder="Speak or type the count here...">${escapeHtml(state.transcript)}</textarea>
         </section>
 
-        <button class="mobile-process-button" id="mobile-process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
-          ${state.isProcessing ? "Processing" : "Process Count"} <i>→</i>
-        </button>
+        <div class="mobile-transcript-actions">
+          <button class="mobile-process-button" id="mobile-process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
+            ${state.isProcessing ? "Processing" : "Process Count"} <i>→</i>
+          </button>
+          <button class="transcript-clear-button" id="mobile-clear-transcript-button" type="button">Clear</button>
+        </div>
       </section>
 
       <section class="mobile-parsed-section">
@@ -1900,6 +1914,7 @@ function render() {
                   <label for="transcript-input">Transcript</label>
                   <textarea id="transcript-input" placeholder="Paste or type what your staff counted...">${escapeHtml(state.transcript)}</textarea>
                   <div class="transcript-actions">
+                    <button class="transcript-clear-button" id="clear-transcript-button" type="button">Clear</button>
                     <button class="new-count-button process-button" id="process-count-button" type="button" ${state.isProcessing ? "disabled" : ""}>
                       ${state.isProcessing ? "Processing" : "Process"}
                     </button>
@@ -2024,6 +2039,8 @@ function bindEvents() {
   document.querySelector("#mobile-start-count-button")?.addEventListener("click", startNewCount);
   document.querySelector("#process-count-button")?.addEventListener("click", processCount);
   document.querySelector("#mobile-process-count-button")?.addEventListener("click", processCount);
+  document.querySelector("#clear-transcript-button")?.addEventListener("click", handleClearTranscript);
+  document.querySelector("#mobile-clear-transcript-button")?.addEventListener("click", handleClearTranscript);
   document.querySelector("#mic-button")?.addEventListener("click", handleMicButtonClick);
   document.querySelector("#mobile-mic-button")?.addEventListener("click", handleMicButtonClick);
   document.querySelector("#recording-start-action")?.addEventListener("click", handlePrimaryRecordingAction);
