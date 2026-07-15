@@ -1,5 +1,4 @@
 import {
-  createRestaurant,
   downloadCsv,
   getAuthMe,
   getCountSessions,
@@ -29,6 +28,7 @@ const CATEGORY_COLORS = {
   Other: "#cfc8bc",
   Uncategorized: "#d8d6cf",
 };
+const CATEGORY_FALLBACK_COLORS = ["#9fbf9f", "#f0d980", "#b98272", "#7da4b8", "#c79a4b", "#8aa0c4", "#a8d1df", "#a9ada8"];
 const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Liquids", "Dry Goods", "Bar", "Frozen", "Supplies", "Other", "Uncategorized"];
 
 const state = {
@@ -38,8 +38,6 @@ const state = {
   data: null,
   activeTab: getDashboardTabFromHash(),
   restaurants: [],
-  setupRestaurantName: "",
-  setupLoading: false,
   userEmail: "",
   countSessions: [],
   countsLoading: false,
@@ -289,17 +287,56 @@ function normalizeCategoryLabel(value) {
   return categoryMap[normalized] || raw.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function firstPresentValue(...values) {
+  return values.find((value) => String(value ?? "").trim());
+}
+
+function inferCategoryFromRow(row) {
+  const name = String(row?.item_name_clean || row?.item_name_raw || row?.item_name || "").toLowerCase();
+  const unit = String(row?.unit || "").toLowerCase();
+  if (/\b(tomato|tomatoes|lettuce|cucumber|cucumbers|cilantro|onion|onions|pepper|peppers|potato|potatoes|lime|limes|lemon|lemons|fruit|herb|herbs|greens|produce)\b/.test(name)) {
+    return "Produce";
+  }
+  if (/\b(milk|cream|egg|eggs|cheese|butter|yogurt|dairy)\b/.test(name)) {
+    return "Dairy & Eggs";
+  }
+  if (/\b(chicken|beef|pork|bacon|steak|fish|salmon|tuna|shrimp|turkey|wing|wings|breast|breasts|meat)\b/.test(name)) {
+    return "Meats";
+  }
+  if (/\b(oil|vinegar|water|sauce|syrup|stock|broth|juice|marinara)\b/.test(name) || ["bottles", "gallons", "ounces", "liters", "quarts", "pints"].includes(unit)) {
+    return "Liquids";
+  }
+  if (/\b(flour|rice|sugar|dough|pasta|bread|bun|buns|napkin|napkins|dry)\b/.test(name)) {
+    return name.includes("napkin") ? "Supplies" : "Dry Goods";
+  }
+  if (/\b(coke|tonic|sparkling|wine|beer|liquor|bar)\b/.test(name)) {
+    return "Bar";
+  }
+  if (/\b(frozen|freezer|ice cream|fries|mozzarella sticks|veggie patties)\b/.test(name)) {
+    return "Frozen";
+  }
+  if (/\b(napkin|napkins|roll|rolls|sleeve|sleeves|container|containers|supply|supplies)\b/.test(name)) {
+    return "Supplies";
+  }
+  return "Uncategorized";
+}
+
 function getRowCategory(row) {
-  return normalizeCategoryLabel(
-    row?.category ||
-      row?.item_category ||
-      row?.category_name ||
-      row?.itemCategory ||
-      row?.clean_category ||
-      row?.normalized_category ||
-      row?.metadata?.category ||
-      row?.entry?.category,
+  const directCategory = firstPresentValue(
+    row?.category,
+    row?.parsed_category,
+    row?.item_category,
+    row?.category_name,
+    row?.itemCategory,
+    row?.clean_category,
+    row?.normalized_category,
+    row?.metadata?.category,
+    row?.entry?.category,
+    row?.inventory_item?.category,
+    row?.inventoryItem?.category,
+    row?.item?.category,
   );
+  return normalizeCategoryLabel(directCategory || inferCategoryFromRow(row));
 }
 
 function getCategory(row) {
@@ -343,6 +380,10 @@ function getCategoryCounts(rows) {
       const bIndex = CATEGORY_ORDER.indexOf(b.category);
       return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex) || a.category.localeCompare(b.category);
     });
+}
+
+function getCategoryColor(category, index = 0) {
+  return CATEGORY_COLORS[category] || CATEGORY_FALLBACK_COLORS[index % CATEGORY_FALLBACK_COLORS.length] || CATEGORY_COLORS.Uncategorized;
 }
 
 function getCategoryStatusBreakdown(rows) {
@@ -458,13 +499,21 @@ async function initialize() {
     return;
   }
   debugAuthFlow("dashboard restaurant fetch result", { count: state.restaurants.length });
+  consumeGoogleDashboardRedirect();
 
   if (!state.restaurants.length) {
-    consumeGoogleDashboardRedirect();
     setSelectedRestaurantId("");
-    state.phase = "setup-restaurant";
-    debugAuthFlow("dashboard route decision", { route: "onboarding", restaurantCount: 0 });
-    renderRestaurantSetup();
+    state.phase = "select-restaurant";
+    debugAuthFlow("dashboard route decision", { route: "chooser", restaurantCount: 0 });
+    renderRestaurantChooser();
+    return;
+  }
+
+  if (arrivedFromLogin) {
+    setSelectedRestaurantId("");
+    state.phase = "select-restaurant";
+    debugAuthFlow("dashboard route decision", { route: "chooser", restaurantCount: state.restaurants.length, reason: "fresh_login" });
+    renderRestaurantChooser();
     return;
   }
 
@@ -495,9 +544,10 @@ async function initialize() {
       return;
     }
     if (error.status === 404) {
-      state.phase = "setup-restaurant";
-      debugAuthFlow("dashboard route decision", { route: "onboarding", reason: "selected_restaurant_missing" });
-      renderRestaurantSetup();
+      setSelectedRestaurantId("");
+      state.phase = "select-restaurant";
+      debugAuthFlow("dashboard route decision", { route: "chooser", reason: "selected_restaurant_missing" });
+      renderRestaurantChooser();
       return;
     }
     // Backend reachable problem but still signed in: show the shell with an error.
@@ -523,40 +573,6 @@ window.addEventListener("hashchange", () => {
     }
   }
 });
-
-async function submitRestaurantSetup(event) {
-  event.preventDefault();
-  const name = document.querySelector("#dashboard-restaurant-name")?.value.trim() || state.setupRestaurantName.trim();
-  if (!name) {
-    state.phase = "setup-restaurant";
-    state.error = "Enter your restaurant name.";
-    renderRestaurantSetup();
-    return;
-  }
-
-  state.setupRestaurantName = name;
-  state.setupLoading = true;
-  state.error = "";
-  renderRestaurantSetup();
-
-  try {
-    const restaurant = await createRestaurant(name);
-    setSelectedRestaurantId(restaurant.id);
-    state.restaurants = [restaurant];
-    state.restaurantName = restaurant.name || state.restaurantName;
-    state.phase = "loading";
-    renderShell();
-    await loadSummary();
-  } catch (error) {
-    state.phase = "setup-restaurant";
-    state.error = error.message || "Could not create your restaurant workspace.";
-  } finally {
-    state.setupLoading = false;
-    if (state.phase === "setup-restaurant") {
-      renderRestaurantSetup();
-    }
-  }
-}
 
 async function selectRestaurant(restaurantId) {
   const restaurant = state.restaurants.find((item) => String(item.id) === String(restaurantId));
@@ -648,62 +664,46 @@ async function exportLatestCount() {
 }
 
 function renderRestaurantChooser() {
+  const hasRestaurants = state.restaurants.length > 0;
   app.innerHTML = `
     <main class="restaurant-select-shell">
       <section class="restaurant-select-panel">
         <a href="./index.html" class="product-logo">Koe</a>
         <div class="restaurant-select-copy">
-          <h1>Choose a restaurant</h1>
-          <p>Select the workspace you want to open.</p>
+          <h1>${hasRestaurants ? "Choose a restaurant" : "No registered restaurants"}</h1>
+          <p>${
+            hasRestaurants
+              ? "Select the workspace you want to open."
+              : "This login is not connected to a restaurant workspace yet. Use a different login or ask the account owner to add this account."
+          }</p>
         </div>
-        <div class="restaurant-choice-list">
-          ${state.restaurants
-            .map(
-              (restaurant) => `
-                <button class="restaurant-choice-button" data-restaurant-id="${restaurant.id}" type="button">
-                  <span>
-                    <strong>${escapeHtml(restaurant.name)}</strong>
-                    <small>${escapeHtml(restaurant.location || "Restaurant workspace")}</small>
-                  </span>
-                  <i aria-hidden="true">→</i>
-                </button>
-              `,
-            )
-            .join("")}
-        </div>
+        ${
+          hasRestaurants
+            ? `<div class="restaurant-choice-list">
+                ${state.restaurants
+                  .map(
+                    (restaurant) => `
+                      <button class="restaurant-choice-button" data-restaurant-id="${restaurant.id}" type="button">
+                        <span>
+                          <strong>${escapeHtml(restaurant.name)}</strong>
+                          <small>${escapeHtml(restaurant.location || "Restaurant workspace")}</small>
+                        </span>
+                        <i aria-hidden="true">→</i>
+                      </button>
+                    `,
+                  )
+                  .join("")}
+              </div>`
+            : `<div class="dashboard-calm">No restaurant workspaces are registered under ${escapeHtml(state.userEmail || "this account")}.</div>`
+        }
+        <button class="ghost-button dashboard-logout-button" id="restaurant-chooser-logout" type="button">Use a different login</button>
       </section>
     </main>
   `;
   document.querySelectorAll(".restaurant-choice-button").forEach((button) => {
     button.addEventListener("click", () => selectRestaurant(button.dataset.restaurantId));
   });
-}
-
-function renderRestaurantSetup() {
-  app.innerHTML = `
-    <main class="restaurant-select-shell">
-      <section class="restaurant-select-panel">
-        <a href="./index.html" class="product-logo">Koe</a>
-        <div class="restaurant-select-copy">
-          <h1>Set up your restaurant</h1>
-          <p>${escapeHtml(state.userEmail || "This Google account")} is signed in. Add your restaurant workspace to open the dashboard.</p>
-        </div>
-        <form class="dashboard-setup-form" id="dashboard-setup-form">
-          <label for="dashboard-restaurant-name">
-            <span>Name of Restaurant</span>
-            <input id="dashboard-restaurant-name" type="text" autocomplete="organization" placeholder="Restaurant name" value="${escapeHtml(state.setupRestaurantName)}" ${state.setupLoading ? "disabled" : ""} required />
-          </label>
-          ${state.error ? `<p class="message message--error">${escapeHtml(state.error)}</p>` : ""}
-          <button class="new-count-button" type="submit" ${state.setupLoading ? "disabled" : ""}>
-            ${state.setupLoading ? "Creating workspace..." : "Continue to Dashboard"}
-          </button>
-        </form>
-        <button class="ghost-button dashboard-logout-button" id="dashboard-setup-logout" type="button">Use a different login</button>
-      </section>
-    </main>
-  `;
-  document.querySelector("#dashboard-setup-form")?.addEventListener("submit", submitRestaurantSetup);
-  document.querySelector("#dashboard-setup-logout")?.addEventListener("click", logout);
+  document.querySelector("#restaurant-chooser-logout")?.addEventListener("click", logout);
 }
 
 async function loadSummary() {
@@ -1063,10 +1063,10 @@ function renderDonutChart(categories, total) {
   const gradient = total
     ? `conic-gradient(${categories
         .reduce(
-          (segments, item) => {
+          (segments, item, index) => {
             const start = segments.cursor;
             const end = start + (item.count / total) * 100;
-            segments.parts.push(`${CATEGORY_COLORS[item.category] || CATEGORY_COLORS.Uncategorized} ${start.toFixed(2)}% ${end.toFixed(2)}%`);
+            segments.parts.push(`${getCategoryColor(item.category, index)} ${start.toFixed(2)}% ${end.toFixed(2)}%`);
             segments.cursor = end;
             return segments;
           },
@@ -1083,11 +1083,11 @@ function renderDonutChart(categories, total) {
         ${
           total
             ? categories
-                .map((item) => {
+                .map((item, index) => {
                   const percent = Math.round((item.count / total) * 100);
                   return `
                     <div class="donut-legend-row">
-                      <i style="background: ${escapeHtml(CATEGORY_COLORS[item.category] || CATEGORY_COLORS.Uncategorized)}"></i>
+                      <i style="background: ${escapeHtml(getCategoryColor(item.category, index))}"></i>
                       <span>${escapeHtml(item.category)}</span>
                       <b>${item.count}</b>
                       <small>${percent}%</small>
