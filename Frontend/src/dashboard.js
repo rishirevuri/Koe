@@ -12,6 +12,18 @@ import { isSupabaseConfigured, supabase } from "./supabaseClient.js";
 import { bindSidebar, renderSidebar } from "./sidebar.js";
 
 const app = document.querySelector("#dashboard-app");
+const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
+const CATEGORY_COLORS = {
+  Produce: "#9fbf9f",
+  "Dairy & Eggs": "#f0d980",
+  Meats: "#b98272",
+  "Dry Goods": "#c79a4b",
+  Bar: "#7da4b8",
+  Frozen: "#a8d1df",
+  Supplies: "#a9ada8",
+  Uncategorized: "#d8d6cf",
+};
+const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Dry Goods", "Bar", "Frozen", "Supplies", "Uncategorized"];
 
 const state = {
   restaurantName: "Your Restaurant",
@@ -30,6 +42,9 @@ const state = {
   selectedReport: null,
   reportLoading: false,
   reportError: "",
+  latestReport: null,
+  latestReportLoading: false,
+  latestReportError: "",
   exportLoading: false,
 };
 
@@ -123,7 +138,127 @@ function formatDuration(seconds) {
 }
 
 function formatQty(value) {
+  if (value === null || value === undefined || value === "") return "—";
   return Number.isInteger(value) ? String(value) : String(value);
+}
+
+function getLatestCount(data = state.data) {
+  return data?.last_count_summary || null;
+}
+
+function getLatestCountId(data = state.data) {
+  return data?.last_count_summary?.count_id || data?.export_status?.count_id || null;
+}
+
+function getRowsForCount(countId = getLatestCountId()) {
+  if (!countId || Number(state.latestReport?.count_id) !== Number(countId)) return [];
+  return state.latestReport?.entries || [];
+}
+
+function isReviewStatus(status) {
+  return REVIEW_STATUSES.has(status);
+}
+
+function isPartialRow(row) {
+  return row?.status === "Partial Quantity" || (typeof row?.quantity === "number" && !Number.isInteger(row.quantity));
+}
+
+function getCategory(row) {
+  return row?.category || "Uncategorized";
+}
+
+function getStatusCounts(rows) {
+  return rows.reduce(
+    (counts, row) => {
+      counts.total += 1;
+      if (row.status === "Clean") counts.clean += 1;
+      if (isReviewStatus(row.status)) counts.review += 1;
+      if (isPartialRow(row)) counts.partial += 1;
+      if (row.status === "Converted Unit") counts.converted += 1;
+      if (!row.area) counts.missingArea += 1;
+      if (getCategory(row) === "Uncategorized") counts.uncategorized += 1;
+      return counts;
+    },
+    {
+      total: 0,
+      clean: 0,
+      review: 0,
+      partial: 0,
+      converted: 0,
+      missingArea: 0,
+      uncategorized: 0,
+    },
+  );
+}
+
+function getCategoryCounts(rows) {
+  const counts = new Map();
+  rows.forEach((row) => {
+    const category = getCategory(row);
+    counts.set(category, (counts.get(category) || 0) + 1);
+  });
+  return [...counts.entries()]
+    .map(([category, count]) => ({ category, count }))
+    .sort((a, b) => {
+      const aIndex = CATEGORY_ORDER.indexOf(a.category);
+      const bIndex = CATEGORY_ORDER.indexOf(b.category);
+      return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex) || a.category.localeCompare(b.category);
+    });
+}
+
+function getCategoryStatusBreakdown(rows) {
+  const groups = new Map();
+  rows.forEach((row) => {
+    const category = getCategory(row);
+    if (!groups.has(category)) {
+      groups.set(category, { category, total: 0, clean: 0, partial: 0, review: 0, converted: 0 });
+    }
+    const group = groups.get(category);
+    group.total += 1;
+    if (isReviewStatus(row.status)) {
+      group.review += 1;
+    } else if (isPartialRow(row)) {
+      group.partial += 1;
+    } else if (row.status === "Converted Unit") {
+      group.converted += 1;
+    } else {
+      group.clean += 1;
+    }
+  });
+  return [...groups.values()].sort((a, b) => b.total - a.total || a.category.localeCompare(b.category));
+}
+
+function getDataQualityScore(rows) {
+  const counts = getStatusCounts(rows);
+  if (!counts.total) return { value: null, label: "No data" };
+  const value = Math.round(((counts.total - counts.review) / counts.total) * 100);
+  return {
+    value,
+    label: value >= 90 ? "Great" : value >= 75 ? "Good" : "Needs cleanup",
+  };
+}
+
+function getPrioritySnapshotRows(rows) {
+  const priority = {
+    "Needs Review": 0,
+    "Missing Unit": 0,
+    "Possible Duplicate": 0,
+    "Partial Quantity": 1,
+    "Converted Unit": 2,
+    Clean: 3,
+  };
+  return [...rows]
+    .sort((a, b) => (priority[a.status] ?? 4) - (priority[b.status] ?? 4))
+    .slice(0, 8);
+}
+
+function summarizeExamples(rows, predicate) {
+  const names = rows.filter(predicate).map((row) => row.item_name_clean || row.item_name_raw || "Unnamed item");
+  const uniqueNames = [...new Set(names)];
+  if (!uniqueNames.length) return "None";
+  const shown = uniqueNames.slice(0, 3).join(", ");
+  const remaining = uniqueNames.length - 3;
+  return remaining > 0 ? `${shown} +${remaining} more` : shown;
 }
 
 async function logout() {
@@ -328,6 +463,23 @@ async function exportSelectedCount() {
   }
 }
 
+async function exportLatestCount() {
+  const countId = getLatestCountId();
+  if (!countId || state.exportLoading) return;
+  state.exportLoading = true;
+  renderShell();
+  try {
+    await downloadCsv(countId);
+    await loadSummary();
+  } catch (error) {
+    state.latestReportError = error.message || "CSV export failed.";
+    renderShell();
+  } finally {
+    state.exportLoading = false;
+    renderShell();
+  }
+}
+
 function renderRestaurantChooser() {
   app.innerHTML = `
     <main class="restaurant-select-shell">
@@ -393,8 +545,20 @@ async function loadSummary() {
   renderShell();
   try {
     state.data = await getDashboardSummary();
-    state.selectedCountId =
-      state.selectedCountId || state.data?.export_status?.count_id || state.data?.last_count_summary?.count_id || null;
+    const latestCountId = getLatestCountId(state.data);
+    state.selectedCountId = state.selectedCountId || latestCountId || null;
+    state.latestReport = null;
+    state.latestReportError = "";
+    if (latestCountId) {
+      state.latestReportLoading = true;
+      try {
+        state.latestReport = await getReport(latestCountId);
+      } catch (reportError) {
+        state.latestReportError = reportError.message || "Could not load latest count rows.";
+      } finally {
+        state.latestReportLoading = false;
+      }
+    }
     state.phase = "ready";
   } catch (error) {
     state.phase = "error";
@@ -427,6 +591,17 @@ function renderShell() {
     const countId = document.querySelector("#dashboard-open-latest")?.dataset.countId || state.selectedCountId;
     setDashboardTab("past-counts", countId);
   });
+  document.querySelector("#dashboard-export-latest")?.addEventListener("click", exportLatestCount);
+  document.querySelectorAll("[data-dashboard-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.dashboardAction;
+      if (action === "report") setDashboardTab("past-counts", getLatestCountId());
+      if (action === "export") exportLatestCount();
+      if (action === "review") {
+        document.querySelector("#dashboard-quality")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  });
   document.querySelector("#past-count-export")?.addEventListener("click", exportSelectedCount);
   document.querySelector("#past-count-refresh")?.addEventListener("click", () => loadPastCounts({ selectCountId: state.selectedCountId }));
 }
@@ -453,12 +628,29 @@ function renderContent() {
 
   const data = state.data || {};
   return `
-    <header class="dashboard-header">
-      <h1>Dashboard</h1>
-      <p>${escapeHtml(state.restaurantName)}</p>
-    </header>
+    ${renderPostCountHeader(data)}
     ${renderDashboardTabs()}
     ${state.activeTab === "past-counts" ? renderPastCounts() : renderOverviewContent(data)}
+  `;
+}
+
+function renderPostCountHeader(data) {
+  const latestCountId = getLatestCountId(data);
+  return `
+    <header class="dashboard-header dashboard-header--post-count">
+      <div>
+        <span>${escapeHtml(state.restaurantName)}</span>
+        <h1>Post-count overview</h1>
+        <p>Insights and data quality from your latest inventory count.</p>
+      </div>
+      <div class="dashboard-header-actions">
+        <a class="new-count-button" href="./product.html#count">New count</a>
+        <button class="dashboard-secondary-button" id="dashboard-export-latest" type="button" ${!latestCountId || state.exportLoading ? "disabled" : ""}>
+          ${state.exportLoading ? "Exporting..." : "Export CSV"}
+        </button>
+        <button class="dashboard-more-button" type="button" aria-label="More dashboard actions">•••</button>
+      </div>
+    </header>
   `;
 }
 
@@ -488,16 +680,412 @@ function renderOverviewContent(data) {
     `;
   }
 
+  const latestCount = getLatestCount(data);
+  const rows = getRowsForCount(latestCount?.count_id);
+  if (state.latestReportLoading) {
+    return `
+      <div class="dashboard-status post-count-loading">
+        <div class="dashboard-spinner" aria-hidden="true"></div>
+        <p>Loading count insights...</p>
+      </div>
+    `;
+  }
+  if (state.latestReportError) {
+    return `
+      <section class="post-count-empty-state">
+        <h2>Dashboard summary loaded</h2>
+        <p>${escapeHtml(state.latestReportError)}</p>
+        <button class="new-count-button" id="dashboard-open-latest" data-count-id="${escapeHtml(latestCount?.count_id || "")}" type="button">Open latest count</button>
+      </section>
+    `;
+  }
+  return renderPostCountOverview(data, latestCount, rows);
+}
+
+function renderPostCountOverview(data, latestCount, rows) {
   return `
-    ${renderMobileDashboardPanel(data)}
-    ${renderLowStock(data.low_stock_items || [])}
-    ${renderLastCount(data.last_count_summary)}
-    ${renderChanges(data.count_over_count_changes || [])}
-    ${renderDataQuality(data.data_quality_insights || [])}
-    ${renderExportStatus(data.export_status || {})}
-    <div class="dashboard-cta">
-      <a class="new-count-button" href="./product.html">New count</a>
+    ${renderKpiCards(rows)}
+    ${renderMainSummaryGrid(data, latestCount, rows)}
+    <section class="dashboard-analytics-grid">
+      ${renderInventoryBreakdown(rows)}
+      ${renderCategoryStatusCard(rows)}
+    </section>
+    <section class="dashboard-lower-grid">
+      ${renderLatestSnapshot(rows)}
+      ${renderDataQualitySummary(rows)}
+    </section>
+    ${renderBottomActionStrip(rows)}
+  `;
+}
+
+function renderKpiCards(rows) {
+  const counts = getStatusCounts(rows);
+  const quality = getDataQualityScore(rows);
+  const cards = [
+    { icon: "Σ", label: "Total items counted", value: counts.total, text: "Rows saved from latest count" },
+    { icon: "✓", label: "Clean items", value: counts.clean, text: "No cleanup flags" },
+    { icon: "!", label: "Needs review", value: counts.review, text: "Review before export" },
+    { icon: "½", label: "Partial quantities", value: counts.partial, text: "Fractions or partial containers" },
+    { icon: "↔", label: "Converted units", value: counts.converted, text: "Package conversions handled" },
+    { icon: "%", label: "Data quality score", value: quality.value === null ? "—" : `${quality.value}%`, text: quality.label },
+  ];
+  return `
+    <section class="post-count-kpis" aria-label="Latest count KPIs">
+      ${cards
+        .map(
+          (card) => `
+            <article class="post-count-kpi">
+              <span class="kpi-icon">${escapeHtml(card.icon)}</span>
+              <div>
+                <p>${escapeHtml(card.label)}</p>
+                <strong>${escapeHtml(card.value)}</strong>
+                <small>${escapeHtml(card.text)}</small>
+              </div>
+            </article>
+          `,
+        )
+        .join("")}
+    </section>
+  `;
+}
+
+function renderMainSummaryGrid(data, latestCount, rows) {
+  return `
+    <section class="dashboard-summary-grid">
+      ${renderCountSummaryCard(data, latestCount, rows)}
+      ${renderInsightsCard(data, rows)}
+      ${renderManagerActionsCard(rows)}
+    </section>
+  `;
+}
+
+function renderCountSummaryCard(data, latestCount, rows) {
+  const counts = getStatusCounts(rows);
+  const exported = Boolean(data.export_status?.exported);
+  const reviewText = counts.review > 0 ? "Review recommended before export" : "Ready to export";
+  return `
+    <article class="post-count-card count-summary-card">
+      <div class="post-count-card-heading">
+        <span>Count Summary</span>
+        <h2>${escapeHtml(latestCount?.area || "Latest count")}</h2>
+      </div>
+      <div class="count-summary-lines">
+        <div><span>Completed</span><strong>${escapeHtml(formatDateTime(latestCount?.completed_at || latestCount?.started_at))}</strong></div>
+        <div><span>Area covered</span><strong>${escapeHtml(latestCount?.area || "Not set")}</strong></div>
+        <div><span>Total items</span><strong>${counts.total}</strong></div>
+        <div><span>Review status</span><strong>${escapeHtml(reviewText)}</strong></div>
+        <div><span>Export status</span><strong>${exported ? "Exported" : "Not exported"}</strong></div>
+      </div>
+      <div class="count-summary-strip ${counts.review ? "is-review" : "is-clean"}">${escapeHtml(reviewText)}</div>
+    </article>
+  `;
+}
+
+function renderInsightsCard(data, rows) {
+  const counts = getStatusCounts(rows);
+  const lowStockCount = data.low_stock_items?.length || 0;
+  const insights = [
+    {
+      tone: "review",
+      icon: "!",
+      title: "Items needing review",
+      text: counts.review ? "Manager attention required before export." : "No review blockers found.",
+      value: counts.review,
+    },
+    {
+      tone: "partial",
+      icon: "½",
+      title: "Partial quantities detected",
+      text: counts.partial ? "Partial containers were normalized." : "No partial quantity rows.",
+      value: counts.partial,
+    },
+    {
+      tone: "converted",
+      icon: "↔",
+      title: "Unit conversions detected",
+      text: counts.converted ? "Package counts were converted." : "No converted unit rows.",
+      value: counts.converted,
+    },
+    {
+      tone: lowStockCount ? "review" : "neutral",
+      icon: "↗",
+      title: "Potential reorder watchlist",
+      text: lowStockCount ? "Items are below configured par levels." : "Par levels not configured yet.",
+      value: lowStockCount || "—",
+    },
+  ];
+  return `
+    <article class="post-count-card insights-card">
+      <div class="post-count-card-heading">
+        <span>Insights</span>
+        <h2>Recommendations</h2>
+      </div>
+      <div class="insight-action-list">
+        ${insights
+          .map(
+            (insight) => `
+              <div class="insight-action-row">
+                <i class="insight-dot insight-dot--${escapeHtml(insight.tone)}">${escapeHtml(insight.icon)}</i>
+                <span>
+                  <strong>${escapeHtml(insight.title)}</strong>
+                  <small>${escapeHtml(insight.text)}</small>
+                </span>
+                <b>${escapeHtml(insight.value)}</b>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderManagerActionsCard(rows) {
+  const counts = getStatusCounts(rows);
+  const ready = counts.review === 0;
+  const actions = [
+    { action: "review", label: "Review flagged items", detail: `${counts.review} items need attention`, highlighted: counts.review > 0 },
+    { action: "report", label: "Open full report", detail: "View the saved spreadsheet" },
+    { action: "export", label: "Export CSV", detail: "Download manager-ready rows" },
+  ];
+  return `
+    <article class="post-count-card manager-actions-card">
+      <div class="post-count-card-heading">
+        <span>Manager Actions</span>
+        <h2>Next steps</h2>
+      </div>
+      <div class="manager-action-list">
+        ${actions
+          .map(
+            (item) => `
+              <button class="manager-action ${item.highlighted ? "is-highlighted" : ""}" data-dashboard-action="${escapeHtml(item.action)}" type="button">
+                <span>
+                  <strong>${escapeHtml(item.label)}</strong>
+                  <small>${escapeHtml(item.detail)}</small>
+                </span>
+                <i>›</i>
+              </button>
+            `,
+          )
+          .join("")}
+        <a class="manager-action" href="./product.html#count">
+          <span><strong>Start new count</strong><small>Begin another area count</small></span>
+          <i>›</i>
+        </a>
+      </div>
+      ${ready ? `<div class="ready-strip">Ready to export</div>` : ""}
+    </article>
+  `;
+}
+
+function renderInventoryBreakdown(rows) {
+  const categories = getCategoryCounts(rows);
+  const total = rows.length;
+  return `
+    <article class="post-count-card inventory-breakdown-card">
+      <div class="post-count-card-heading">
+        <span>Inventory Breakdown</span>
+        <h2>Category mix</h2>
+      </div>
+      ${renderDonutChart(categories, total)}
+    </article>
+  `;
+}
+
+function renderDonutChart(categories, total) {
+  const gradient = total
+    ? `conic-gradient(${categories
+        .reduce(
+          (segments, item) => {
+            const start = segments.cursor;
+            const end = start + (item.count / total) * 100;
+            segments.parts.push(`${CATEGORY_COLORS[item.category] || CATEGORY_COLORS.Uncategorized} ${start.toFixed(2)}% ${end.toFixed(2)}%`);
+            segments.cursor = end;
+            return segments;
+          },
+          { cursor: 0, parts: [] },
+        )
+        .parts.join(", ")})`
+    : `conic-gradient(${CATEGORY_COLORS.Uncategorized} 0 100%)`;
+  return `
+    <div class="donut-layout">
+      <div class="donut-chart" style="background: ${escapeHtml(gradient)}">
+        <div><strong>${total || "—"}</strong><span>Total items</span></div>
+      </div>
+      <div class="donut-legend">
+        ${
+          total
+            ? categories
+                .map((item) => {
+                  const percent = Math.round((item.count / total) * 100);
+                  return `
+                    <div class="donut-legend-row">
+                      <i style="background: ${escapeHtml(CATEGORY_COLORS[item.category] || CATEGORY_COLORS.Uncategorized)}"></i>
+                      <span>${escapeHtml(item.category)}</span>
+                      <b>${item.count}</b>
+                      <small>${percent}%</small>
+                    </div>
+                  `;
+                })
+                .join("")
+            : `<p>No category data yet.</p>`
+        }
+      </div>
     </div>
+  `;
+}
+
+function renderCategoryStatusCard(rows) {
+  const breakdown = getCategoryStatusBreakdown(rows);
+  return `
+    <article class="post-count-card category-status-card">
+      <div class="post-count-card-heading">
+        <span>Category Status</span>
+        <h2>Quality by group</h2>
+      </div>
+      <div class="category-status-list">
+        ${
+          breakdown.length
+            ? breakdown.map((group) => renderCategoryStatusRow(group)).join("")
+            : `<div class="dashboard-calm">No category rows available yet.</div>`
+        }
+      </div>
+    </article>
+  `;
+}
+
+function renderCategoryStatusRow(group) {
+  const segments = [
+    ["clean", group.clean],
+    ["partial", group.partial],
+    ["review", group.review],
+    ["converted", group.converted],
+  ];
+  return `
+    <div class="category-status-row">
+      <div class="category-status-top">
+        <strong>${escapeHtml(group.category)}</strong>
+        <span>${group.total} items</span>
+      </div>
+      <div class="category-status-bar">
+        ${segments
+          .filter(([, value]) => value > 0)
+          .map(([name, value]) => `<i class="status-segment status-segment--${name}" style="width: ${(value / group.total) * 100}%"></i>`)
+          .join("")}
+      </div>
+      <div class="category-status-chips">
+        ${group.review ? `<span class="review-chip">${group.review} review</span>` : ""}
+        ${group.partial ? `<span class="partial-chip">${group.partial} partial</span>` : ""}
+        ${group.converted ? `<span class="converted-chip">${group.converted} converted</span>` : ""}
+      </div>
+    </div>
+  `;
+}
+
+function renderLatestSnapshot(rows) {
+  const snapshot = getPrioritySnapshotRows(rows);
+  return `
+    <article class="post-count-card latest-snapshot-card">
+      <div class="post-count-card-heading">
+        <span>Latest Count Snapshot</span>
+        <h2>Rows to scan</h2>
+      </div>
+      ${
+        snapshot.length
+          ? `<div class="snapshot-table">
+              <div class="snapshot-row snapshot-row--head"><span>Item</span><span>Category</span><span>Qty</span><span>Unit</span><span>Status</span></div>
+              ${snapshot
+                .map(
+                  (row) => `
+                    <div class="snapshot-row">
+                      <span>${escapeHtml(row.item_name_clean || row.item_name_raw || "Unnamed item")}</span>
+                      <span>${escapeHtml(getCategory(row))}</span>
+                      <span>${escapeHtml(formatQty(row.quantity))}</span>
+                      <span>${escapeHtml(row.unit || "—")}</span>
+                      <span><i class="status-pill ${statusClass(row.status)}">${escapeHtml(row.status || "Clean")}</i></span>
+                    </div>
+                  `,
+                )
+                .join("")}
+            </div>`
+          : `<div class="dashboard-calm">No saved rows found for the latest count.</div>`
+      }
+    </article>
+  `;
+}
+
+function renderDataQualitySummary(rows) {
+  const counts = getStatusCounts(rows);
+  const groups = [
+    {
+      label: "Review required",
+      count: counts.review,
+      examples: summarizeExamples(rows, (row) => isReviewStatus(row.status)),
+      tone: "review",
+    },
+    {
+      label: "Partial quantities",
+      count: counts.partial,
+      examples: summarizeExamples(rows, (row) => isPartialRow(row)),
+      tone: "partial",
+    },
+    {
+      label: "Unit conversions",
+      count: counts.converted,
+      examples: summarizeExamples(rows, (row) => row.status === "Converted Unit"),
+      tone: "converted",
+    },
+    {
+      label: "Missing areas",
+      count: counts.missingArea,
+      examples: summarizeExamples(rows, (row) => !row.area),
+      tone: "review",
+    },
+    {
+      label: "Uncategorized items",
+      count: counts.uncategorized,
+      examples: summarizeExamples(rows, (row) => getCategory(row) === "Uncategorized"),
+      tone: "neutral",
+    },
+  ];
+  return `
+    <article class="post-count-card data-quality-card" id="dashboard-quality">
+      <div class="post-count-card-heading">
+        <span>Data Quality</span>
+        <h2>Cleanup summary</h2>
+      </div>
+      <div class="quality-group-list">
+        ${groups
+          .map(
+            (group) => `
+              <div class="quality-group quality-group--${escapeHtml(group.tone)}">
+                <div><strong>${escapeHtml(group.label)} — ${group.count} items</strong><small>${escapeHtml(group.examples)}</small></div>
+              </div>
+            `,
+          )
+          .join("")}
+      </div>
+    </article>
+  `;
+}
+
+function renderBottomActionStrip(rows) {
+  const counts = getStatusCounts(rows);
+  const message =
+    counts.review === 0
+      ? "Great job — this count is clean and export-ready."
+      : "Almost done — review flagged items before export.";
+  return `
+    <section class="dashboard-action-strip">
+      <p>${escapeHtml(message)}</p>
+      <div>
+        <button class="dashboard-secondary-button" data-dashboard-action="report" type="button">Open Full Report</button>
+        <button class="dashboard-secondary-button" data-dashboard-action="review" type="button">Review Flagged Items</button>
+        <button class="new-count-button" data-dashboard-action="export" type="button" ${state.exportLoading ? "disabled" : ""}>
+          ${state.exportLoading ? "Exporting..." : "Export CSV"}
+        </button>
+      </div>
+    </section>
   `;
 }
 
