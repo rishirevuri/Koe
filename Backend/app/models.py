@@ -72,6 +72,7 @@ class CountEntry(Base):
     item_name_raw: Mapped[str | None] = mapped_column(String(255), nullable=True)
     item_name: Mapped[str] = mapped_column(String(255), nullable=False)
     normalized_item_name: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    category: Mapped[str | None] = mapped_column(String(120), nullable=True)
     quantity: Mapped[float] = mapped_column(Float, nullable=False)
     unit: Mapped[str] = mapped_column(String(80), nullable=False)
     status: Mapped[str] = mapped_column(String(80), default="Clean", nullable=False)

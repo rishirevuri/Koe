@@ -283,6 +283,61 @@ def test_voice_parse_repairs_legacy_count_entry_category_column() -> None:
     assert all(entry["is_demo_estimate"] is True for entry in payload["entries"])
 
 
+def test_count_entry_model_accepts_category_constructor_keyword() -> None:
+    assert "category" in inspect(CountEntry).attrs.keys()
+
+    entry = CountEntry(category="Produce")
+
+    assert entry.category == "Produce"
+
+
+def test_voice_parse_saves_claude_category(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        return [
+            ParsedCandidate(
+                raw_phrase="16 tomatoes",
+                quantity=16,
+                unit="individual",
+                item_name="Tomatoes",
+                partial_detail=None,
+                needs_review=False,
+                review_reason=None,
+                status="Clean",
+                category="Produce",
+            )
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "16 tomatoes",
+            "area": "Walk-in",
+            "save": True,
+        },
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["item_name_clean"] == "Tomatoes"
+    assert entry["quantity"] == 16
+    assert entry["unit"] == "individual"
+    assert entry["category"] == "Produce"
+
+    db = SessionLocal()
+    try:
+        saved_entry = db.query(CountEntry).filter(CountEntry.count_session_id == count_id).one()
+        assert saved_entry.category == "Produce"
+    finally:
+        db.close()
+
+
 def test_unknown_item_creates_issue() -> None:
     count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
     response = client.post(
