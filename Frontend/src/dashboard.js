@@ -17,13 +17,15 @@ const CATEGORY_COLORS = {
   Produce: "#9fbf9f",
   "Dairy & Eggs": "#f0d980",
   Meats: "#b98272",
+  Liquids: "#7da4b8",
   "Dry Goods": "#c79a4b",
-  Bar: "#7da4b8",
+  Bar: "#8aa0c4",
   Frozen: "#a8d1df",
   Supplies: "#a9ada8",
+  Other: "#cfc8bc",
   Uncategorized: "#d8d6cf",
 };
-const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Dry Goods", "Bar", "Frozen", "Supplies", "Uncategorized"];
+const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Liquids", "Dry Goods", "Bar", "Frozen", "Supplies", "Other", "Uncategorized"];
 
 const state = {
   restaurantName: "Your Restaurant",
@@ -163,8 +165,51 @@ function isPartialRow(row) {
   return row?.status === "Partial Quantity" || (typeof row?.quantity === "number" && !Number.isInteger(row.quantity));
 }
 
+function normalizeCategoryLabel(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "Uncategorized";
+  const normalized = raw.toLowerCase().replaceAll("&", "and").replaceAll("_", " ").replace(/\s+/g, " ").trim();
+  const categoryMap = {
+    produce: "Produce",
+    "dairy eggs": "Dairy & Eggs",
+    "dairy and eggs": "Dairy & Eggs",
+    dairy: "Dairy & Eggs",
+    eggs: "Dairy & Eggs",
+    meat: "Meats",
+    meats: "Meats",
+    "dry goods": "Dry Goods",
+    dry: "Dry Goods",
+    liquid: "Liquids",
+    liquids: "Liquids",
+    oil: "Liquids",
+    oils: "Liquids",
+    beverage: "Liquids",
+    beverages: "Liquids",
+    bar: "Bar",
+    frozen: "Frozen",
+    supplies: "Supplies",
+    supply: "Supplies",
+    other: "Other",
+    uncategorized: "Uncategorized",
+  };
+  return categoryMap[normalized] || raw.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function getRowCategory(row) {
+  return normalizeCategoryLabel(
+    row?.category ||
+      row?.item_category ||
+      row?.category_name ||
+      row?.itemCategory ||
+      row?.clean_category ||
+      row?.normalized_category ||
+      row?.metadata?.category ||
+      row?.entry?.category,
+  );
+}
+
 function getCategory(row) {
-  return row?.category || "Uncategorized";
+  return getRowCategory(row);
 }
 
 function getStatusCounts(rows) {
@@ -1047,7 +1092,7 @@ function renderDataQualitySummary(rows) {
       examples: summarizeExamples(rows, (row) => getCategory(row) === "Uncategorized"),
       tone: "neutral",
     },
-  ];
+  ].filter((group) => group.count > 0 || ["Review required", "Partial quantities", "Unit conversions"].includes(group.label));
   return `
     <article class="post-count-card data-quality-card" id="dashboard-quality">
       <div class="post-count-card-heading">

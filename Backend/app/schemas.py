@@ -195,6 +195,7 @@ class ReportEntry(BaseModel):
     area: str | None
     item_name_raw: str | None
     item_name_clean: str
+    category: str | None = None
     quantity: float
     unit: str
     status: str

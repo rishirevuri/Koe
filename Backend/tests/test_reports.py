@@ -4,7 +4,14 @@ from app.services.report_service import build_csv, build_report
 
 def test_report_summary_and_csv() -> None:
     restaurant = Restaurant(id=1, name="Demo Restaurant")
-    item = InventoryItem(id=1, restaurant_id=1, name="Olive oil", normalized_name="olive oil", default_unit="bottles")
+    item = InventoryItem(
+        id=1,
+        restaurant_id=1,
+        name="Olive oil",
+        normalized_name="olive oil",
+        category="Oils",
+        default_unit="bottles",
+    )
     count = CountSession(id=1, restaurant_id=1, status="approved", restaurant=restaurant)
     entry = CountEntry(
         id=1,
@@ -30,6 +37,7 @@ def test_report_summary_and_csv() -> None:
     report = build_report(count)
     assert report["summary"] == {"total_items": 1, "items_needing_review": 0}
     assert report["entries"][0]["item_name_clean"] == "Olive oil"
+    assert report["entries"][0]["category"] == "Oils"
     csv_text = build_csv(count)
     assert "Count ID,Restaurant ID,Area,Raw Item Name,Clean Item Name,Quantity,Unit,Status,Original Phrase,Created At,Counted By" in csv_text
     assert "1,1,Dry Storage,olive oil,Olive oil,2.5,bottles,Partial Quantity" in csv_text

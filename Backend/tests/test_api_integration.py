@@ -186,6 +186,12 @@ def test_voice_parse_save_report_and_csv() -> None:
         ("Tomatoes", 5.0, "boxes"),
         ("Cheese", 2.0, "boxes"),
     ]
+    assert [(entry["item_name_clean"], entry["category"]) for entry in report["entries"]] == [
+        ("Olive oil", "Oils"),
+        ("Lettuce", "Produce"),
+        ("Tomatoes", "Produce"),
+        ("Cheese", "Dairy"),
+    ]
     assert {entry["area"] for entry in report["entries"]} == {"Dry Storage"}
 
     csv_response = client.get(f"/reports/{count_id}/csv")

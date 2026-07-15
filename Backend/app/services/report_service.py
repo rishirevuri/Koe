@@ -30,6 +30,7 @@ def _entry_row(entry: CountEntry) -> dict:
         "area": entry.area,
         "item_name_raw": entry.item_name_raw or entry.item_name,
         "item_name_clean": entry.inventory_item.name if entry.inventory_item else entry.item_name,
+        "category": entry.inventory_item.category if entry.inventory_item else None,
         "quantity": entry.quantity,
         "unit": entry.unit,
         "status": _entry_status(entry),
