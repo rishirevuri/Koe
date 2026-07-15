@@ -766,10 +766,14 @@ async function handleAuthSubmit(mode) {
       return;
     }
   }
-  setNotice(mode === "signup" ? "Account created. Check your email if confirmation is enabled." : "Logged in.");
-  // After a successful auth + confirmed workspace, land on the dashboard.
-  state.pendingDashboardRedirect = true;
-  await initializeAuthFlow();
+  if (!result.data?.session) {
+    setNotice(mode === "signup" ? "Account created. Check your email if confirmation is enabled." : "Check your email to finish signing in.");
+    render();
+    return;
+  }
+
+  state.navigatingAway = true;
+  window.location.assign("./dashboard.html");
 }
 
 async function handleResetPassword() {
@@ -812,6 +816,7 @@ async function handleGoogleSignIn() {
   }
 
   state.authLoading = true;
+  setSelectedRestaurantId("");
   requestGoogleDashboardRedirect();
   render();
   const { error } = await supabase.auth.signInWithOAuth({
