@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.database import get_db
+from app.database import ensure_count_entry_columns, get_db
 from app.models import CountEntry, CountSession, utc_now
 from app.schemas import MatchResponse, NormalizeItemRequest, ParseResponse, ParseUploadRequest, ParseVoiceRequest, ParsedEntry
 from app.config import get_settings
@@ -28,6 +28,23 @@ INVALID_FALLBACK_ITEM_NAMES = {
     "is half empty",
     "more on the bottom shelf",
 }
+
+
+def _candidate_log_summary(
+    candidate: ParsedCandidate,
+    *,
+    item_name_clean: str | None = None,
+    status: str | None = None,
+    par_status: str | None = None,
+) -> dict:
+    return {
+        "item_name_clean": item_name_clean or candidate.item_name,
+        "quantity": candidate.quantity,
+        "unit": candidate.unit,
+        "category": candidate.category,
+        "status": status or candidate.status,
+        "par_status": par_status,
+    }
 
 
 def _has_anthropic_key(settings) -> bool:
@@ -102,81 +119,119 @@ def _handle_candidates(
     parser_source = (parser_debug or {}).get("parser_source")
     parsed: list[ParsedEntry] = []
     logger.info("%s_parse: candidate handling started count_session_id=%s candidate_count=%s save=%s", source, count_session_id, len(candidates), save)
+    if save:
+        try:
+            logger.info("%s_parse: schema check started count_session_id=%s", source, count_session_id)
+            ensure_count_entry_columns()
+            logger.info("%s_parse: schema check finished count_session_id=%s", source, count_session_id)
+        except Exception as error:
+            logger.exception(
+                "%s_parse: schema check failed count_session_id=%s error_type=%s",
+                source,
+                count_session_id,
+                type(error).__name__,
+            )
+            raise
     for candidate in candidates:
-        if parser_source == "deterministic_fallback" and _is_invalid_fallback_candidate(candidate):
-            logger.info("parse_voice: dropped invalid deterministic_fallback row name=%s", candidate.item_name)
-            continue
-        match = match_inventory_item(db, restaurant_id, candidate.item_name)
-        needs_review = candidate.needs_review or match.needs_review
-        review_reason = candidate.review_reason or match.review_reason
-        entry = None
-        created_at = None
-        clean_name = candidate.item_name if parser_source == "claude" else match.matched_name or candidate.item_name
-        status = _status_for_candidate(candidate, match, parser_source)
-        if save:
-            entry = CountEntry(
-                count_session_id=count_session_id,
-                inventory_item_id=match.matched_item_id,
-                item_name_raw=candidate.item_name,
+        stage = "candidate_start"
+        row_summary = _candidate_log_summary(candidate)
+        try:
+            if parser_source == "deterministic_fallback" and _is_invalid_fallback_candidate(candidate):
+                logger.info("parse_voice: dropped invalid deterministic_fallback row name=%s", candidate.item_name)
+                continue
+            stage = "match_inventory_item"
+            match = match_inventory_item(db, restaurant_id, candidate.item_name)
+            needs_review = candidate.needs_review or match.needs_review
+            review_reason = candidate.review_reason or match.review_reason
+            entry = None
+            created_at = None
+            clean_name = candidate.item_name if parser_source == "claude" else match.matched_name or candidate.item_name
+            status = _status_for_candidate(candidate, match, parser_source)
+            row_summary = _candidate_log_summary(candidate, item_name_clean=clean_name, status=status)
+            if save:
+                stage = "row_save"
+                entry = CountEntry(
+                    count_session_id=count_session_id,
+                    inventory_item_id=match.matched_item_id,
+                    item_name_raw=candidate.item_name,
+                    item_name=clean_name,
+                    normalized_item_name=match.normalized_name,
+                    category=candidate.category,
+                    quantity=candidate.quantity if candidate.quantity is not None else 0.0,
+                    unit=candidate.unit or "",
+                    status=status,
+                    area=resolved_area,
+                    source=source,
+                    raw_input=text,
+                    original_phrase=candidate.raw_phrase,
+                    partial_detail=candidate.partial_detail,
+                    needs_review=needs_review,
+                    review_reason=review_reason,
+                    counted_by=counted_by,
+                )
+                db.add(entry)
+                db.flush()
+                created_at = entry.created_at
+
+            issue_type = _issue_type(match, candidate)
+            if issue_type:
+                stage = "issue_create"
+                create_issue(
+                    db,
+                    restaurant_id=restaurant_id,
+                    count_session_id=count_session_id,
+                    inventory_item_id=match.matched_item_id,
+                    count_entry_id=entry.id if entry else None,
+                    issue_type=issue_type,
+                    title=review_reason or "Inventory count needs review",
+                    description=f"Parsed phrase '{candidate.raw_phrase}' needs review.",
+                    suggested_action="Confirm the item, unit, or partial quantity before approval.",
+                )
+
+            stage = "par_estimate"
+            logger.info("%s_parse: par estimate started item=%s status=%s", source, clean_name, status)
+            par_fields = estimate_par_status(
                 item_name=clean_name,
-                normalized_item_name=match.normalized_name,
                 category=candidate.category,
-                quantity=candidate.quantity if candidate.quantity is not None else 0.0,
-                unit=candidate.unit or "",
-                status=status,
-                area=resolved_area,
-                source=source,
-                raw_input=text,
-                original_phrase=candidate.raw_phrase,
-                partial_detail=candidate.partial_detail,
-                needs_review=needs_review,
-                review_reason=review_reason,
-                counted_by=counted_by,
-            )
-            db.add(entry)
-            db.flush()
-            created_at = entry.created_at
-
-        issue_type = _issue_type(match, candidate)
-        if issue_type:
-            create_issue(
-                db,
-                restaurant_id=restaurant_id,
-                count_session_id=count_session_id,
-                inventory_item_id=match.matched_item_id,
-                count_entry_id=entry.id if entry else None,
-                issue_type=issue_type,
-                title=review_reason or "Inventory count needs review",
-                description=f"Parsed phrase '{candidate.raw_phrase}' needs review.",
-                suggested_action="Confirm the item, unit, or partial quantity before approval.",
-            )
-
-        logger.info("%s_parse: par estimate started item=%s status=%s", source, clean_name, status)
-        par_fields = estimate_par_status(
-            item_name=clean_name,
-            category=candidate.category,
-            quantity=candidate.quantity,
-            unit=candidate.unit,
-            status=status,
-        )
-        logger.info("%s_parse: par estimate finished item=%s par_status=%s", source, clean_name, par_fields.get("par_status"))
-        parsed.append(
-            ParsedEntry(
-                count_id=count_session_id,
-                restaurant_id=restaurant_id,
                 quantity=candidate.quantity,
                 unit=candidate.unit,
-                area=resolved_area,
-                item_name_raw=candidate.item_name,
-                item_name_clean=clean_name,
-                category=candidate.category,
                 status=status,
-                original_phrase=candidate.raw_phrase,
-                created_at=created_at,
-                counted_by=counted_by,
-                **par_fields,
             )
-        )
+            row_summary = _candidate_log_summary(
+                candidate,
+                item_name_clean=clean_name,
+                status=status,
+                par_status=par_fields.get("par_status"),
+            )
+            logger.info("%s_parse: par estimate finished item=%s par_status=%s", source, clean_name, par_fields.get("par_status"))
+            stage = "response_row"
+            parsed.append(
+                ParsedEntry(
+                    count_id=count_session_id,
+                    restaurant_id=restaurant_id,
+                    quantity=candidate.quantity,
+                    unit=candidate.unit,
+                    area=resolved_area,
+                    item_name_raw=candidate.item_name,
+                    item_name_clean=clean_name,
+                    category=candidate.category,
+                    status=status,
+                    original_phrase=candidate.raw_phrase,
+                    created_at=created_at,
+                    counted_by=counted_by,
+                    **par_fields,
+                )
+            )
+        except Exception as error:
+            logger.exception(
+                "%s_parse: row failed count_session_id=%s stage=%s error_type=%s row=%s",
+                source,
+                count_session_id,
+                stage,
+                type(error).__name__,
+                row_summary,
+            )
+            raise
 
     if save:
         count.status = "completed"

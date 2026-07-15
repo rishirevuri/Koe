@@ -34,6 +34,10 @@ def create_db_and_tables() -> None:
     _ensure_count_entry_columns()
 
 
+def ensure_count_entry_columns() -> None:
+    _ensure_count_entry_columns()
+
+
 def _ensure_count_session_columns() -> None:
     """Lightweight migration: add the ``exported`` column to an existing
     count_sessions table. ``create_all`` only creates missing tables, so a
@@ -61,6 +65,7 @@ def _ensure_count_entry_columns() -> None:
     existing = {column["name"] for column in inspector.get_columns("count_entries")}
     column_sql = {
         "item_name_raw": "ALTER TABLE count_entries ADD COLUMN item_name_raw VARCHAR(255)",
+        "category": "ALTER TABLE count_entries ADD COLUMN category VARCHAR(120)",
         "status": "ALTER TABLE count_entries ADD COLUMN status VARCHAR(80) NOT NULL DEFAULT 'Clean'",
         "original_phrase": "ALTER TABLE count_entries ADD COLUMN original_phrase TEXT",
         "counted_by": "ALTER TABLE count_entries ADD COLUMN counted_by VARCHAR(255)",

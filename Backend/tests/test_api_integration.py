@@ -1,9 +1,10 @@
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import inspect, text
 
 from app import auth as auth_deps
 from app.config import Settings
-from app.database import SessionLocal
+from app.database import SessionLocal, engine
 from app.main import app
 from app.models import CountEntry, CountSession, InventoryItem, Restaurant
 from app.routes import ai, integrations
@@ -87,6 +88,10 @@ def use_disabled_integration_settings(monkeypatch) -> None:
     monkeypatch.setattr(speech_to_text_service, "get_settings", lambda: settings)
     monkeypatch.setattr(external_ai_service, "get_settings", lambda: settings)
     monkeypatch.setattr(google_sheets_service, "get_settings", lambda: settings)
+
+
+def count_entry_columns() -> set[str]:
+    return {column["name"] for column in inspect(engine).get_columns("count_entries")}
 
 
 class EnabledClaudeSettings(DisabledIntegrationSettings):
@@ -248,6 +253,34 @@ def test_voice_parse_save_report_and_csv() -> None:
     assert "cheese,Cheese,2.0,boxes,Clean" in csv_text
     assert "Needs Review" not in csv_text
     assert "Manager Note" not in csv_text
+
+
+def test_voice_parse_repairs_legacy_count_entry_category_column() -> None:
+    with engine.begin() as connection:
+        if "category" in count_entry_columns():
+            connection.execute(text("ALTER TABLE count_entries DROP COLUMN category"))
+    assert "category" not in count_entry_columns()
+
+    count_response = client.post("/counts", json={"area": "Dry Storage"})
+    assert count_response.status_code == 200
+    count_id = count_response.json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "10 lemons, 8 cans of tomato sauce, 198 eggs, and 0.5 cases of napkins.",
+            "area": "Dry Storage",
+            "save": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "category" in count_entry_columns()
+    payload = response.json()
+    assert payload["saved"] is True
+    assert payload["entries"]
+    assert all(entry["is_demo_estimate"] is True for entry in payload["entries"])
 
 
 def test_unknown_item_creates_issue() -> None:
