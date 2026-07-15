@@ -2,6 +2,7 @@ import { supabase } from "./supabaseClient.js";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://koe-backend-pfz2.onrender.com";
 const SELECTED_RESTAURANT_KEY = "koe:selectedRestaurantId";
+const DEFAULT_REQUEST_TIMEOUT_MS = 45000;
 
 export function getSelectedRestaurantId() {
   return window.localStorage.getItem(SELECTED_RESTAURANT_KEY) || "";
@@ -32,16 +33,35 @@ async function getAuthHeaders(session = null) {
 }
 
 async function request(path, options = {}) {
-  const { auth = true, headers = {}, session = null, ...fetchOptions } = options;
+  const { auth = true, headers = {}, session = null, timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS, ...fetchOptions } = options;
   const authHeaders = auth ? await getAuthHeaders(session) : {};
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...authHeaders,
-      ...headers,
-    },
-    ...fetchOptions,
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}${path}`, {
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeaders,
+        ...headers,
+      },
+      signal: controller.signal,
+      ...fetchOptions,
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error(`Request timed out while contacting the backend at ${API_BASE_URL}. Try again after the backend is awake.`);
+      timeoutError.status = 0;
+      throw timeoutError;
+    }
+    const networkError = new Error(
+      `Backend unreachable at ${API_BASE_URL}. Check that the API is running, awake, and allowed by CORS. Browser error: ${error.message}`,
+    );
+    networkError.status = 0;
+    throw networkError;
+  } finally {
+    window.clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     let detail = `Request failed with status ${response.status}`;
@@ -51,12 +71,23 @@ async function request(path, options = {}) {
     } catch {
       detail = response.statusText || detail;
     }
+    if (response.status === 401) {
+      detail = `Auth expired or invalid. Sign in again. (${detail})`;
+    } else if (response.status >= 500) {
+      detail = `Backend server error. ${detail}`;
+    }
     const error = new Error(detail);
     error.status = response.status;
     throw error;
   }
 
-  return response.json();
+  try {
+    return await response.json();
+  } catch (error) {
+    const invalidResponseError = new Error(`Backend returned an invalid JSON response from ${path}.`);
+    invalidResponseError.status = response.status;
+    throw invalidResponseError;
+  }
 }
 
 export async function checkBackendHealth() {
@@ -109,6 +140,7 @@ export async function createCountSession({ area, notes, restaurant_id = null }) 
 export async function parseVoiceCount({ count_session_id, text, area, save, restaurant_id = null }) {
   return request("/ai/parse-voice", {
     method: "POST",
+    timeoutMs: 90000,
     body: JSON.stringify({ restaurant_id, count_session_id, text, area, save }),
   });
 }

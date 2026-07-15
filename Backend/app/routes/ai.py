@@ -101,6 +101,7 @@ def _handle_candidates(
 
     parser_source = (parser_debug or {}).get("parser_source")
     parsed: list[ParsedEntry] = []
+    logger.info("%s_parse: candidate handling started count_session_id=%s candidate_count=%s save=%s", source, count_session_id, len(candidates), save)
     for candidate in candidates:
         if parser_source == "deterministic_fallback" and _is_invalid_fallback_candidate(candidate):
             logger.info("parse_voice: dropped invalid deterministic_fallback row name=%s", candidate.item_name)
@@ -150,6 +151,15 @@ def _handle_candidates(
                 suggested_action="Confirm the item, unit, or partial quantity before approval.",
             )
 
+        logger.info("%s_parse: par estimate started item=%s status=%s", source, clean_name, status)
+        par_fields = estimate_par_status(
+            item_name=clean_name,
+            category=candidate.category,
+            quantity=candidate.quantity,
+            unit=candidate.unit,
+            status=status,
+        )
+        logger.info("%s_parse: par estimate finished item=%s par_status=%s", source, clean_name, par_fields.get("par_status"))
         parsed.append(
             ParsedEntry(
                 count_id=count_session_id,
@@ -164,13 +174,7 @@ def _handle_candidates(
                 original_phrase=candidate.raw_phrase,
                 created_at=created_at,
                 counted_by=counted_by,
-                **estimate_par_status(
-                    item_name=clean_name,
-                    category=candidate.category,
-                    quantity=candidate.quantity,
-                    unit=candidate.unit,
-                    status=status,
-                ),
+                **par_fields,
             )
         )
 
@@ -179,6 +183,8 @@ def _handle_candidates(
         count.completed_at = count.completed_at or utc_now()
         db.add(count)
         db.commit()
+        logger.info("%s_parse: rows saved count_session_id=%s row_count=%s", source, count_session_id, len(parsed))
+    logger.info("%s_parse: response returned count_session_id=%s row_count=%s", source, count_session_id, len(parsed))
     return ParseResponse(entries=parsed, saved=save, **(parser_debug or {}))
 
 
@@ -189,50 +195,71 @@ def parse_voice(
     current_restaurant=Depends(get_current_restaurant),
     current_user: SupabaseUser = Depends(get_current_supabase_user),
 ) -> ParseResponse:
-    ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
-    settings = get_settings()
-    provider = settings.text_ai_provider or "claude"
-    model = getattr(settings, "anthropic_model", "") or ""
-    anthropic_key_present = _has_anthropic_key(settings)
-    parser_source = "deterministic_fallback"
-
     logger.info(
-        "parse_voice: external_ai_enabled=%s provider=%s anthropic_key_present=%s model=%s",
-        settings.enable_external_ai,
-        provider,
-        anthropic_key_present,
-        model,
+        "parse_voice: request received count_session_id=%s text_length=%s save=%s",
+        payload.count_session_id,
+        len(payload.text or ""),
+        payload.save,
     )
+    try:
+        ensure_restaurant_id_matches(payload.restaurant_id, current_restaurant)
+        logger.info("parse_voice: auth/session ok restaurant_id=%s user_id=%s", current_restaurant.id, current_user.user_id)
+        settings = get_settings()
+        provider = settings.text_ai_provider or "claude"
+        model = getattr(settings, "anthropic_model", "") or ""
+        anthropic_key_present = _has_anthropic_key(settings)
+        parser_source = "deterministic_fallback"
 
-    candidates = parse_voice_text(payload.text)
-    if settings.enable_external_ai and settings.is_claude_configured and (settings.text_ai_provider or "claude").lower() == "claude":
-        try:
-            logger.info("parse_voice: attempting Claude parse")
-            claude_candidates = parse_inventory_with_claude(payload.text)
-            candidates = claude_candidates
-            parser_source = "claude"
-            logger.info("parse_voice: Claude parse succeeded")
-        except Exception as error:
-            logger.warning(
-                "parse_voice: Claude parse failed; using deterministic_fallback; error_type=%s; model=%s",
-                type(error).__name__,
-                model,
-            )
-            candidates = parse_voice_text(payload.text)
-    logger.info("parse_voice: using parser_source=%s", parser_source)
+        logger.info(
+            "parse_voice: external_ai_enabled=%s provider=%s anthropic_key_present=%s model=%s",
+            settings.enable_external_ai,
+            provider,
+            anthropic_key_present,
+            model,
+        )
 
-    return _handle_candidates(
-        db,
-        restaurant_id=current_restaurant.id,
-        count_session_id=payload.count_session_id,
-        text=payload.text,
-        area=payload.area,
-        source="voice",
-        save=payload.save,
-        candidates=candidates,
-        counted_by=current_user.email or current_user.user_id,
-        parser_debug=_parser_debug(settings, parser_source),
-    )
+        logger.info("parse_voice: deterministic parse started")
+        candidates = parse_voice_text(payload.text)
+        logger.info("parse_voice: deterministic parse finished candidate_count=%s", len(candidates))
+        if settings.enable_external_ai and settings.is_claude_configured and (settings.text_ai_provider or "claude").lower() == "claude":
+            try:
+                logger.info("parse_voice: Claude parse started")
+                claude_candidates = parse_inventory_with_claude(payload.text)
+                candidates = claude_candidates
+                parser_source = "claude"
+                logger.info("parse_voice: Claude parse finished candidate_count=%s", len(candidates))
+            except Exception as error:
+                logger.warning(
+                    "parse_voice: Claude parse failed; using deterministic_fallback; error_type=%s; model=%s",
+                    type(error).__name__,
+                    model,
+                )
+                logger.info("parse_voice: deterministic fallback parse started")
+                candidates = parse_voice_text(payload.text)
+                logger.info("parse_voice: deterministic fallback parse finished candidate_count=%s", len(candidates))
+        logger.info("parse_voice: using parser_source=%s", parser_source)
+
+        return _handle_candidates(
+            db,
+            restaurant_id=current_restaurant.id,
+            count_session_id=payload.count_session_id,
+            text=payload.text,
+            area=payload.area,
+            source="voice",
+            save=payload.save,
+            candidates=candidates,
+            counted_by=current_user.email or current_user.user_id,
+            parser_debug=_parser_debug(settings, parser_source),
+        )
+    except HTTPException:
+        raise
+    except Exception as error:
+        logger.exception(
+            "parse_voice: unexpected failure count_session_id=%s error_type=%s",
+            payload.count_session_id,
+            type(error).__name__,
+        )
+        raise HTTPException(status_code=500, detail="Inventory count processing failed. Check backend logs for parse_voice stage details.") from error
 
 
 @router.post("/parse-upload", response_model=ParseResponse)

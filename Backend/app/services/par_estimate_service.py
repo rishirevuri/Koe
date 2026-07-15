@@ -190,7 +190,7 @@ def _find_rule(item_name: str) -> ParRule | None:
     return None
 
 
-def estimate_par_status(
+def _estimate_par_status(
     *,
     item_name: str,
     category: str | None = None,
@@ -238,3 +238,23 @@ def estimate_par_status(
         "par_confidence": rule.confidence if rule.confidence in PAR_CONFIDENCES else "low",
         "is_demo_estimate": True,
     }
+
+
+def estimate_par_status(
+    *,
+    item_name: str,
+    category: str | None = None,
+    quantity: float | None,
+    unit: str | None,
+    status: str | None = None,
+) -> dict:
+    try:
+        return _estimate_par_status(
+            item_name=item_name,
+            category=category,
+            quantity=quantity,
+            unit=unit,
+            status=status,
+        )
+    except Exception:
+        return _empty_estimate("Demo par estimate could not be calculated safely for this row.")
