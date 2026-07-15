@@ -4517,6 +4517,22 @@ button:disabled,
   font-weight: 600;
 }
 
+.count-summary-lines strong,
+.insight-action-row strong,
+.manager-action strong,
+.quality-group strong,
+.category-status-top strong {
+  font-weight: 500;
+}
+
+.snapshot-row span:first-child {
+  font-weight: 500;
+}
+
+.post-count-card-heading h2 {
+  font-weight: 600;
+}
+
 .dashboard-section {
   max-width: 1080px;
   margin: 0 auto 34px;

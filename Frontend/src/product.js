@@ -16,6 +16,7 @@ import { bindSidebar, renderSidebar } from "./sidebar.js";
 const AREA_OPTIONS = ["Dry Storage", "Walk-in", "Freezer", "Bar", "Wine Storage", "Prep Station"];
 const MOBILE_AREA_OPTIONS = ["Walk-in", "Dry Storage", "Bar", "Kitchen", "Other"];
 const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
+const googleDashboardRedirectKey = "koe:googleDashboardRedirect";
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const VALID_STATUSES = new Set(["Clean", "Partial Quantity", "Missing Unit", "Needs Review", "Possible Duplicate", "Converted Unit"]);
 const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Liquids", "Dry Goods", "Bar", "Frozen", "Supplies", "Other"];
@@ -120,6 +121,32 @@ function formatDateTime(date) {
 function getMobileTabFromHash() {
   const tab = window.location.hash.replace("#", "").toLowerCase();
   return ["dashboard", "count", "reports", "account"].includes(tab) ? tab : "count";
+}
+
+function requestGoogleDashboardRedirect() {
+  try {
+    window.sessionStorage.setItem(googleDashboardRedirectKey, "1");
+  } catch {
+    // OAuth still uses dashboardRedirectUrl if session storage is unavailable.
+  }
+}
+
+function consumeGoogleDashboardRedirect() {
+  try {
+    const shouldRedirect = window.sessionStorage.getItem(googleDashboardRedirectKey) === "1";
+    window.sessionStorage.removeItem(googleDashboardRedirectKey);
+    return shouldRedirect;
+  } catch {
+    return false;
+  }
+}
+
+function hasGoogleDashboardRedirect() {
+  try {
+    return window.sessionStorage.getItem(googleDashboardRedirectKey) === "1";
+  } catch {
+    return false;
+  }
 }
 
 function setMobileTab(tab) {
@@ -585,6 +612,7 @@ async function loadCurrentWorkspace() {
   console.log("Supabase session found; loading workspace");
   state.view = "loading-workspace";
   state.authStatus = "Setting up workspace...";
+  const shouldRedirectToDashboard = hasGoogleDashboardRedirect();
   try {
     const me = await getAuthMe();
     if (!state.session) return;
@@ -600,7 +628,8 @@ async function loadCurrentWorkspace() {
     clearMessages();
     loadMobileDashboardSummary();
     console.log("Workspace loaded");
-    if (state.pendingDashboardRedirect) {
+    if (state.pendingDashboardRedirect || shouldRedirectToDashboard) {
+      if (shouldRedirectToDashboard) consumeGoogleDashboardRedirect();
       state.navigatingAway = true;
       window.location.assign("./dashboard.html");
       return;
@@ -612,6 +641,11 @@ async function loadCurrentWorkspace() {
       return;
     }
     if (isMissingWorkspaceError(error)) {
+      if (shouldRedirectToDashboard) {
+        state.navigatingAway = true;
+        window.location.assign("./dashboard.html");
+        return;
+      }
       const pendingRestaurantName =
         state.authRestaurantName.trim() || state.session?.user?.user_metadata?.restaurant_name?.trim() || "";
       if (pendingRestaurantName && !state.workspaceCreateAttempted) {
@@ -624,6 +658,10 @@ async function loadCurrentWorkspace() {
           console.error("Restaurant workspace creation failed:", createError.message);
           setError(createError.message || "Restaurant workspace setup failed.");
         }
+      }
+      if (!pendingRestaurantName) {
+        await handleInvalidSession();
+        return;
       }
       console.log("Workspace missing; rendering setup");
       state.workspaceMissing = true;
@@ -774,6 +812,7 @@ async function handleGoogleSignIn() {
   }
 
   state.authLoading = true;
+  requestGoogleDashboardRedirect();
   render();
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
@@ -784,6 +823,7 @@ async function handleGoogleSignIn() {
 
   if (error) {
     console.error("Google sign-in failed:", error.message);
+    consumeGoogleDashboardRedirect();
     state.authLoading = false;
     setError(error.message);
     render();

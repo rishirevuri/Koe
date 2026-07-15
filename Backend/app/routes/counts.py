@@ -50,7 +50,13 @@ def list_count_sessions(
     current_restaurant: Restaurant = Depends(get_current_restaurant),
 ) -> list[CountSession]:
     ensure_restaurant_id_matches(restaurant_id, current_restaurant)
-    return list(db.scalars(select(CountSession).where(CountSession.restaurant_id == current_restaurant.id).order_by(CountSession.id)))
+    return list(
+        db.scalars(
+            select(CountSession)
+            .where(CountSession.restaurant_id == current_restaurant.id)
+            .order_by(CountSession.started_at.desc(), CountSession.id.desc())
+        )
+    )
 
 
 @router.get("/{count_id}", response_model=CountSessionSummary)

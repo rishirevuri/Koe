@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models import CountEntry, CountSession
+from app.models import CountEntry, CountSession, utc_now
 from app.schemas import MatchResponse, NormalizeItemRequest, ParseResponse, ParseUploadRequest, ParseVoiceRequest, ParsedEntry
 from app.config import get_settings
 from app.auth import SupabaseUser, ensure_restaurant_id_matches, get_current_restaurant, get_current_supabase_user
@@ -166,6 +166,9 @@ def _handle_candidates(
         )
 
     if save:
+        count.status = "completed"
+        count.completed_at = count.completed_at or utc_now()
+        db.add(count)
         db.commit()
     return ParseResponse(entries=parsed, saved=save, **(parser_debug or {}))
 

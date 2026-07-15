@@ -6,12 +6,14 @@ import {
   getDashboardSummary,
   getReport,
   getRestaurants,
+  getSelectedRestaurantId,
   setSelectedRestaurantId,
 } from "./api.js";
 import { isSupabaseConfigured, supabase } from "./supabaseClient.js";
 import { bindSidebar, renderSidebar } from "./sidebar.js";
 
 const app = document.querySelector("#dashboard-app");
+const googleDashboardRedirectKey = "koe:googleDashboardRedirect";
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const CATEGORY_COLORS = {
   Produce: "#9fbf9f",
@@ -104,6 +106,30 @@ function formatCountTime(value) {
 
 function getDashboardTabFromHash() {
   return window.location.hash.replace("#", "").trim().toLowerCase() === "past-counts" ? "past-counts" : "overview";
+}
+
+function consumeGoogleDashboardRedirect() {
+  try {
+    const shouldRedirect = window.sessionStorage.getItem(googleDashboardRedirectKey) === "1";
+    window.sessionStorage.removeItem(googleDashboardRedirectKey);
+    return shouldRedirect;
+  } catch {
+    return false;
+  }
+}
+
+async function returnToLogin() {
+  try {
+    await supabase.auth.signOut();
+  } catch {
+    // Ignore and still navigate to the login screen.
+  }
+  setSelectedRestaurantId("");
+  window.location.assign("./product.html");
+}
+
+function getCountTimestamp(count) {
+  return count?.completed_at || count?.started_at || null;
 }
 
 function setDashboardTab(tab, countId = null) {
@@ -357,23 +383,33 @@ async function initialize() {
   }
 
   if (!state.restaurants.length) {
-    setSelectedRestaurantId("");
-    state.phase = "setup-restaurant";
-    renderRestaurantSetup();
+    if (consumeGoogleDashboardRedirect()) {
+      setSelectedRestaurantId("");
+      state.phase = "setup-restaurant";
+      renderRestaurantSetup();
+      return;
+    }
+    await returnToLogin();
     return;
   }
 
   if (state.restaurants.length > 1) {
-    setSelectedRestaurantId("");
-    state.phase = "select-restaurant";
-    renderRestaurantChooser();
-    return;
+    const savedRestaurantId = getSelectedRestaurantId();
+    const savedRestaurant = state.restaurants.find((restaurant) => String(restaurant.id) === String(savedRestaurantId));
+    if (savedRestaurant) {
+      state.restaurantName = savedRestaurant.name || state.restaurantName;
+      setSelectedRestaurantId(savedRestaurant.id);
+    } else {
+      setSelectedRestaurantId("");
+      state.phase = "select-restaurant";
+      renderRestaurantChooser();
+      return;
+    }
+  } else {
+    setSelectedRestaurantId(state.restaurants[0].id);
   }
 
-  setSelectedRestaurantId(state.restaurants[0].id);
-
-  // Confirm the workspace. Workspace provisioning/setup lives on product.html,
-  // so send the user there if they are not yet linked.
+  // Confirm the selected workspace before loading protected dashboard data.
   try {
     const me = await getAuthMe();
     state.restaurantName = me?.restaurant?.name || state.restaurantName;
@@ -456,8 +492,8 @@ async function loadPastCounts({ selectCountId = null } = {}) {
   try {
     const sessions = await getCountSessions();
     state.countSessions = [...sessions].sort((a, b) => {
-      const bTime = new Date(b.started_at || 0).getTime();
-      const aTime = new Date(a.started_at || 0).getTime();
+      const bTime = new Date(getCountTimestamp(b) || 0).getTime();
+      const aTime = new Date(getCountTimestamp(a) || 0).getTime();
       return bTime - aTime || Number(b.id) - Number(a.id);
     });
     const preferredId = selectCountId || state.selectedCountId || state.countSessions[0]?.id || null;
@@ -815,7 +851,7 @@ function renderCountSummaryCard(data, latestCount, rows) {
         <h2>${escapeHtml(latestCount?.area || "Latest count")}</h2>
       </div>
       <div class="count-summary-lines">
-        <div><span>Completed</span><strong>${escapeHtml(formatDateTime(latestCount?.completed_at || latestCount?.started_at))}</strong></div>
+        <div><span>Completed</span><strong>${escapeHtml(formatDateTime(getCountTimestamp(latestCount)))}</strong></div>
         <div><span>Area covered</span><strong>${escapeHtml(latestCount?.area || "Not set")}</strong></div>
         <div><span>Total items</span><strong>${counts.total}</strong></div>
         <div><span>Review status</span><strong>${escapeHtml(reviewText)}</strong></div>
@@ -1137,7 +1173,7 @@ function renderBottomActionStrip(rows) {
 function renderPastCounts() {
   const sessions = state.countSessions;
   const selectedSession = sessions.find((session) => Number(session.id) === Number(state.selectedCountId)) || sessions[0] || null;
-  const monthLabel = formatCountMonth(selectedSession?.started_at || sessions[0]?.started_at);
+  const monthLabel = formatCountMonth(getCountTimestamp(selectedSession) || getCountTimestamp(sessions[0]));
 
   if (state.countsLoading && !sessions.length) {
     return `
@@ -1200,8 +1236,8 @@ function renderPastCountListItem(session) {
   return `
     <button class="past-count-item ${isActive ? "is-active" : ""}" data-count-id="${session.id}" type="button">
       <span class="past-count-date">
-        <strong>${escapeHtml(formatCountDay(session.started_at))}</strong>
-        <small>${escapeHtml(formatCountTime(session.started_at))}</small>
+        <strong>${escapeHtml(formatCountDay(getCountTimestamp(session)))}</strong>
+        <small>${escapeHtml(formatCountTime(getCountTimestamp(session)))}</small>
       </span>
       <span class="past-count-meta">
         <b>${escapeHtml(session.area || "Not set")}</b>
@@ -1219,7 +1255,7 @@ function renderSelectedCountDetail(session) {
   return `
     <div class="past-count-detail-header">
       <div>
-        <span>${escapeHtml(formatDateTime(session.started_at))}</span>
+        <span>${escapeHtml(formatDateTime(getCountTimestamp(session)))}</span>
         <h2>${escapeHtml(session.area || "Inventory Count")}</h2>
         <p>Saved count #${escapeHtml(session.id)}${session.status ? ` • ${escapeHtml(session.status)}` : ""}</p>
       </div>
@@ -1231,7 +1267,7 @@ function renderSelectedCountDetail(session) {
       <div><dt>Rows</dt><dd>${summary.total_items ?? entries.length}</dd></div>
       <div><dt>Needs review</dt><dd>${summary.items_needing_review ?? 0}</dd></div>
       <div><dt>Area</dt><dd>${escapeHtml(session.area || "Not set")}</dd></div>
-      <div><dt>Started</dt><dd>${escapeHtml(formatCountTime(session.started_at))}</dd></div>
+      <div><dt>Completed</dt><dd>${escapeHtml(formatCountTime(getCountTimestamp(session)))}</dd></div>
     </dl>
     ${renderPastCountSpreadsheet(entries)}
   `;
