@@ -56,7 +56,7 @@ def test_report_summary_and_csv() -> None:
     report = build_report(count)
     assert report["summary"] == {"total_items": 1, "items_needing_review": 0}
     assert report["entries"][0]["item_name_clean"] == "Olive oil"
-    assert report["entries"][0]["category"] == "Oils"
+    assert report["entries"][0]["category"] == "Oils & Liquids"
     assert report["entries"][0]["par_status"] == "low"
     assert report["entries"][0]["estimated_par_quantity"] == 3
     assert report["entries"][0]["par_unit"] == "bottles"
@@ -68,7 +68,7 @@ def test_report_summary_and_csv() -> None:
         "1",
         "1",
         "Dry Storage",
-        "Oils",
+        "Oils & Liquids",
         "Olive oil",
         "olive oil",
         "2.5",

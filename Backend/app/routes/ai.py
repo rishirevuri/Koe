@@ -8,6 +8,7 @@ from app.models import CountEntry, CountSession, utc_now
 from app.schemas import MatchResponse, NormalizeItemRequest, ParseResponse, ParseUploadRequest, ParseVoiceRequest, ParsedEntry
 from app.config import get_settings
 from app.auth import SupabaseUser, ensure_restaurant_id_matches, get_current_restaurant, get_current_supabase_user
+from app.services.category_service import normalize_inventory_category
 from app.services.issue_service import create_issue
 from app.services.matching_service import MatchResult, match_inventory_item
 from app.services.external_ai_service import parse_inventory_with_claude
@@ -147,6 +148,7 @@ def _handle_candidates(
             created_at = None
             clean_name = candidate.item_name if parser_source == "claude" else match.matched_name or candidate.item_name
             status = _status_for_candidate(candidate, match, parser_source)
+            category = normalize_inventory_category(clean_name, candidate.category)
             row_summary = _candidate_log_summary(candidate, item_name_clean=clean_name, status=status)
             if save:
                 stage = "row_save"
@@ -156,7 +158,7 @@ def _handle_candidates(
                     item_name_raw=candidate.item_name,
                     item_name=clean_name,
                     normalized_item_name=match.normalized_name,
-                    category=candidate.category,
+                    category=category,
                     quantity=candidate.quantity,
                     unit=candidate.unit or "",
                     status=status,
@@ -192,7 +194,7 @@ def _handle_candidates(
             logger.info("%s_parse: par estimate started item=%s status=%s", source, clean_name, status)
             par_fields = estimate_par_status(
                 item_name=clean_name,
-                category=candidate.category,
+                category=category,
                 quantity=candidate.quantity,
                 unit=candidate.unit,
                 status=status,
@@ -214,7 +216,7 @@ def _handle_candidates(
                     area=resolved_area,
                     item_name_raw=candidate.item_name,
                     item_name_clean=clean_name,
-                    category=candidate.category,
+                    category=category,
                     status=status,
                     original_phrase=candidate.raw_phrase,
                     created_at=created_at,

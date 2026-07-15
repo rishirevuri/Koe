@@ -14,6 +14,7 @@ from app.auth import (
 from app.database import get_db
 from app.models import CountEntry, CountSession, Restaurant
 from app.schemas import CountEntryCreate, CountEntryRead, CountSessionCreate, CountSessionRead, CountSessionSummary
+from app.services.category_service import normalize_inventory_category
 from app.services.issue_service import create_issue
 from app.services.matching_service import match_inventory_item
 from app.utils.units import normalize_unit
@@ -43,20 +44,26 @@ def create_count_session(
     return count
 
 
-@router.get("", response_model=list[CountSessionRead])
+@router.get("", response_model=list[CountSessionSummary])
 def list_count_sessions(
     restaurant_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     current_restaurant: Restaurant = Depends(get_current_restaurant),
-) -> list[CountSession]:
+) -> list[dict]:
     ensure_restaurant_id_matches(restaurant_id, current_restaurant)
-    return list(
+    sessions = list(
         db.scalars(
             select(CountSession)
             .where(CountSession.restaurant_id == current_restaurant.id)
-            .order_by(CountSession.started_at.desc(), CountSession.id.desc())
+            .order_by(
+                CountSession.completed_at.is_(None),
+                CountSession.completed_at.desc(),
+                CountSession.started_at.desc(),
+                CountSession.id.desc(),
+            )
         )
     )
+    return [{**CountSessionRead.model_validate(count).model_dump(), "summary": _summary(count)} for count in sessions]
 
 
 @router.get("/{count_id}", response_model=CountSessionSummary)
@@ -86,12 +93,14 @@ def add_count_entry(
     ensure_count_belongs_to_restaurant(count.restaurant_id, current_restaurant)
     match = match_inventory_item(db, count.restaurant_id, payload.item_name)
     status = "Needs Review" if match.needs_review else "Clean"
+    clean_name = match.matched_name or payload.item_name
     entry = CountEntry(
         count_session_id=count.id,
         inventory_item_id=match.matched_item_id,
         item_name_raw=payload.item_name,
-        item_name=match.matched_name or payload.item_name,
+        item_name=clean_name,
         normalized_item_name=match.normalized_name,
+        category=normalize_inventory_category(clean_name),
         quantity=payload.quantity,
         unit=normalize_unit(payload.unit),
         status=status,

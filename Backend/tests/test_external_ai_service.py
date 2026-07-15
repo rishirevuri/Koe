@@ -47,7 +47,13 @@ def test_normalize_claude_inventory_payload_items_shape() -> None:
 
     parsed = normalize_claude_inventory_payload(payload)
 
-    assert parsed["items"] == payload["items"]
+    assert parsed["items"] == [
+        {
+            **payload["items"][0],
+            "category": "Oils & Liquids",
+        },
+        payload["items"][1],
+    ]
     assert parsed["summary"] == {
         "items_counted": 2,
         "rows_needing_review": 0,
@@ -79,7 +85,7 @@ def test_normalize_claude_inventory_payload_legacy_entries_shape() -> None:
         {
             "item_name_raw": "Tomatoes",
             "item_name_clean": "Tomatoes",
-            "category": "Other",
+            "category": "Produce",
             "quantity": None,
             "unit": None,
             "status": "Needs Review",
@@ -195,8 +201,11 @@ def test_mocked_claude_hard_transcript_behavior(monkeypatch) -> None:
     assert by_name["Heavy cream"]["quantity"] == 0.5
     assert by_name["Eggs"]["quantity"] == 198
     assert by_name["Water bottles"]["quantity"] == 48
+    assert by_name["Water bottles"]["category"] == "Beverages"
     assert by_name["Coke cans"]["quantity"] == 18
+    assert by_name["Coke cans"]["category"] == "Beverages"
     assert by_name["Limes"]["quantity"] is None
+    assert by_name["Limes"]["category"] == "Produce"
     assert by_name["Limes"]["status"] == "Needs Review"
     assert by_name["Ice cream"]["quantity"] == 2.25
     assert by_name["Ice cream"]["category"] == "Frozen"

@@ -20,17 +20,18 @@ const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Dupli
 const CATEGORY_COLORS = {
   Produce: "#9fbf9f",
   "Dairy & Eggs": "#f0d980",
-  Meats: "#b98272",
-  Liquids: "#7da4b8",
+  Proteins: "#b98272",
+  Bakery: "#d4a66a",
+  "Sauces & Condiments": "#c97f5f",
+  "Oils & Liquids": "#7da4b8",
+  Beverages: "#8aa0c4",
   "Dry Goods": "#c79a4b",
-  Bar: "#8aa0c4",
   Frozen: "#a8d1df",
   Supplies: "#a9ada8",
-  Other: "#cfc8bc",
   Uncategorized: "#d8d6cf",
 };
-const CATEGORY_FALLBACK_COLORS = ["#9fbf9f", "#f0d980", "#b98272", "#7da4b8", "#c79a4b", "#8aa0c4", "#a8d1df", "#a9ada8"];
-const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Liquids", "Dry Goods", "Bar", "Frozen", "Supplies", "Other", "Uncategorized"];
+const CATEGORY_FALLBACK_COLORS = ["#9fbf9f", "#f0d980", "#b98272", "#d4a66a", "#c97f5f", "#7da4b8", "#8aa0c4", "#c79a4b", "#a8d1df", "#a9ada8"];
+const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Proteins", "Bakery", "Sauces & Condiments", "Oils & Liquids", "Beverages", "Frozen", "Supplies", "Dry Goods", "Uncategorized"];
 
 const state = {
   restaurantName: "Your Restaurant",
@@ -291,21 +292,33 @@ function normalizeCategoryLabel(value) {
     "dairy and eggs": "Dairy & Eggs",
     dairy: "Dairy & Eggs",
     eggs: "Dairy & Eggs",
-    meat: "Meats",
-    meats: "Meats",
+    bakery: "Bakery",
+    bread: "Bakery",
+    meat: "Proteins",
+    meats: "Proteins",
+    protein: "Proteins",
+    proteins: "Proteins",
     "dry goods": "Dry Goods",
     dry: "Dry Goods",
-    liquid: "Liquids",
-    liquids: "Liquids",
-    oil: "Liquids",
-    oils: "Liquids",
-    beverage: "Liquids",
-    beverages: "Liquids",
-    bar: "Bar",
+    liquid: "Oils & Liquids",
+    liquids: "Oils & Liquids",
+    oil: "Oils & Liquids",
+    oils: "Oils & Liquids",
+    "oils liquids": "Oils & Liquids",
+    "oils and liquids": "Oils & Liquids",
+    beverage: "Beverages",
+    beverages: "Beverages",
+    bar: "Beverages",
+    condiment: "Sauces & Condiments",
+    condiments: "Sauces & Condiments",
+    sauce: "Sauces & Condiments",
+    sauces: "Sauces & Condiments",
+    "sauces condiments": "Sauces & Condiments",
+    "sauces and condiments": "Sauces & Condiments",
     frozen: "Frozen",
     supplies: "Supplies",
     supply: "Supplies",
-    other: "Other",
+    other: "Uncategorized",
     uncategorized: "Uncategorized",
   };
   return categoryMap[normalized] || raw.replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -324,23 +337,29 @@ function inferCategoryFromRow(row) {
   if (/\b(milk|cream|egg|eggs|cheese|butter|yogurt|dairy)\b/.test(name)) {
     return "Dairy & Eggs";
   }
-  if (/\b(chicken|beef|pork|bacon|steak|fish|salmon|tuna|shrimp|turkey|wing|wings|breast|breasts|meat)\b/.test(name)) {
-    return "Meats";
+  if (/\b(chicken|beef|pork|bacon|steak|fish|salmon|tuna|shrimp|turkey|wing|wings|breast|breasts|patty|patties|meat)\b/.test(name)) {
+    return "Proteins";
   }
-  if (/\b(oil|vinegar|water|sauce|syrup|stock|broth|juice|marinara)\b/.test(name) || ["bottles", "gallons", "ounces", "liters", "quarts", "pints"].includes(unit)) {
-    return "Liquids";
+  if (/\b(burger buns?|hamburger buns?|sourdough|bread)\b/.test(name)) {
+    return "Bakery";
+  }
+  if (/\b(marinara sauce|tomato sauce|pesto|ranch dressing|caesar dressing|pickles?)\b/.test(name)) {
+    return "Sauces & Condiments";
+  }
+  if (/\b(olive oil|canola oil|oil|vinegar)\b/.test(name)) {
+    return "Oils & Liquids";
+  }
+  if (/\b(water bottles?|sparkling water|tonic waters?|ginger beers?|coke|cola|juice|wine|beer|liquor)\b/.test(name)) {
+    return "Beverages";
+  }
+  if (/\b(frozen fries|frozen berries|ice cream|gelato|mozzarella sticks)\b/.test(name)) {
+    return "Frozen";
+  }
+  if (/\b(napkins?|straws?|receipt paper|paper cups?|takeout containers?|supply|supplies)\b/.test(name)) {
+    return "Supplies";
   }
   if (/\b(flour|rice|sugar|dough|pasta|bread|bun|buns|napkin|napkins|dry)\b/.test(name)) {
     return name.includes("napkin") ? "Supplies" : "Dry Goods";
-  }
-  if (/\b(coke|tonic|sparkling|wine|beer|liquor|bar)\b/.test(name)) {
-    return "Bar";
-  }
-  if (/\b(frozen|freezer|ice cream|fries|mozzarella sticks|veggie patties)\b/.test(name)) {
-    return "Frozen";
-  }
-  if (/\b(napkin|napkins|roll|rolls|sleeve|sleeves|container|containers|supply|supplies)\b/.test(name)) {
-    return "Supplies";
   }
   return "Uncategorized";
 }
@@ -1544,6 +1563,7 @@ function renderPastCountSpreadsheet(entries) {
         <thead>
           <tr>
             <th>Item</th>
+            <th>Category</th>
             <th>Qty</th>
             <th>Unit</th>
             <th>Status</th>
@@ -1560,6 +1580,7 @@ function renderPastCountSpreadsheet(entries) {
                     <strong>${escapeHtml(entry.item_name_clean || "Unnamed item")}</strong>
                     <small>${escapeHtml(entry.item_name_raw || "")}</small>
                   </td>
+                  <td>${escapeHtml(getCategory(entry))}</td>
                   <td>${escapeHtml(formatQty(entry.quantity ?? ""))}</td>
                   <td>${escapeHtml(entry.unit || "")}</td>
                   <td><span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status || "Clean")}</span></td>

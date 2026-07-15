@@ -100,7 +100,7 @@ class CountEntry(Base):
 
     @property
     def item_name_clean(self) -> str:
-        return self.inventory_item.name if self.inventory_item else self.item_name
+        return self.item_name or (self.inventory_item.name if self.inventory_item else "")
 
 
 class Issue(Base):

@@ -5,6 +5,7 @@ import re
 from sqlalchemy.orm import Session
 
 from app.models import CountEntry, CountSession
+from app.services.category_service import normalize_inventory_category
 from app.services.par_estimate_service import estimate_par_status
 
 
@@ -44,8 +45,11 @@ def _entry_quantity(entry: CountEntry, status: str) -> float | None:
 
 def _entry_row(entry: CountEntry) -> dict:
     status = _entry_status(entry)
-    item_name_clean = entry.inventory_item.name if entry.inventory_item else entry.item_name
-    category = entry.category or (entry.inventory_item.category if entry.inventory_item else None)
+    item_name_clean = entry.item_name or (entry.inventory_item.name if entry.inventory_item else "")
+    category = normalize_inventory_category(
+        item_name_clean,
+        entry.category or (entry.inventory_item.category if entry.inventory_item else None),
+    )
     quantity = _entry_quantity(entry, status)
     return {
         "count_id": entry.count_session_id,

@@ -5,6 +5,7 @@ import re
 import httpx
 
 from app.config import get_settings
+from app.services.category_service import normalize_inventory_category
 from app.services.voice_parse_service import ParsedCandidate, normalize_obvious_item_unit
 from app.utils.units import normalize_unit
 
@@ -277,12 +278,20 @@ REVIEW_STATUSES = {"Needs Review", "Possible Duplicate", "Missing Unit"}
 ALLOWED_CATEGORIES = {
     "Produce",
     "Dairy & Eggs",
-    "Meats",
-    "Liquids",
+    "Proteins",
+    "Bakery",
+    "Sauces & Condiments",
+    "Oils & Liquids",
+    "Beverages",
     "Dry Goods",
-    "Bar",
     "Frozen",
     "Supplies",
+    "Uncategorized",
+    # Legacy labels still accepted from older prompts/responses and normalized
+    # below to the current report categories.
+    "Meats",
+    "Liquids",
+    "Bar",
     "Other",
 }
 
@@ -346,9 +355,9 @@ def _normalize_status(value: object, *, quantity: float | None, unit: str | None
     return "Clean"
 
 
-def _normalize_category(value: object) -> str:
+def _normalize_category(value: object, *, item_name: str | None = None) -> str:
     category = _safe_string(value)
-    return category if category in ALLOWED_CATEGORIES else "Other"
+    return normalize_inventory_category(item_name, category if category in ALLOWED_CATEGORIES else None)
 
 
 def _normalize_claude_item(entry: dict) -> dict | None:
@@ -381,7 +390,7 @@ def _normalize_claude_item(entry: dict) -> dict | None:
     return {
         "item_name_raw": item_name_raw,
         "item_name_clean": item_name_clean,
-        "category": _normalize_category(entry.get("category")),
+        "category": _normalize_category(entry.get("category"), item_name=item_name_clean),
         "quantity": quantity,
         "unit": unit,
         "status": status,
@@ -459,7 +468,7 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
         needs_review=status in REVIEW_STATUSES or bool(entry.get("needs_review")),
         review_reason=str(review_reason) if review_reason else None,
         status=status or None,
-        category=_safe_string(entry.get("category")) or None,
+        category=normalize_inventory_category(item_name, _safe_string(entry.get("category")) or None),
     )
 
 

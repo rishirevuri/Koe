@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_restaurant
 from app.database import get_db
 from app.models import CountEntry, CountSession, InventoryItem, Issue, Restaurant
+from app.services.category_service import normalize_inventory_category
 from app.services.par_estimate_service import estimate_par_status
 
 
@@ -27,11 +28,14 @@ def _entry_needs_review(entry: CountEntry) -> bool:
 
 
 def _entry_name(entry: CountEntry) -> str:
-    return entry.inventory_item.name if entry.inventory_item else entry.item_name
+    return entry.item_name or (entry.inventory_item.name if entry.inventory_item else "")
 
 
 def _entry_category(entry: CountEntry) -> str | None:
-    return entry.category or (entry.inventory_item.category if entry.inventory_item else None)
+    return normalize_inventory_category(
+        _entry_name(entry),
+        entry.category or (entry.inventory_item.category if entry.inventory_item else None),
+    )
 
 
 def _par_row(entry: CountEntry) -> dict:

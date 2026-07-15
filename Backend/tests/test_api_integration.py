@@ -252,10 +252,10 @@ def test_voice_parse_save_report_and_csv() -> None:
         ("Cheese", 2.0, "boxes"),
     ]
     assert [(entry["item_name_clean"], entry["category"]) for entry in report["entries"]] == [
-        ("Olive oil", "Oils"),
+        ("Olive oil", "Oils & Liquids"),
         ("Lettuce", "Produce"),
         ("Tomatoes", "Produce"),
-        ("Cheese", "Dairy"),
+        ("Cheese", "Dairy & Eggs"),
     ]
     assert {entry["area"] for entry in report["entries"]} == {"Dry Storage"}
 
@@ -268,7 +268,7 @@ def test_voice_parse_save_report_and_csv() -> None:
         str(count_id),
         "2",
         "Dry Storage",
-        "Oils",
+        "Oils & Liquids",
         "Olive oil",
         "olive oil",
         "2.5",
@@ -426,6 +426,62 @@ def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
     ]
 
 
+def test_voice_parse_corrects_restaurant_categories_in_report_and_csv(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+
+    rows = [
+        ("Marinara sauce", "Dry Goods", 2, "jars", "Sauces & Condiments"),
+        ("Pesto", "Dry Goods", 4, "containers", "Sauces & Condiments"),
+        ("Tomato sauce", "Dry Goods", 8, "cans", "Sauces & Condiments"),
+        ("Olive oil", "Dry Goods", 3, "bottles", "Oils & Liquids"),
+        ("Canola oil", "Dry Goods", 5, "gallons", "Oils & Liquids"),
+        ("Water bottles", "Liquids", 48, "bottles", "Beverages"),
+        ("Burger buns", "Dry Goods", 48, "buns", "Bakery"),
+        ("Bacon", "Meats", 2, "boxes", "Proteins"),
+        ("Salmon", "Meats", 6, "pounds", "Proteins"),
+        ("Chicken breast", "Meats", 4, "pounds", "Proteins"),
+        ("Napkins", "Dry Goods", 1, "cases", "Supplies"),
+        ("Paper cups", "Dry Goods", 500, "cups", "Supplies"),
+    ]
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        return [
+            ParsedCandidate(
+                raw_phrase=f"{quantity} {unit} {name}",
+                quantity=quantity,
+                unit=unit,
+                item_name=name,
+                partial_detail=None,
+                needs_review=False,
+                review_reason=None,
+                status="Clean",
+                category=source_category,
+            )
+            for name, source_category, quantity, unit, _expected_category in rows
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": "category fixture", "area": "Dry Storage", "save": True},
+    )
+
+    assert response.status_code == 200
+    response_categories = {entry["item_name_clean"]: entry["category"] for entry in response.json()["entries"]}
+    assert response_categories == {name: expected for name, *_rest, expected in rows}
+
+    report = client.get(f"/reports/{count_id}").json()
+    report_categories = {entry["item_name_clean"]: entry["category"] for entry in report["entries"]}
+    assert report_categories == response_categories
+
+    csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
+    csv_categories = {row["Item Name"]: row["Category"] for row in csv_rows}
+    assert csv_categories == response_categories
+
+
 def test_unknown_item_creates_issue() -> None:
     count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
     response = client.post(
@@ -541,6 +597,83 @@ def test_parse_voice_area_updates_entries_report_and_csv_when_count_started_with
     assert csv_rows[0] == CSV_HEADER
     assert csv_rows[1][2] == "Walk-in"
     assert csv_rows[1][4:6] == ["Olive oil", "olive oil"]
+
+
+def test_saved_counts_persist_for_same_user_and_are_account_scoped() -> None:
+    first_count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+    first_parse = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": first_count_id,
+            "text": "3 bottles of olive oil",
+            "area": "Dry Storage",
+            "save": True,
+        },
+    )
+    assert first_parse.status_code == 200
+
+    second_count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+    second_parse = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": second_count_id,
+            "text": "5 heads of lettuce",
+            "area": "Walk-in",
+            "save": True,
+        },
+    )
+    assert second_parse.status_code == 200
+
+    draft_count_id = client.post("/counts", json={"area": "Prep Station"}).json()["id"]
+
+    # Simulate logout/re-auth by resetting dependency overrides without
+    # touching database state, then authenticate as the same account again.
+    app.dependency_overrides.clear()
+    app.dependency_overrides[auth_deps.get_current_supabase_user] = override_current_user
+
+    counts_response = client.get("/counts")
+    assert counts_response.status_code == 200
+    counts = counts_response.json()
+    assert [count["id"] for count in counts[:3]] == [second_count_id, first_count_id, draft_count_id]
+    completed = [count for count in counts if count["id"] in {first_count_id, second_count_id}]
+    assert all(count["status"] == "completed" for count in completed)
+    assert all(count["completed_at"] for count in completed)
+    assert all(count["restaurant_id"] == 2 for count in completed)
+    assert {count["id"]: count["summary"]["total_entries"] for count in completed} == {
+        first_count_id: 1,
+        second_count_id: 1,
+    }
+
+    report_response = client.get(f"/reports/{first_count_id}")
+    assert report_response.status_code == 200
+    report = report_response.json()
+    assert report["count_id"] == first_count_id
+    assert [(entry["item_name_clean"], entry["category"]) for entry in report["entries"]] == [
+        ("Olive oil", "Oils & Liquids")
+    ]
+
+    csv_response = client.get(f"/reports/{first_count_id}/csv")
+    assert csv_response.status_code == 200
+    assert "Olive oil" in csv_response.text
+
+    other_user = auth_deps.SupabaseUser(user_id="other-persist-user", email="other@example.com")
+    db = SessionLocal()
+    try:
+        other_restaurant = Restaurant(name="Other Owner", owner_user_id=other_user.user_id)
+        db.add(other_restaurant)
+        db.commit()
+    finally:
+        db.close()
+    app.dependency_overrides[auth_deps.get_current_supabase_user] = lambda: other_user
+
+    other_counts = client.get("/counts")
+    assert other_counts.status_code == 200
+    assert first_count_id not in {count["id"] for count in other_counts.json()}
+    assert client.get(f"/reports/{first_count_id}").status_code == 404
+    assert client.get(f"/reports/{first_count_id}/csv").status_code == 404
+
+    app.dependency_overrides.clear()
+    app.dependency_overrides[auth_deps.get_current_supabase_user] = override_current_user
 
 
 def test_ownership_checks_prevent_other_restaurant_count_and_report() -> None:

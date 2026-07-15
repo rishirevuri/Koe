@@ -21,7 +21,7 @@ const authRedirectKey = "koe:authRedirecting";
 const googleDashboardRedirectKey = "koe:googleDashboardRedirect";
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const VALID_STATUSES = new Set(["Clean", "Partial Quantity", "Missing Unit", "Needs Review", "Possible Duplicate", "Converted Unit"]);
-const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Liquids", "Dry Goods", "Bar", "Frozen", "Supplies", "Other"];
+const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Proteins", "Bakery", "Sauces & Condiments", "Oils & Liquids", "Beverages", "Frozen", "Supplies", "Dry Goods", "Uncategorized"];
 const INVALID_FALLBACK_ITEM_NAMES = new Set([
   "of",
   "and",
@@ -487,14 +487,17 @@ function normalizeDisplayCategory(category) {
   const raw = String(category || "").trim();
   if (CATEGORY_ORDER.includes(raw)) return raw;
   const value = raw.toLowerCase();
-  if (["oils", "beverages", "liquid", "liquids", "bar", "wine"].includes(value)) return "Liquids";
+  if (["oils", "oil", "liquid", "liquids", "oils & liquids", "oils and liquids"].includes(value)) return "Oils & Liquids";
+  if (["beverage", "beverages", "bar", "wine"].includes(value)) return "Beverages";
+  if (["sauce", "sauces", "condiment", "condiments", "sauces & condiments", "sauces and condiments"].includes(value)) return "Sauces & Condiments";
+  if (value === "bakery") return "Bakery";
   if (value === "produce") return "Produce";
-  if (["meat", "meats", "seafood"].includes(value)) return "Meats";
+  if (["meat", "meats", "protein", "proteins", "seafood"].includes(value)) return "Proteins";
   if (["dairy", "eggs", "dairy & eggs"].includes(value)) return "Dairy & Eggs";
   if (["dry goods", "dry"].includes(value)) return "Dry Goods";
   if (value === "frozen") return "Frozen";
   if (value === "supplies") return "Supplies";
-  if (value === "other") return "Other";
+  if (value === "other" || value === "uncategorized") return "Uncategorized";
   return "";
 }
 
@@ -504,19 +507,37 @@ function inferCategory(entry) {
 
   const name = String(getEntryCleanName(entry)).toLowerCase();
   const unit = String(entry.unit || "").toLowerCase();
-  if (/\b(oil|vinegar|water|wine|beer|juice|syrup|sauce|stock|broth|milk)\b/.test(name) || ["bottles", "gallons", "ounces"].includes(unit)) {
-    return "Liquids";
+  if (/\b(marinara sauce|tomato sauce|pesto|ranch dressing|caesar dressing|pickles?)\b/.test(name)) {
+    return "Sauces & Condiments";
+  }
+  if (/\b(olive oil|canola oil|oil|vinegar)\b/.test(name)) {
+    return "Oils & Liquids";
+  }
+  if (/\b(water bottles?|sparkling water|tonic waters?|ginger beers?|coke|cola|wine|beer|juice)\b/.test(name)) {
+    return "Beverages";
   }
   if (/\b(tomato|tomatoes|lettuce|cucumber|cucumbers|onion|onions|pepper|peppers|carrot|carrots|potato|potatoes|fruit|herb|herbs|greens)\b/.test(name)) {
     return "Produce";
   }
-  if (/\b(chicken|beef|pork|steak|fish|salmon|tuna|shrimp|turkey|meat)\b/.test(name)) {
-    return "Meats";
+  if (/\b(chicken|beef|pork|bacon|steak|fish|salmon|tuna|shrimp|turkey|patty|patties|meat)\b/.test(name)) {
+    return "Proteins";
   }
   if (/\b(egg|eggs|cheese|cream|butter|yogurt)\b/.test(name)) {
     return "Dairy & Eggs";
   }
-  return "Other";
+  if (/\b(burger buns?|hamburger buns?|sourdough|bread)\b/.test(name)) {
+    return "Bakery";
+  }
+  if (/\b(napkins?|straws?|receipt paper|paper cups?|takeout containers?)\b/.test(name)) {
+    return "Supplies";
+  }
+  if (/\b(frozen fries|frozen berries|ice cream|gelato|mozzarella sticks)\b/.test(name)) {
+    return "Frozen";
+  }
+  if (["bottles", "gallons", "ounces"].includes(unit)) {
+    return "Oils & Liquids";
+  }
+  return "Uncategorized";
 }
 
 function groupEntriesByCategory(entries) {
