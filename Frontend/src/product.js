@@ -17,6 +17,7 @@ const AREA_OPTIONS = ["Dry Storage", "Walk-in", "Freezer", "Bar", "Wine Storage"
 const MOBILE_AREA_OPTIONS = ["Walk-in", "Dry Storage", "Bar", "Kitchen", "Other"];
 const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
 const authHandoffKey = "koe:authHandoff";
+const authRedirectKey = "koe:authRedirecting";
 const googleDashboardRedirectKey = "koe:googleDashboardRedirect";
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const VALID_STATUSES = new Set(["Clean", "Partial Quantity", "Missing Unit", "Needs Review", "Possible Duplicate", "Converted Unit"]);
@@ -130,6 +131,19 @@ function requestGoogleDashboardRedirect() {
     window.sessionStorage.setItem(googleDashboardRedirectKey, "1");
   } catch {
     // OAuth still uses dashboardRedirectUrl if session storage is unavailable.
+  }
+}
+
+function debugAuthFlow(message, details = {}) {
+  if (!import.meta.env.DEV) return;
+  console.log(`[koe-auth] ${message}`, details);
+}
+
+function markDashboardAuthRedirect() {
+  try {
+    window.sessionStorage.setItem(authRedirectKey, "1");
+  } catch {
+    // The redirect still works if session storage is unavailable.
   }
 }
 
@@ -651,7 +665,7 @@ async function loadCurrentWorkspace() {
     if (state.pendingDashboardRedirect || shouldRedirectToDashboard) {
       if (shouldRedirectToDashboard) consumeGoogleDashboardRedirect();
       state.navigatingAway = true;
-      window.location.assign("./dashboard.html");
+      window.location.assign("/dashboard.html");
       return;
     }
   } catch (error) {
@@ -663,7 +677,7 @@ async function loadCurrentWorkspace() {
     if (isMissingWorkspaceError(error)) {
       if (shouldRedirectToDashboard) {
         state.navigatingAway = true;
-        window.location.assign("./dashboard.html");
+        window.location.assign("/dashboard.html");
         return;
       }
       const pendingRestaurantName =
@@ -766,11 +780,17 @@ async function handleAuthSubmit(mode) {
 
   if (result.error) {
     state.authRedirectPending = false;
+    debugAuthFlow("product login failed", { mode, error: result.error.message });
     setError(result.error.message);
     render();
     return;
   }
 
+  debugAuthFlow("product login success", {
+    mode,
+    hasSession: Boolean(result.data?.session),
+    hasUser: Boolean(result.data?.user),
+  });
   state.authFirstName = firstName;
   state.authLastName = lastName;
   state.authRestaurantName = restaurantName;
@@ -796,9 +816,11 @@ async function handleAuthSubmit(mode) {
     return;
   }
 
+  markDashboardAuthRedirect();
   storeAuthHandoff(result.data.session);
   state.navigatingAway = true;
-  window.location.assign("./dashboard.html");
+  debugAuthFlow("product redirecting to dashboard", { target: "/dashboard.html" });
+  window.location.assign("/dashboard.html");
 }
 
 async function handleResetPassword() {
@@ -842,7 +864,9 @@ async function handleGoogleSignIn() {
 
   state.authLoading = true;
   setSelectedRestaurantId("");
+  markDashboardAuthRedirect();
   requestGoogleDashboardRedirect();
+  debugAuthFlow("product redirecting to Google OAuth", { target: dashboardRedirectUrl });
   render();
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",

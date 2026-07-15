@@ -14,6 +14,7 @@ import { bindSidebar, renderSidebar } from "./sidebar.js";
 
 const app = document.querySelector("#dashboard-app");
 const authHandoffKey = "koe:authHandoff";
+const authRedirectKey = "koe:authRedirecting";
 const googleDashboardRedirectKey = "koe:googleDashboardRedirect";
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const CATEGORY_COLORS = {
@@ -119,8 +120,52 @@ function consumeGoogleDashboardRedirect() {
   }
 }
 
-async function getSessionWithHandoff() {
-  const { data } = await supabase.auth.getSession();
+function debugAuthFlow(message, details = {}) {
+  if (!import.meta.env.DEV) return;
+  console.log(`[koe-auth] ${message}`, details);
+}
+
+function consumeDashboardAuthRedirect() {
+  try {
+    const wasRedirecting = window.sessionStorage.getItem(authRedirectKey) === "1";
+    window.sessionStorage.removeItem(authRedirectKey);
+    return wasRedirecting;
+  } catch {
+    return false;
+  }
+}
+
+function waitForAuthSession(timeoutMs = 1250) {
+  return new Promise((resolve) => {
+    let settled = false;
+    let timer = null;
+    let subscription = null;
+    const finish = (session) => {
+      if (settled) return;
+      settled = true;
+      if (timer) window.clearTimeout(timer);
+      subscription?.unsubscribe?.();
+      resolve(session || null);
+    };
+    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session) finish(session);
+    });
+    subscription = data?.subscription || null;
+    timer = window.setTimeout(() => finish(null), timeoutMs);
+  });
+}
+
+async function getSessionWithRestore() {
+  let { data } = await supabase.auth.getSession();
+  debugAuthFlow("dashboard getSession result", { hasSession: Boolean(data.session), phase: "initial" });
+  if (data.session) return data.session;
+
+  const waitedSession = await waitForAuthSession();
+  debugAuthFlow("dashboard getSession result", { hasSession: Boolean(waitedSession), phase: "after_grace" });
+  if (waitedSession) return waitedSession;
+
+  ({ data } = await supabase.auth.getSession());
+  debugAuthFlow("dashboard getSession result", { hasSession: Boolean(data.session), phase: "post_grace_check" });
   if (data.session) return data.session;
 
   let handoff = null;
@@ -137,6 +182,7 @@ async function getSessionWithHandoff() {
     refresh_token: handoff.refresh_token,
   });
   if (error) return null;
+  debugAuthFlow("dashboard getSession result", { hasSession: Boolean(restored.session), phase: "handoff_fallback" });
   return restored.session || null;
 }
 
@@ -147,7 +193,7 @@ async function returnToLogin() {
     // Ignore and still navigate to the login screen.
   }
   setSelectedRestaurantId("");
-  window.location.assign("./product.html");
+  window.location.assign("/product.html");
 }
 
 function getCountTimestamp(count) {
@@ -361,14 +407,17 @@ async function logout() {
     // ignore; navigate to the auth page regardless
   }
   setSelectedRestaurantId("");
-  window.location.assign("./product.html");
+  window.location.assign("/product.html");
 }
 
 function goToLogin() {
-  window.location.assign("./product.html");
+  debugAuthFlow("dashboard route decision", { route: "login" });
+  window.location.assign("/product.html");
 }
 
 async function initialize() {
+  const arrivedFromLogin = consumeDashboardAuthRedirect();
+  debugAuthFlow("dashboard boot start", { arrivedFromLogin });
   state.phase = "loading";
   renderShell();
 
@@ -379,8 +428,9 @@ async function initialize() {
 
   let session = null;
   try {
-    session = await getSessionWithHandoff();
-  } catch {
+    session = await getSessionWithRestore();
+  } catch (error) {
+    debugAuthFlow("dashboard session restore failed", { error: error?.name || "Error" });
     goToLogin();
     return;
   }
@@ -393,7 +443,12 @@ async function initialize() {
   try {
     state.restaurants = await getRestaurants();
   } catch (error) {
-    if (error.status === 401) {
+    if (error.status === 401 || error.status === 403) {
+      try {
+        await supabase.auth.signOut();
+      } catch {
+        // Ignore and continue to login.
+      }
       goToLogin();
       return;
     }
@@ -402,27 +457,27 @@ async function initialize() {
     renderShell();
     return;
   }
+  debugAuthFlow("dashboard restaurant fetch result", { count: state.restaurants.length });
 
   if (!state.restaurants.length) {
-    if (consumeGoogleDashboardRedirect()) {
-      setSelectedRestaurantId("");
-      state.phase = "setup-restaurant";
-      renderRestaurantSetup();
-      return;
-    }
-    await returnToLogin();
+    consumeGoogleDashboardRedirect();
+    setSelectedRestaurantId("");
+    state.phase = "setup-restaurant";
+    debugAuthFlow("dashboard route decision", { route: "onboarding", restaurantCount: 0 });
+    renderRestaurantSetup();
     return;
   }
 
   if (state.restaurants.length > 1) {
     const savedRestaurantId = getSelectedRestaurantId();
     const savedRestaurant = state.restaurants.find((restaurant) => String(restaurant.id) === String(savedRestaurantId));
-    if (savedRestaurant) {
+    if (!arrivedFromLogin && savedRestaurant) {
       state.restaurantName = savedRestaurant.name || state.restaurantName;
       setSelectedRestaurantId(savedRestaurant.id);
     } else {
       setSelectedRestaurantId("");
       state.phase = "select-restaurant";
+      debugAuthFlow("dashboard route decision", { route: "chooser", restaurantCount: state.restaurants.length });
       renderRestaurantChooser();
       return;
     }
@@ -435,14 +490,24 @@ async function initialize() {
     const me = await getAuthMe();
     state.restaurantName = me?.restaurant?.name || state.restaurantName;
   } catch (error) {
-    if (error.status === 401 || error.status === 404) {
+    if (error.status === 401) {
       goToLogin();
+      return;
+    }
+    if (error.status === 404) {
+      state.phase = "setup-restaurant";
+      debugAuthFlow("dashboard route decision", { route: "onboarding", reason: "selected_restaurant_missing" });
+      renderRestaurantSetup();
       return;
     }
     // Backend reachable problem but still signed in: show the shell with an error.
     state.restaurantName = state.restaurantName;
   }
 
+  debugAuthFlow("dashboard route decision", {
+    route: "dashboard",
+    restaurantCount: state.restaurants.length,
+  });
   renderShell();
   loadSummary();
 }
