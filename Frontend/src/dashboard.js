@@ -1,4 +1,5 @@
 import {
+  createRestaurant,
   downloadCsv,
   getAuthMe,
   getCountSessions,
@@ -33,7 +34,7 @@ const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Meats", "Liquids", "Dry Good
 
 const state = {
   restaurantName: "Your Restaurant",
-  phase: "loading", // loading | ready | error
+  phase: "loading", // loading | ready | error | select-restaurant
   error: "",
   data: null,
   activeTab: getDashboardTabFromHash(),
@@ -108,6 +109,22 @@ function getDashboardTabFromHash() {
   return window.location.hash.replace("#", "").trim().toLowerCase() === "past-counts" ? "past-counts" : "overview";
 }
 
+function getRestaurantNameFromSession(session) {
+  const metadata = session?.user?.user_metadata || {};
+  return String(metadata.restaurant_name || metadata.restaurantName || metadata.organization || "").trim();
+}
+
+function isAuthCallbackUrl() {
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const searchParams = new URLSearchParams(window.location.search);
+  return Boolean(
+    hashParams.get("access_token") ||
+      hashParams.get("refresh_token") ||
+      hashParams.get("type") ||
+      searchParams.get("code"),
+  );
+}
+
 function consumeGoogleDashboardRedirect() {
   try {
     const shouldRedirect = window.sessionStorage.getItem(googleDashboardRedirectKey) === "1";
@@ -157,6 +174,13 @@ async function getSessionWithRestore() {
   let { data } = await supabase.auth.getSession();
   debugAuthFlow("dashboard getSession result", { hasSession: Boolean(data.session), phase: "initial" });
   if (data.session) return data.session;
+
+  const authCode = new URLSearchParams(window.location.search).get("code");
+  if (authCode) {
+    const { data: exchanged, error } = await supabase.auth.exchangeCodeForSession(authCode);
+    debugAuthFlow("dashboard code exchange result", { hasSession: Boolean(exchanged?.session), hasError: Boolean(error) });
+    if (exchanged?.session) return exchanged.session;
+  }
 
   const waitedSession = await waitForAuthSession();
   debugAuthFlow("dashboard getSession result", { hasSession: Boolean(waitedSession), phase: "after_grace" });
@@ -457,7 +481,7 @@ function goToLogin() {
 }
 
 async function initialize() {
-  const arrivedFromLogin = consumeDashboardAuthRedirect();
+  const arrivedFromLogin = consumeDashboardAuthRedirect() || isAuthCallbackUrl();
   debugAuthFlow("dashboard boot start", { arrivedFromLogin });
   state.phase = "loading";
   renderShell();
@@ -499,6 +523,23 @@ async function initialize() {
     return;
   }
   debugAuthFlow("dashboard restaurant fetch result", { count: state.restaurants.length });
+
+  if (!state.restaurants.length) {
+    const restaurantName = getRestaurantNameFromSession(session);
+    if (restaurantName) {
+      try {
+        const restaurant = await createRestaurant(restaurantName, session);
+        state.restaurants = [restaurant];
+        debugAuthFlow("dashboard created signup restaurant", { restaurantId: restaurant.id });
+      } catch (error) {
+        state.phase = "error";
+        state.error = error.message || "Could not register your restaurant workspace.";
+        renderShell();
+        return;
+      }
+    }
+  }
+
   consumeGoogleDashboardRedirect();
 
   if (!state.restaurants.length) {

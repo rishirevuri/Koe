@@ -768,6 +768,7 @@ async function handleAuthSubmit(mode) {
           email,
           password,
           options: {
+            emailRedirectTo: dashboardRedirectUrl,
             data: {
               first_name: firstName,
               last_name: lastName,

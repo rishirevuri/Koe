@@ -132,6 +132,45 @@ def test_auth_me_returns_current_workspace() -> None:
     assert payload["restaurant"]["name"] == "Smoking Pig BBQ"
 
 
+def test_create_restaurant_is_idempotent_for_existing_owned_workspace() -> None:
+    db = SessionLocal()
+    try:
+        existing_id = db.query(Restaurant).filter(Restaurant.name == "Smoking Pig BBQ").one().id
+    finally:
+        db.close()
+
+    response = client.post("/restaurants", json={"name": "  Smoking Pig BBQ  "})
+
+    assert response.status_code == 200
+    assert response.json()["id"] == existing_id
+    restaurants = client.get("/restaurants").json()
+    assert [restaurant["name"] for restaurant in restaurants].count("Smoking Pig BBQ") == 1
+
+
+def test_create_restaurant_claims_unowned_matching_workspace() -> None:
+    db = SessionLocal()
+    try:
+        massimo = db.query(Restaurant).filter(Restaurant.name == "Massimo’s").one()
+        massimo_id = massimo.id
+        assert massimo.owner_user_id is None
+    finally:
+        db.close()
+
+    response = client.post("/restaurants", json={"name": "Massimo’s"})
+
+    assert response.status_code == 200
+    assert response.json()["id"] == massimo_id
+    restaurants = client.get("/restaurants").json()
+    assert {restaurant["name"] for restaurant in restaurants} >= {"Smoking Pig BBQ", "Massimo’s"}
+
+
+def test_create_restaurant_rejects_blank_name() -> None:
+    response = client.post("/restaurants", json={"name": "   "})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Restaurant name is required"
+
+
 def test_dev_link_route_disabled_outside_development(monkeypatch) -> None:
     settings = DisabledIntegrationSettings()
     settings.environment = "production"
