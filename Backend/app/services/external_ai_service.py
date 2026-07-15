@@ -5,7 +5,7 @@ import re
 import httpx
 
 from app.config import get_settings
-from app.services.voice_parse_service import ParsedCandidate
+from app.services.voice_parse_service import ParsedCandidate, normalize_obvious_item_unit
 from app.utils.units import normalize_unit
 
 
@@ -446,10 +446,14 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
     unit = normalize_unit(str(entry.get("unit"))) if entry.get("unit") else None
     partial_detail = entry.get("partial_detail") or (entry.get("original_phrase") if status == "Partial Quantity" else None)
     review_reason = entry.get("review_reason") or (entry.get("original_phrase") if status in REVIEW_STATUSES else None)
+    if quantity is None and status in REVIEW_STATUSES and unit == "individual":
+        unit = None
+    unit = normalize_obvious_item_unit(item_name, unit)
+    resolved_unit = unit if unit is not None else None if quantity is None and status in REVIEW_STATUSES else "individual"
     return ParsedCandidate(
         raw_phrase=str(entry.get("original_phrase") or entry.get("raw_phrase") or entry.get("item_name_raw") or item_name),
         quantity=quantity,
-        unit=unit or "individual",
+        unit=resolved_unit,
         item_name=item_name,
         partial_detail=str(partial_detail) if partial_detail else None,
         needs_review=status in REVIEW_STATUSES or bool(entry.get("needs_review")),

@@ -53,6 +53,24 @@ PARTIAL_TAIL = re.compile(
     r"\b(?:one\s+(?:(?:of\s+)?(?:which|them)\s+)?(?:is\s+)?(?:half|quarter|fourth|three quarters|three fourths)\s+(?:empty|full)?|one\s+(?:almost empty|mostly full|partially full))\b",
     re.IGNORECASE,
 )
+VAGUE_QUANTITY_PATTERN = re.compile(
+    r"\b(?:a few|some|several|not sure how many|unknown count|(?:i|we)\s+(?:do not|don't)\s+know(?:\s+the)?\s+exact\s+count)\b",
+    re.IGNORECASE,
+)
+VAGUE_LEADING_ITEM_PATTERN = re.compile(
+    r"\b(?P<vague>a few|some|several)\s+(?P<item>[A-Za-z][A-Za-z\s-]*?)(?=\s*(?:,|\.|;|\bbut\b|\bnot sure\b|\bunknown count\b|\bi\s+(?:do not|don't)\b|\d+\b|$))",
+    re.IGNORECASE,
+)
+UNKNOWN_TRAILING_ITEM_PATTERN = re.compile(
+    r"\b(?P<item>[A-Za-z][A-Za-z\s-]*?)\s+(?:not sure how many|unknown count|(?:i|we)\s+(?:do not|don't)\s+know(?:\s+the)?\s+exact\s+count)\b",
+    re.IGNORECASE,
+)
+VAGUE_LEADING_WORDS = re.compile(r"^(?:a few|some|several)\s+", re.IGNORECASE)
+UNKNOWN_TAIL = re.compile(
+    r"\s+(?:but\s+)?(?:not sure how many|unknown count|(?:i|we)\s+(?:do not|don't)\s+know(?:\s+the)?\s+exact\s+count).*$",
+    re.IGNORECASE,
+)
+UNUSABLE_ITEM_PATTERN = re.compile(r"\b(?:spoiled|unusable|rotten|bad|discard|throw away|thrown away)\b", re.IGNORECASE)
 
 
 def _normalize_spoken_numbers(text: str) -> str:
@@ -91,6 +109,56 @@ def _clean_item_name(value: str) -> str:
     return cleaned
 
 
+def normalize_obvious_item_unit(item_name: str, unit: str | None) -> str | None:
+    normalized_item = re.sub(r"[^a-z0-9]+", " ", item_name.lower()).strip()
+    if unit not in {None, "", "individual"}:
+        return unit
+    if re.search(r"\bpaper cups?\b", normalized_item):
+        return "cups"
+    if re.search(r"\bveggie(?: burger)? patties?\b", normalized_item):
+        return "patties"
+    if re.search(r"\b(?:burger|hamburger) buns?\b", normalized_item):
+        return "buns"
+    return unit
+
+
+def _clean_vague_item_name(value: str) -> str:
+    cleaned = UNKNOWN_TAIL.sub("", value).strip(" ,.")
+    cleaned = VAGUE_LEADING_WORDS.sub("", cleaned).strip(" ,.")
+    cleaned = LEADING_NOISE.sub("", cleaned).strip(" ,.")
+    return _clean_item_name(cleaned)
+
+
+def _parse_vague_quantity_phrases(text: str) -> list[ParsedCandidate]:
+    candidates: list[ParsedCandidate] = []
+    seen: set[str] = set()
+    for pattern in (VAGUE_LEADING_ITEM_PATTERN, UNKNOWN_TRAILING_ITEM_PATTERN):
+        for match in pattern.finditer(text):
+            raw_phrase = match.group(0).strip(" ,.")
+            if not VAGUE_QUANTITY_PATTERN.search(raw_phrase):
+                continue
+            item_name = _clean_vague_item_name(match.group("item"))
+            if not item_name or UNUSABLE_ITEM_PATTERN.search(item_name):
+                continue
+            key = item_name.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                ParsedCandidate(
+                    raw_phrase=raw_phrase,
+                    quantity=None,
+                    unit=normalize_obvious_item_unit(item_name, None),
+                    item_name=item_name,
+                    partial_detail=None,
+                    needs_review=True,
+                    review_reason="Vague or unknown quantity; confirm the count before export.",
+                    status="Needs Review",
+                )
+            )
+    return candidates
+
+
 def _parse_quantity_unit_item(phrase: str) -> tuple[re.Match[str], float, str, str] | None:
     match = QUANTITY_START_PATTERN.search(phrase)
     if not match:
@@ -106,7 +174,7 @@ def _parse_quantity_unit_item(phrase: str) -> tuple[re.Match[str], float, str, s
         return match, qty, first_normalized, item_part
 
     item_part = f"{first_word} {remainder}".strip(" ,.")
-    return match, qty, "individual", item_part
+    return match, qty, normalize_obvious_item_unit(item_part, "individual") or "individual", item_part
 
 
 def parse_voice_text(text: str) -> list[ParsedCandidate]:
@@ -125,11 +193,12 @@ def parse_voice_text(text: str) -> list[ParsedCandidate]:
             partial_phrase = phrase
 
         partial = parse_partial_quantity(partial_phrase, qty, unit)
+        resolved_unit = normalize_obvious_item_unit(item_name, partial.unit or unit)
         candidates.append(
             ParsedCandidate(
                 raw_phrase=phrase,
                 quantity=partial.quantity if partial.quantity is not None else qty,
-                unit=partial.unit or unit,
+                unit=resolved_unit,
                 item_name=item_name,
                 partial_detail=partial.partial_detail,
                 needs_review=partial.needs_review,
@@ -137,4 +206,5 @@ def parse_voice_text(text: str) -> list[ParsedCandidate]:
                 status="Needs Review" if partial.needs_review else "Partial Quantity" if partial.partial_detail else "Clean",
             )
         )
+    candidates.extend(_parse_vague_quantity_phrases(text))
     return candidates

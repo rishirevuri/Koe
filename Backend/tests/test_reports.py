@@ -1,5 +1,24 @@
+import csv
+import io
+
 from app.models import CountEntry, CountSession, InventoryItem, Restaurant
 from app.services.report_service import build_csv, build_report
+
+
+CSV_HEADER = [
+    "Count ID",
+    "Restaurant ID",
+    "Area",
+    "Category",
+    "Item Name",
+    "Raw Item Name",
+    "Quantity",
+    "Unit",
+    "Status",
+    "Original Phrase",
+    "Counted By",
+    "Created At",
+]
 
 
 def test_report_summary_and_csv() -> None:
@@ -43,11 +62,68 @@ def test_report_summary_and_csv() -> None:
     assert report["entries"][0]["par_unit"] == "bottles"
     assert report["entries"][0]["is_demo_estimate"] is True
     csv_text = build_csv(count)
-    assert "Count ID,Restaurant ID,Area,Raw Item Name,Clean Item Name,Quantity,Unit,Status,Original Phrase,Created At,Counted By" in csv_text
-    assert "1,1,Dry Storage,olive oil,Olive oil,2.5,bottles,Partial Quantity" in csv_text
+    csv_rows = list(csv.reader(io.StringIO(csv_text)))
+    assert csv_rows[0] == CSV_HEADER
+    assert csv_rows[1][:11] == [
+        "1",
+        "1",
+        "Dry Storage",
+        "Oils",
+        "Olive oil",
+        "olive oil",
+        "2.5",
+        "bottles",
+        "Partial Quantity",
+        "3 bottles olive oil, one half empty",
+        "tester@example.com",
+    ]
     assert "par_status" not in csv_text
     assert "Needs Review" not in csv_text
     assert "Manager Note" not in csv_text
+
+
+def test_csv_blanks_unknown_vague_quantity() -> None:
+    restaurant = Restaurant(id=1, name="Demo Restaurant")
+    count = CountSession(id=1, restaurant_id=1, status="completed", restaurant=restaurant)
+    entry = CountEntry(
+        id=1,
+        count_session_id=1,
+        item_name_raw="takeout containers",
+        item_name="Takeout containers",
+        normalized_item_name="takeout containers",
+        category="Supplies",
+        quantity=None,
+        unit="",
+        status="Needs Review",
+        area="Storage",
+        source="voice",
+        raw_input="a few takeout containers, not sure how many",
+        original_phrase="a few takeout containers, not sure how many",
+        needs_review=True,
+        review_reason="Vague or unknown quantity; confirm the count before export.",
+        counted_by="tester@example.com",
+    )
+    count.entries = [entry]
+
+    report = build_report(count)
+    assert report["entries"][0]["quantity"] is None
+    assert report["entries"][0]["status"] == "Needs Review"
+
+    csv_rows = list(csv.reader(io.StringIO(build_csv(count))))
+    assert csv_rows[0] == CSV_HEADER
+    assert csv_rows[1][:11] == [
+        "1",
+        "1",
+        "Storage",
+        "Supplies",
+        "Takeout containers",
+        "takeout containers",
+        "",
+        "",
+        "Needs Review",
+        "a few takeout containers, not sure how many",
+        "tester@example.com",
+    ]
 
 
 def test_report_prefers_saved_count_entry_category() -> None:

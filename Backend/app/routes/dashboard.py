@@ -16,7 +16,9 @@ DUPLICATE_ISSUE_TYPES = ("possible_duplicate", "duplicate")
 REVIEW_STATUSES = {"Needs Review", "Missing Unit", "Possible Duplicate"}
 
 
-def _format_quantity(quantity: float) -> str:
+def _format_quantity(quantity: float | None) -> str:
+    if quantity is None:
+        return ""
     return str(int(quantity)) if float(quantity).is_integer() else str(quantity)
 
 
@@ -100,6 +102,8 @@ def dashboard_summary(
         entry = latest_by_item.get(item.id)
         if entry is None:
             continue  # never counted -> no current quantity to compare
+        if entry.quantity is None:
+            continue
         if entry.quantity < item.par_level:
             low_stock_items.append(
                 {
@@ -139,6 +143,8 @@ def dashboard_summary(
         for item_id in current_map.keys() & previous_map.keys():
             current_entry = current_map[item_id]
             previous_entry = previous_map[item_id]
+            if current_entry.quantity is None or previous_entry.quantity is None:
+                continue
             delta = current_entry.quantity - previous_entry.quantity
             if delta == 0:
                 continue
@@ -176,6 +182,8 @@ def dashboard_summary(
 
     seen_partial: set[str] = set()
     for entry in recent_entries:
+        if entry.quantity is None:
+            continue
         if float(entry.quantity).is_integer():
             continue
         item = items_by_id.get(entry.inventory_item_id) if entry.inventory_item_id else None

@@ -157,7 +157,7 @@ def _handle_candidates(
                     item_name=clean_name,
                     normalized_item_name=match.normalized_name,
                     category=candidate.category,
-                    quantity=candidate.quantity if candidate.quantity is not None else 0.0,
+                    quantity=candidate.quantity,
                     unit=candidate.unit or "",
                     status=status,
                     area=resolved_area,

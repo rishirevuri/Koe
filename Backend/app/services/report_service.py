@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 
 from sqlalchemy.orm import Session
 
@@ -18,16 +19,34 @@ INVALID_EXPORT_ITEM_NAMES = {
     "is half empty",
     "more on the bottom shelf",
 }
+UNKNOWN_QUANTITY_PATTERN = re.compile(
+    r"\b(?:a few|some|several|vague or unknown quantity|not sure how many|unknown count|(?:i|we)\s+(?:do not|don't)\s+know(?:\s+the)?\s+exact\s+count)\b",
+    re.IGNORECASE,
+)
 
 
 def _entry_status(entry: CountEntry) -> str:
     return entry.status or "Clean"
 
 
+def _entry_quantity(entry: CountEntry, status: str) -> float | None:
+    if entry.quantity is None:
+        return None
+    if entry.quantity == 0 and status in REVIEW_STATUSES:
+        text = " ".join(
+            str(value or "")
+            for value in (entry.review_reason, entry.original_phrase, entry.raw_input)
+        )
+        if UNKNOWN_QUANTITY_PATTERN.search(text):
+            return None
+    return entry.quantity
+
+
 def _entry_row(entry: CountEntry) -> dict:
     status = _entry_status(entry)
     item_name_clean = entry.inventory_item.name if entry.inventory_item else entry.item_name
     category = entry.category or (entry.inventory_item.category if entry.inventory_item else None)
+    quantity = _entry_quantity(entry, status)
     return {
         "count_id": entry.count_session_id,
         "restaurant_id": entry.count_session.restaurant_id,
@@ -35,7 +54,7 @@ def _entry_row(entry: CountEntry) -> dict:
         "item_name_raw": entry.item_name_raw or entry.item_name,
         "item_name_clean": item_name_clean,
         "category": category,
-        "quantity": entry.quantity,
+        "quantity": quantity,
         "unit": entry.unit,
         "status": status,
         "original_phrase": entry.original_phrase or entry.raw_input or entry.item_name_raw or entry.item_name,
@@ -44,7 +63,7 @@ def _entry_row(entry: CountEntry) -> dict:
         **estimate_par_status(
             item_name=item_name_clean,
             category=category,
-            quantity=entry.quantity,
+            quantity=quantity,
             unit=entry.unit,
             status=status,
         ),
@@ -78,14 +97,15 @@ def build_csv(count: CountSession) -> str:
             "Count ID",
             "Restaurant ID",
             "Area",
+            "Category",
+            "Item Name",
             "Raw Item Name",
-            "Clean Item Name",
             "Quantity",
             "Unit",
             "Status",
             "Original Phrase",
-            "Created At",
             "Counted By",
+            "Created At",
         ]
     )
     for entry in build_report(count)["entries"]:
@@ -94,14 +114,15 @@ def build_csv(count: CountSession) -> str:
                 entry["count_id"],
                 entry["restaurant_id"],
                 entry["area"] or "",
-                entry["item_name_raw"] or "",
+                entry["category"] or "",
                 entry["item_name_clean"],
-                entry["quantity"],
-                entry["unit"],
+                entry["item_name_raw"] or "",
+                "" if entry["quantity"] is None else entry["quantity"],
+                entry["unit"] or "",
                 entry["status"],
                 entry["original_phrase"] or "",
-                entry["created_at"].isoformat() if entry["created_at"] else "",
                 entry["counted_by"] or "",
+                entry["created_at"].isoformat() if entry["created_at"] else "",
             ]
         )
     return output.getvalue()

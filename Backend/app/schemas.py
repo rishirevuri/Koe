@@ -92,7 +92,7 @@ class CountEntryRead(BaseModel):
     area: str | None
     item_name_raw: str | None
     item_name_clean: str
-    quantity: float
+    quantity: float | None
     unit: str
     status: str
     original_phrase: str | None
@@ -202,7 +202,7 @@ class ReportEntry(BaseModel):
     item_name_raw: str | None
     item_name_clean: str
     category: str | None = None
-    quantity: float
+    quantity: float | None
     unit: str
     status: str
     original_phrase: str | None = None

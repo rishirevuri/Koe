@@ -74,3 +74,48 @@ def _ensure_count_entry_columns() -> None:
         for column, statement in column_sql.items():
             if column not in existing:
                 connection.execute(text(statement))
+    _ensure_count_entry_quantity_nullable()
+
+
+def _quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
+
+
+def _ensure_count_entry_quantity_nullable() -> None:
+    inspector = inspect(engine)
+    if "count_entries" not in inspector.get_table_names():
+        return
+
+    quantity = next((column for column in inspector.get_columns("count_entries") if column["name"] == "quantity"), None)
+    if not quantity or quantity.get("nullable", True):
+        return
+
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE count_entries ALTER COLUMN quantity DROP NOT NULL"))
+        return
+
+    if engine.dialect.name != "sqlite":
+        return
+
+    from app import models  # noqa: F401
+
+    table = Base.metadata.tables["count_entries"]
+    with engine.begin() as connection:
+        old_columns = [row[1] for row in connection.execute(text("PRAGMA table_info(count_entries)"))]
+        connection.execute(text("PRAGMA foreign_keys=OFF"))
+        connection.execute(text("ALTER TABLE count_entries RENAME TO count_entries_old"))
+        for index in connection.execute(text("PRAGMA index_list(count_entries_old)")):
+            index_name = index[1]
+            if not str(index_name).startswith("sqlite_autoindex"):
+                connection.execute(text(f"DROP INDEX IF EXISTS {_quote_identifier(index_name)}"))
+        for index in table.indexes:
+            connection.execute(text(f"DROP INDEX IF EXISTS {_quote_identifier(index.name)}"))
+        table.create(bind=connection)
+        copy_columns = [column.name for column in table.columns if column.name in old_columns]
+        column_list = ", ".join(_quote_identifier(column) for column in copy_columns)
+        connection.execute(
+            text(f"INSERT INTO count_entries ({column_list}) SELECT {column_list} FROM count_entries_old")
+        )
+        connection.execute(text("DROP TABLE count_entries_old"))
+        connection.execute(text("PRAGMA foreign_keys=ON"))

@@ -85,3 +85,26 @@ def test_voice_parse_pack_and_bunch_units_are_not_item_fragments() -> None:
         ("buns", 3, "packs"),
         ("cilantro", 4, "bunches"),
     ]
+
+
+def test_voice_parse_vague_quantity_stays_unknown() -> None:
+    parsed = parse_voice_text("a few takeout containers, not sure how many")
+
+    assert len(parsed) == 1
+    row = parsed[0]
+    assert row.item_name == "takeout containers"
+    assert row.quantity is None
+    assert row.unit is None
+    assert row.status == "Needs Review"
+    assert row.needs_review is True
+    assert row.raw_phrase == "a few takeout containers"
+
+
+def test_voice_parse_obvious_item_units() -> None:
+    parsed = parse_voice_text("1000 paper cups, 30 veggie burger patties, and 4 hamburger buns")
+
+    assert [(item.item_name, item.quantity, item.unit) for item in parsed] == [
+        ("paper cups", 1000, "cups"),
+        ("veggie burger patties", 30, "patties"),
+        ("hamburger buns", 4, "buns"),
+    ]

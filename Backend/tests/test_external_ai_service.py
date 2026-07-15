@@ -1,5 +1,10 @@
 from app.services import external_ai_service
-from app.services.external_ai_service import SYSTEM_PROMPT, normalize_claude_inventory_payload, parse_inventory_json_with_claude
+from app.services.external_ai_service import (
+    SYSTEM_PROMPT,
+    _coerce_candidate,
+    normalize_claude_inventory_payload,
+    parse_inventory_json_with_claude,
+)
 
 
 def test_claude_prompt_requires_manager_ready_json_shape() -> None:
@@ -83,6 +88,30 @@ def test_normalize_claude_inventory_payload_legacy_entries_shape() -> None:
     ]
     assert parsed["summary"]["rows_needing_review"] == 1
     assert parsed["summary"]["manager_insights"] == ["1 row needs manager review before export."]
+
+
+def test_coerce_candidate_cleans_obvious_units_and_vague_quantity() -> None:
+    rows = [
+        {"item_name_clean": "Paper cups", "quantity": 1000, "unit": "individual", "status": "Clean"},
+        {"item_name_clean": "Veggie burger patties", "quantity": 30, "unit": "individual", "status": "Clean"},
+        {"item_name_clean": "Hamburger buns", "quantity": 4, "unit": "individual", "status": "Clean"},
+        {
+            "item_name_clean": "Takeout containers",
+            "quantity": None,
+            "unit": None,
+            "status": "Needs Review",
+            "original_phrase": "a few takeout containers, not sure how many",
+        },
+    ]
+
+    candidates = [_coerce_candidate(row) for row in rows]
+
+    assert [(candidate.item_name, candidate.quantity, candidate.unit, candidate.status) for candidate in candidates] == [
+        ("Paper cups", 1000.0, "cups", "Clean"),
+        ("Veggie burger patties", 30.0, "patties", "Clean"),
+        ("Hamburger buns", 4.0, "buns", "Clean"),
+        ("Takeout containers", None, None, "Needs Review"),
+    ]
 
 
 class EnabledClaudeSettings:

@@ -1,3 +1,6 @@
+import csv
+import io
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import inspect, text
@@ -16,6 +19,20 @@ from app.services.voice_parse_service import ParsedCandidate
 
 client = TestClient(app)
 TEST_USER = auth_deps.SupabaseUser(user_id="test-supabase-user", email="tester@example.com")
+CSV_HEADER = [
+    "Count ID",
+    "Restaurant ID",
+    "Area",
+    "Category",
+    "Item Name",
+    "Raw Item Name",
+    "Quantity",
+    "Unit",
+    "Status",
+    "Original Phrase",
+    "Counted By",
+    "Created At",
+]
 
 
 def override_current_user() -> auth_deps.SupabaseUser:
@@ -245,12 +262,24 @@ def test_voice_parse_save_report_and_csv() -> None:
     csv_response = client.get(f"/reports/{count_id}/csv")
     assert csv_response.status_code == 200
     csv_text = csv_response.text
-    assert "Count ID,Restaurant ID,Area,Raw Item Name,Clean Item Name,Quantity,Unit,Status,Original Phrase,Created At,Counted By" in csv_text
-    assert "olive oil,Olive oil,2.5,bottles,Partial Quantity" in csv_text
-    assert ",Dry Storage,olive oil,Olive oil," in csv_text
-    assert "lettuce,Lettuce,3.0,heads,Clean" in csv_text
-    assert "tomatoes,Tomatoes,5.0,boxes,Clean" in csv_text
-    assert "cheese,Cheese,2.0,boxes,Clean" in csv_text
+    csv_rows = list(csv.reader(io.StringIO(csv_text)))
+    assert csv_rows[0] == CSV_HEADER
+    assert csv_rows[1][:11] == [
+        str(count_id),
+        "2",
+        "Dry Storage",
+        "Oils",
+        "Olive oil",
+        "olive oil",
+        "2.5",
+        "bottles",
+        "Partial Quantity",
+        "3 bottles of olive oil, one of which is half empty",
+        TEST_USER.email,
+    ]
+    assert ["Lettuce", "lettuce", "3.0", "heads", "Clean"] in [row[4:9] for row in csv_rows[1:]]
+    assert ["Tomatoes", "tomatoes", "5.0", "boxes", "Clean"] in [row[4:9] for row in csv_rows[1:]]
+    assert ["Cheese", "cheese", "2.0", "boxes", "Clean"] in [row[4:9] for row in csv_rows[1:]]
     assert "Needs Review" not in csv_text
     assert "Manager Note" not in csv_text
 
@@ -336,6 +365,65 @@ def test_voice_parse_saves_claude_category(monkeypatch) -> None:
         assert saved_entry.category == "Produce"
     finally:
         db.close()
+
+
+def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        return [
+            ParsedCandidate(
+                raw_phrase="a few takeout containers, but I do not know the exact count",
+                quantity=None,
+                unit=None,
+                item_name="Takeout containers",
+                partial_detail=None,
+                needs_review=True,
+                review_reason="a few takeout containers, but I do not know the exact count",
+                status="Needs Review",
+                category="Supplies",
+            )
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Storage"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "a few takeout containers, but I do not know the exact count",
+            "area": "Storage",
+            "save": True,
+        },
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["quantity"] is None
+    assert entry["unit"] is None
+    assert entry["status"] == "Needs Review"
+    assert entry["category"] == "Supplies"
+
+    report = client.get(f"/reports/{count_id}").json()
+    assert report["entries"][0]["quantity"] is None
+
+    csv_rows = list(csv.reader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
+    assert csv_rows[0] == CSV_HEADER
+    assert csv_rows[1][:11] == [
+        str(count_id),
+        "2",
+        "Storage",
+        "Supplies",
+        "Takeout containers",
+        "Takeout containers",
+        "",
+        "",
+        "Needs Review",
+        "a few takeout containers, but I do not know the exact count",
+        TEST_USER.email,
+    ]
 
 
 def test_unknown_item_creates_issue() -> None:
@@ -449,7 +537,10 @@ def test_parse_voice_area_updates_entries_report_and_csv_when_count_started_with
     assert report["entries"][0]["area"] == "Walk-in"
 
     csv_text = client.get(f"/reports/{count_id}/csv").text
-    assert ",Walk-in,olive oil,Olive oil," in csv_text
+    csv_rows = list(csv.reader(io.StringIO(csv_text)))
+    assert csv_rows[0] == CSV_HEADER
+    assert csv_rows[1][2] == "Walk-in"
+    assert csv_rows[1][4:6] == ["Olive oil", "olive oil"]
 
 
 def test_ownership_checks_prevent_other_restaurant_count_and_report() -> None:
