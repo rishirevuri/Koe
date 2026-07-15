@@ -4,6 +4,7 @@ import io
 from sqlalchemy.orm import Session
 
 from app.models import CountEntry, CountSession
+from app.services.par_estimate_service import estimate_par_status
 
 
 REVIEW_STATUSES = {"Needs Review", "Missing Unit", "Possible Duplicate"}
@@ -24,19 +25,29 @@ def _entry_status(entry: CountEntry) -> str:
 
 
 def _entry_row(entry: CountEntry) -> dict:
+    status = _entry_status(entry)
+    item_name_clean = entry.inventory_item.name if entry.inventory_item else entry.item_name
+    category = entry.category or (entry.inventory_item.category if entry.inventory_item else None)
     return {
         "count_id": entry.count_session_id,
         "restaurant_id": entry.count_session.restaurant_id,
         "area": entry.area,
         "item_name_raw": entry.item_name_raw or entry.item_name,
-        "item_name_clean": entry.inventory_item.name if entry.inventory_item else entry.item_name,
-        "category": entry.inventory_item.category if entry.inventory_item else None,
+        "item_name_clean": item_name_clean,
+        "category": category,
         "quantity": entry.quantity,
         "unit": entry.unit,
-        "status": _entry_status(entry),
+        "status": status,
         "original_phrase": entry.original_phrase or entry.raw_input or entry.item_name_raw or entry.item_name,
         "created_at": entry.created_at,
         "counted_by": entry.counted_by,
+        **estimate_par_status(
+            item_name=item_name_clean,
+            category=category,
+            quantity=entry.quantity,
+            unit=entry.unit,
+            status=status,
+        ),
     }
 
 

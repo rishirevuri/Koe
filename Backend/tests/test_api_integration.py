@@ -207,6 +207,10 @@ def test_voice_parse_save_report_and_csv() -> None:
     assert all("manager_note" not in entry for entry in entries)
     assert entries[0]["status"] == "Partial Quantity"
     assert entries[0]["counted_by"] == TEST_USER.email
+    assert entries[0]["par_status"] == "low"
+    assert entries[0]["estimated_par_quantity"] == 3
+    assert entries[0]["par_unit"] == "bottles"
+    assert entries[0]["is_demo_estimate"] is True
     assert {entry["area"] for entry in entries} == {"Dry Storage"}
     payload = parse_response.json()
     assert payload["parser_source"] == "deterministic_fallback"
@@ -458,6 +462,14 @@ def test_dashboard_summary_empty_state() -> None:
     assert data["last_count_summary"] is None
     assert data["count_over_count_changes"] == []
     assert data["data_quality_insights"] == []
+    assert data["estimated_par_summary"] == {
+        "critical_items": 0,
+        "low_items": 0,
+        "unknown_items": 0,
+        "watchlist_items": 0,
+        "is_demo_estimate": True,
+    }
+    assert data["estimated_reorder_watchlist"] == []
     assert data["export_status"] == {"count_id": None, "exported": False}
 
 
@@ -490,6 +502,26 @@ def test_dashboard_summary_normal_state() -> None:
     assert summary["needs_review_count"] == 0
 
     assert "Olive oil was counted as a partial quantity (2.5 bottles)." in data["data_quality_insights"]
+    assert "Demo par estimates enabled; review before ordering." in data["data_quality_insights"]
+
+    par_summary = data["estimated_par_summary"]
+    assert par_summary["critical_items"] == 1
+    assert par_summary["low_items"] == 1
+    assert par_summary["unknown_items"] == 2
+    assert par_summary["watchlist_items"] == 2
+    assert par_summary["is_demo_estimate"] is True
+
+    watchlist = data["estimated_reorder_watchlist"]
+    assert [(row["item_name"], row["par_status"]) for row in watchlist] == [
+        ("Lettuce", "critical"),
+        ("Olive oil", "low"),
+    ]
+    lettuce = watchlist[0]
+    assert lettuce["quantity"] == 3
+    assert lettuce["unit"] == "heads"
+    assert lettuce["estimated_par_quantity"] == 8
+    assert lettuce["par_unit"] == "heads"
+    assert "common restaurant usage patterns" in lettuce["par_reason"].lower()
 
     assert data["export_status"] == {"count_id": count_id, "exported": False}
     assert client.get(f"/reports/{count_id}/csv").status_code == 200

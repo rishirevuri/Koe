@@ -3655,6 +3655,7 @@ button:disabled,
 
 .post-count-kpis,
 .dashboard-summary-grid,
+.estimated-reorder-section,
 .dashboard-analytics-grid,
 .dashboard-lower-grid,
 .dashboard-action-strip {
@@ -3665,7 +3666,7 @@ button:disabled,
 
 .post-count-kpis {
   display: grid;
-  grid-template-columns: repeat(6, minmax(150px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
   gap: 12px;
   margin-bottom: 18px;
 }
@@ -3920,6 +3921,162 @@ button:disabled,
   color: #b8873b;
   font-size: 24px;
   font-style: normal;
+}
+
+.estimated-reorder-section {
+  margin-bottom: 18px;
+  scroll-margin-top: 22px;
+}
+
+.estimated-reorder-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.estimated-reorder-card::before {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 4px;
+  content: "";
+  background: linear-gradient(90deg, #7f1d1d, #b7791f 48%, #6f7774);
+}
+
+.estimated-reorder-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+}
+
+.estimated-reorder-header .post-count-card-heading {
+  margin-bottom: 0;
+}
+
+.post-count-card-heading p {
+  max-width: 720px;
+  margin: 6px 0 0;
+  color: #6f7774;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.estimated-par-counts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(86px, 1fr));
+  gap: 8px;
+}
+
+.par-count {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  align-content: center;
+  padding: 10px 12px;
+  text-align: center;
+  background: rgba(250, 244, 232, 0.68);
+  border: 1px solid rgba(228, 216, 200, 0.8);
+  border-radius: 12px;
+}
+
+.par-count strong {
+  color: #071633;
+  font-family: var(--serif);
+  font-size: 1.7rem;
+  line-height: 0.9;
+}
+
+.par-count small {
+  color: #6f7774;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.par-count--critical {
+  background: #fff1ee;
+  border-color: rgba(127, 29, 29, 0.18);
+}
+
+.par-count--critical strong {
+  color: #7f1d1d;
+}
+
+.par-count--low {
+  background: #fff6d8;
+  border-color: rgba(138, 90, 16, 0.18);
+}
+
+.par-count--low strong {
+  color: #8a5a10;
+}
+
+.estimated-reorder-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 18px;
+}
+
+.estimated-reorder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(140px, 0.45fr) minmax(178px, 0.55fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 14px;
+  background: rgba(255, 250, 242, 0.6);
+  border: 1px solid #efe5d8;
+  border-left-width: 5px;
+  border-radius: 14px;
+}
+
+.estimated-reorder-row--critical {
+  border-left-color: #7f1d1d;
+}
+
+.estimated-reorder-row--low {
+  border-left-color: #b7791f;
+}
+
+.estimated-reorder-row strong {
+  display: block;
+  color: #142f29;
+  font-size: 15px;
+}
+
+.estimated-reorder-row small {
+  display: block;
+  margin-top: 4px;
+  color: #6f7774;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.estimated-reorder-row span {
+  color: #243530;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.estimated-reorder-row i {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 78px;
+  min-height: 32px;
+  align-items: center;
+  color: #fffaf2;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
+  background: #8a5a10;
+  border-radius: 999px;
+}
+
+.estimated-reorder-row--critical i {
+  background: #7f1d1d;
+}
+
+.estimated-reorder-empty {
+  margin-top: 18px;
 }
 
 .donut-layout {
@@ -5222,12 +5379,36 @@ button:disabled,
   }
 
   .dashboard-summary-grid,
+  .estimated-reorder-section,
   .dashboard-analytics-grid,
   .dashboard-lower-grid {
     grid-template-columns: 1fr;
     gap: 12px;
     width: 100%;
     margin-bottom: 12px;
+  }
+
+  .estimated-reorder-header {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .estimated-par-counts {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .par-count {
+    min-width: 0;
+    padding: 10px 8px;
+  }
+
+  .estimated-reorder-row {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .estimated-reorder-row i {
+    justify-self: start;
   }
 
   .post-count-card {

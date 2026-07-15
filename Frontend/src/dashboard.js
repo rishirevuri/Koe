@@ -442,6 +442,46 @@ function getDataQualityScore(rows) {
   };
 }
 
+function getParCounts(rows, data = state.data || {}) {
+  if (!rows.length) {
+    const summary = data.estimated_par_summary || {};
+    return {
+      critical: Number(summary.critical_items || 0),
+      low: Number(summary.low_items || 0),
+      unknown: Number(summary.unknown_items || 0),
+      watchlist: Number(summary.watchlist_items || 0),
+    };
+  }
+  return rows.reduce(
+    (counts, row) => {
+      if (row.par_status === "critical") counts.critical += 1;
+      if (row.par_status === "low") counts.low += 1;
+      if (row.par_status === "unknown") counts.unknown += 1;
+      counts.watchlist = counts.critical + counts.low;
+      return counts;
+    },
+    { critical: 0, low: 0, unknown: 0, watchlist: 0 },
+  );
+}
+
+function getEstimatedWatchlist(rows, data = state.data || {}) {
+  const source = rows.length ? rows : data.estimated_reorder_watchlist || [];
+  const rank = { critical: 0, low: 1 };
+  return source
+    .filter((row) => row.par_status === "critical" || row.par_status === "low")
+    .map((row) => ({
+      item_name: row.item_name || row.item_name_clean || row.item_name_raw || "Unnamed item",
+      quantity: row.quantity,
+      unit: row.unit || "",
+      estimated_par_quantity: row.estimated_par_quantity ?? null,
+      par_unit: row.par_unit || "",
+      par_status: row.par_status,
+      par_reason: row.par_reason || "Demo estimate based on common restaurant usage patterns.",
+      par_confidence: row.par_confidence || "low",
+    }))
+    .sort((a, b) => (rank[a.par_status] ?? 9) - (rank[b.par_status] ?? 9) || String(a.item_name).localeCompare(String(b.item_name)));
+}
+
 function getPrioritySnapshotRows(rows) {
   const priority = {
     "Needs Review": 0,
@@ -805,6 +845,9 @@ function renderShell() {
       const action = button.dataset.dashboardAction;
       if (action === "report") setDashboardTab("past-counts", getLatestCountId());
       if (action === "export") exportLatestCount();
+      if (action === "reorder") {
+        document.querySelector("#estimated-reorder-watchlist")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
       if (action === "review") {
         document.querySelector("#dashboard-quality")?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
@@ -912,8 +955,9 @@ function renderOverviewContent(data) {
 
 function renderPostCountOverview(data, latestCount, rows) {
   return `
-    ${renderKpiCards(rows)}
+    ${renderKpiCards(rows, data)}
     ${renderMainSummaryGrid(data, latestCount, rows)}
+    ${renderEstimatedReorderWatchlist(data, rows)}
     <section class="dashboard-analytics-grid">
       ${renderInventoryBreakdown(rows)}
       ${renderCategoryStatusCard(rows)}
@@ -926,13 +970,16 @@ function renderPostCountOverview(data, latestCount, rows) {
   `;
 }
 
-function renderKpiCards(rows) {
+function renderKpiCards(rows, data = state.data || {}) {
   const counts = getStatusCounts(rows);
   const quality = getDataQualityScore(rows);
+  const parCounts = getParCounts(rows, data);
   const cards = [
     { icon: "Σ", label: "Total items counted", value: counts.total, text: "Rows saved from latest count" },
     { icon: "✓", label: "Clean items", value: counts.clean, text: "No cleanup flags" },
     { icon: "!", label: "Needs review", value: counts.review, text: "Review before export" },
+    { icon: "R", label: "Reorder watchlist", value: parCounts.watchlist, text: "Low + critical demo par" },
+    { icon: "!", label: "Critical items", value: parCounts.critical, text: "Review before ordering" },
     { icon: "½", label: "Partial quantities", value: counts.partial, text: "Fractions or partial containers" },
     { icon: "↔", label: "Converted units", value: counts.converted, text: "Package conversions handled" },
     { icon: "%", label: "Data quality score", value: quality.value === null ? "—" : `${quality.value}%`, text: quality.label },
@@ -991,7 +1038,7 @@ function renderCountSummaryCard(data, latestCount, rows) {
 
 function renderInsightsCard(data, rows) {
   const counts = getStatusCounts(rows);
-  const lowStockCount = data.low_stock_items?.length || 0;
+  const parCounts = getParCounts(rows, data);
   const insights = [
     {
       tone: "review",
@@ -1015,11 +1062,25 @@ function renderInsightsCard(data, rows) {
       value: counts.converted,
     },
     {
-      tone: lowStockCount ? "review" : "neutral",
-      icon: "↗",
-      title: "Potential reorder watchlist",
-      text: lowStockCount ? "Items are below configured par levels." : "Par levels not configured yet.",
-      value: lowStockCount || "—",
+      tone: parCounts.watchlist ? "review" : "neutral",
+      icon: "R",
+      title: "Estimated low stock",
+      text: parCounts.watchlist ? "Below demo estimated par. Review before ordering." : "No low or critical demo par rows.",
+      value: parCounts.watchlist || "—",
+    },
+    {
+      tone: parCounts.critical ? "review" : "neutral",
+      icon: "!",
+      title: "Critical reorder candidates",
+      text: parCounts.critical ? "Below 50% of demo estimated par." : "No critical demo par candidates.",
+      value: parCounts.critical || "—",
+    },
+    {
+      tone: "neutral",
+      icon: "D",
+      title: "Demo par estimates enabled",
+      text: "Based on common restaurant usage patterns, not exact demand.",
+      value: "On",
     },
   ];
   return `
@@ -1048,10 +1109,59 @@ function renderInsightsCard(data, rows) {
   `;
 }
 
+function renderEstimatedReorderWatchlist(data, rows) {
+  const parCounts = getParCounts(rows, data);
+  const watchlist = getEstimatedWatchlist(rows, data);
+  return `
+    <section class="estimated-reorder-section" id="estimated-reorder-watchlist" aria-label="Estimated reorder watchlist">
+      <article class="post-count-card estimated-reorder-card">
+        <div class="estimated-reorder-header">
+          <div class="post-count-card-heading">
+            <span>Demo Estimate</span>
+            <h2>Estimated Reorder Watchlist</h2>
+            <p>Estimated par based on common restaurant usage patterns. Review before ordering.</p>
+          </div>
+          <div class="estimated-par-counts" aria-label="Estimated par status counts">
+            <span class="par-count par-count--critical"><strong>${parCounts.critical}</strong><small>Critical</small></span>
+            <span class="par-count par-count--low"><strong>${parCounts.low}</strong><small>Low</small></span>
+            <span class="par-count par-count--unknown"><strong>${parCounts.unknown}</strong><small>Unknown</small></span>
+          </div>
+        </div>
+        ${
+          watchlist.length
+            ? `<div class="estimated-reorder-list">
+                ${watchlist.map((row) => renderEstimatedReorderRow(row)).join("")}
+              </div>`
+            : `<div class="dashboard-calm estimated-reorder-empty">
+                No low or critical demo par estimates were found for matched rows. This is not exact demand forecasting; review unknown items and manager context before ordering.
+              </div>`
+        }
+      </article>
+    </section>
+  `;
+}
+
+function renderEstimatedReorderRow(row) {
+  const statusLabel = row.par_status === "critical" ? "Critical" : "Low";
+  return `
+    <div class="estimated-reorder-row estimated-reorder-row--${escapeHtml(row.par_status)}">
+      <div>
+        <strong>${escapeHtml(row.item_name)}</strong>
+        <small>${escapeHtml(row.par_reason)}</small>
+      </div>
+      <span>${escapeHtml(formatQty(row.quantity))} ${escapeHtml(row.unit || "counted")}</span>
+      <span>Estimated par ${escapeHtml(formatQty(row.estimated_par_quantity))} ${escapeHtml(row.par_unit)}</span>
+      <i>${escapeHtml(statusLabel)}</i>
+    </div>
+  `;
+}
+
 function renderManagerActionsCard(rows) {
   const counts = getStatusCounts(rows);
+  const parCounts = getParCounts(rows);
   const ready = counts.review === 0;
   const actions = [
+    { action: "reorder", label: "Review estimated par", detail: `${parCounts.watchlist} demo reorder candidates`, highlighted: parCounts.watchlist > 0 },
     { action: "review", label: "Review flagged items", detail: `${counts.review} items need attention`, highlighted: counts.review > 0 },
     { action: "report", label: "Open full report", detail: "View the saved spreadsheet" },
     { action: "export", label: "Export CSV", detail: "Download manager-ready rows" },
@@ -1281,8 +1391,8 @@ function renderBottomActionStrip(rows) {
   const counts = getStatusCounts(rows);
   const message =
     counts.review === 0
-      ? "Great job — this count is clean and export-ready."
-      : "Almost done — review flagged items before export.";
+      ? "Data quality looks clean; review estimated par before ordering."
+      : "Almost done; review flagged items and estimated par before export.";
   return `
     <section class="dashboard-action-strip">
       <p>${escapeHtml(message)}</p>
@@ -1499,7 +1609,7 @@ function renderLowStock(items) {
     return `
       <section class="dashboard-section">
         <h2>Low Stock Items</h2>
-        <div class="dashboard-calm">All items above par level. Nothing to reorder right now.</div>
+        <div class="dashboard-calm">No configured low-stock items found. Review estimated par and manager context before ordering.</div>
       </section>
     `;
   }

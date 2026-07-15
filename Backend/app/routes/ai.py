@@ -11,6 +11,7 @@ from app.auth import SupabaseUser, ensure_restaurant_id_matches, get_current_res
 from app.services.issue_service import create_issue
 from app.services.matching_service import MatchResult, match_inventory_item
 from app.services.external_ai_service import parse_inventory_with_claude
+from app.services.par_estimate_service import estimate_par_status
 from app.services.upload_parse_service import parse_upload_text
 from app.services.voice_parse_service import ParsedCandidate, parse_voice_text
 
@@ -118,6 +119,7 @@ def _handle_candidates(
                 item_name_raw=candidate.item_name,
                 item_name=clean_name,
                 normalized_item_name=match.normalized_name,
+                category=candidate.category,
                 quantity=candidate.quantity if candidate.quantity is not None else 0.0,
                 unit=candidate.unit or "",
                 status=status,
@@ -162,6 +164,13 @@ def _handle_candidates(
                 original_phrase=candidate.raw_phrase,
                 created_at=created_at,
                 counted_by=counted_by,
+                **estimate_par_status(
+                    item_name=clean_name,
+                    category=candidate.category,
+                    quantity=candidate.quantity,
+                    unit=candidate.unit,
+                    status=status,
+                ),
             )
         )
 

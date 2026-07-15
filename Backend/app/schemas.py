@@ -125,6 +125,12 @@ class ParsedEntry(BaseModel):
     original_phrase: str
     created_at: datetime | None = None
     counted_by: str | None = None
+    par_status: Literal["sufficient", "low", "critical", "unknown"] = "unknown"
+    estimated_par_quantity: float | None = None
+    par_unit: str | None = None
+    par_reason: str = ""
+    par_confidence: Literal["high", "medium", "low"] = "low"
+    is_demo_estimate: bool = True
 
 
 class ParseResponse(BaseModel):
@@ -202,6 +208,12 @@ class ReportEntry(BaseModel):
     original_phrase: str | None = None
     created_at: datetime
     counted_by: str | None = None
+    par_status: Literal["sufficient", "low", "critical", "unknown"] = "unknown"
+    estimated_par_quantity: float | None = None
+    par_unit: str | None = None
+    par_reason: str = ""
+    par_confidence: Literal["high", "medium", "low"] = "low"
+    is_demo_estimate: bool = True
 
 
 class ReportResponse(BaseModel):

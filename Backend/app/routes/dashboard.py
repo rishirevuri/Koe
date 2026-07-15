@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_restaurant
 from app.database import get_db
 from app.models import CountEntry, CountSession, InventoryItem, Issue, Restaurant
+from app.services.par_estimate_service import estimate_par_status
 
 
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
@@ -21,6 +22,32 @@ def _format_quantity(quantity: float) -> str:
 
 def _entry_needs_review(entry: CountEntry) -> bool:
     return entry.status in REVIEW_STATUSES
+
+
+def _entry_name(entry: CountEntry) -> str:
+    return entry.inventory_item.name if entry.inventory_item else entry.item_name
+
+
+def _entry_category(entry: CountEntry) -> str | None:
+    return entry.category or (entry.inventory_item.category if entry.inventory_item else None)
+
+
+def _par_row(entry: CountEntry) -> dict:
+    status = entry.status or "Clean"
+    item_name = _entry_name(entry)
+    estimate = estimate_par_status(
+        item_name=item_name,
+        category=_entry_category(entry),
+        quantity=entry.quantity,
+        unit=entry.unit,
+        status=status,
+    )
+    return {
+        "item_name": item_name,
+        "quantity": entry.quantity,
+        "unit": entry.unit,
+        **estimate,
+    }
 
 
 def _latest_entry_per_item(entries: list[CountEntry], session_id: int | None = None) -> dict[int, CountEntry]:
@@ -87,6 +114,7 @@ def dashboard_summary(
 
     # --- 2. Last count summary ---
     last_count_summary = None
+    last_entries: list[CountEntry] = []
     if sessions:
         last = sessions[0]
         last_entries = [entry for entry in entries if entry.count_session_id == last.id]
@@ -176,7 +204,38 @@ def dashboard_summary(
             f"{duplicate_count} possible duplicate item{'s' if duplicate_count != 1 else ''} detected."
         )
 
-    # --- 5. Export status of the most recent count ---
+    # --- 5. Demo restaurant-aware par estimates for the latest count ---
+    estimated_par_rows = [_par_row(entry) for entry in last_entries]
+    critical_count = sum(1 for row in estimated_par_rows if row["par_status"] == "critical")
+    low_count = sum(1 for row in estimated_par_rows if row["par_status"] == "low")
+    unknown_count = sum(1 for row in estimated_par_rows if row["par_status"] == "unknown")
+    estimated_reorder_watchlist = [
+        row for row in estimated_par_rows if row["par_status"] in {"critical", "low"}
+    ]
+    status_rank = {"critical": 0, "low": 1}
+    estimated_reorder_watchlist.sort(
+        key=lambda row: (
+            status_rank.get(row["par_status"], 9),
+            -(
+                (row["estimated_par_quantity"] - row["quantity"]) / row["estimated_par_quantity"]
+                if row["estimated_par_quantity"]
+                else 0
+            ),
+            row["item_name"],
+        )
+    )
+    if estimated_par_rows:
+        if critical_count:
+            insights.append(
+                f"{critical_count} critical reorder candidate{'s' if critical_count != 1 else ''} based on demo estimated par."
+            )
+        if low_count:
+            insights.append(
+                f"{low_count} item{'s' if low_count != 1 else ''} below estimated par based on common restaurant usage patterns."
+            )
+        insights.append("Demo par estimates enabled; review before ordering.")
+
+    # --- 6. Export status of the most recent count ---
     export_status = {
         "count_id": sessions[0].id if sessions else None,
         "exported": bool(sessions[0].exported) if sessions else False,
@@ -187,5 +246,13 @@ def dashboard_summary(
         "last_count_summary": last_count_summary,
         "count_over_count_changes": count_over_count_changes,
         "data_quality_insights": insights,
+        "estimated_par_summary": {
+            "critical_items": critical_count,
+            "low_items": low_count,
+            "unknown_items": unknown_count,
+            "watchlist_items": critical_count + low_count,
+            "is_demo_estimate": True,
+        },
+        "estimated_reorder_watchlist": estimated_reorder_watchlist,
         "export_status": export_status,
     }
