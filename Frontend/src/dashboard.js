@@ -13,6 +13,7 @@ import { isSupabaseConfigured, supabase } from "./supabaseClient.js";
 import { bindSidebar, renderSidebar } from "./sidebar.js";
 
 const app = document.querySelector("#dashboard-app");
+const authHandoffKey = "koe:authHandoff";
 const googleDashboardRedirectKey = "koe:googleDashboardRedirect";
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const CATEGORY_COLORS = {
@@ -116,6 +117,27 @@ function consumeGoogleDashboardRedirect() {
   } catch {
     return false;
   }
+}
+
+async function getSessionWithHandoff() {
+  const { data } = await supabase.auth.getSession();
+  if (data.session) return data.session;
+
+  let handoff = null;
+  try {
+    handoff = JSON.parse(window.sessionStorage.getItem(authHandoffKey) || "null");
+    window.sessionStorage.removeItem(authHandoffKey);
+  } catch {
+    handoff = null;
+  }
+  if (!handoff?.access_token || !handoff?.refresh_token) return null;
+
+  const { data: restored, error } = await supabase.auth.setSession({
+    access_token: handoff.access_token,
+    refresh_token: handoff.refresh_token,
+  });
+  if (error) return null;
+  return restored.session || null;
 }
 
 async function returnToLogin() {
@@ -357,8 +379,7 @@ async function initialize() {
 
   let session = null;
   try {
-    const { data } = await supabase.auth.getSession();
-    session = data.session;
+    session = await getSessionWithHandoff();
   } catch {
     goToLogin();
     return;

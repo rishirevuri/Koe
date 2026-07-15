@@ -16,6 +16,7 @@ import { bindSidebar, renderSidebar } from "./sidebar.js";
 const AREA_OPTIONS = ["Dry Storage", "Walk-in", "Freezer", "Bar", "Wine Storage", "Prep Station"];
 const MOBILE_AREA_OPTIONS = ["Walk-in", "Dry Storage", "Bar", "Kitchen", "Other"];
 const dashboardRedirectUrl = `${window.location.origin}/dashboard.html`;
+const authHandoffKey = "koe:authHandoff";
 const googleDashboardRedirectKey = "koe:googleDashboardRedirect";
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const VALID_STATUSES = new Set(["Clean", "Partial Quantity", "Missing Unit", "Needs Review", "Possible Duplicate", "Converted Unit"]);
@@ -44,6 +45,7 @@ const state = {
   authPassword: "",
   authConfirmPassword: "",
   authLoading: false,
+  authRedirectPending: false,
   session: null,
   userEmail: "",
   workspaceMissing: false,
@@ -146,6 +148,21 @@ function hasGoogleDashboardRedirect() {
     return window.sessionStorage.getItem(googleDashboardRedirectKey) === "1";
   } catch {
     return false;
+  }
+}
+
+function storeAuthHandoff(session) {
+  if (!session?.access_token || !session?.refresh_token) return;
+  try {
+    window.sessionStorage.setItem(
+      authHandoffKey,
+      JSON.stringify({
+        access_token: session.access_token,
+        refresh_token: session.refresh_token,
+      }),
+    );
+  } catch {
+    // Supabase local persistence usually handles this; the handoff only covers redirect timing.
   }
 }
 
@@ -564,6 +581,9 @@ function initialize() {
   });
 
   supabase.auth.onAuthStateChange((_event, session) => {
+    if (state.authRedirectPending || state.navigatingAway) {
+      return;
+    }
     if (session) {
       initializeAuthFlow();
       return;
@@ -726,6 +746,7 @@ async function handleAuthSubmit(mode) {
   }
 
   state.authLoading = true;
+  state.authRedirectPending = true;
   render();
   const result =
     mode === "signup"
@@ -744,6 +765,7 @@ async function handleAuthSubmit(mode) {
   state.authLoading = false;
 
   if (result.error) {
+    state.authRedirectPending = false;
     setError(result.error.message);
     render();
     return;
@@ -760,6 +782,7 @@ async function handleAuthSubmit(mode) {
     try {
       await createRestaurant(restaurantName, result.data.session);
     } catch (error) {
+      state.authRedirectPending = false;
       console.error("Restaurant workspace creation failed:", error.message);
       setError(error.message || "Account created, but restaurant workspace setup failed.");
       render();
@@ -767,11 +790,13 @@ async function handleAuthSubmit(mode) {
     }
   }
   if (!result.data?.session) {
+    state.authRedirectPending = false;
     setNotice(mode === "signup" ? "Account created. Check your email if confirmation is enabled." : "Check your email to finish signing in.");
     render();
     return;
   }
 
+  storeAuthHandoff(result.data.session);
   state.navigatingAway = true;
   window.location.assign("./dashboard.html");
 }
