@@ -4,6 +4,7 @@ import {
   createCountSession,
   downloadCsv,
   getAuthMe,
+  getCountSessions,
   getDashboardSummary,
   getReport,
   linkTesterRestaurant,
@@ -73,6 +74,7 @@ const state = {
   voiceLevel: 0,
   speechRecognition: null,
   recognitionBaseTranscript: "",
+  recognitionFinalTranscript: "",
   recordingTimer: null,
   audioContext: null,
   audioAnalyser: null,
@@ -89,6 +91,14 @@ const state = {
   dashboardData: null,
   dashboardError: "",
   dashboardLoading: false,
+  mobileCountSessions: [],
+  mobileCountsLoading: false,
+  mobileCountsError: "",
+  mobileSelectedCountId: null,
+  mobileSelectedReport: null,
+  mobileReportLoading: false,
+  mobileReportError: "",
+  mobileExportLoading: false,
 };
 
 const app = document.querySelector("#product-app");
@@ -187,12 +197,13 @@ function setMobileTab(tab) {
     return;
   }
   render();
+  handleMobileTabActivation(tab);
 }
 
 function formatReportDate(value) {
-  if (!value) return "Today 9:12 AM";
+  if (!value) return "Not saved yet";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Today 9:12 AM";
+  if (Number.isNaN(date.getTime())) return "Not saved yet";
   const today = new Date();
   const isToday = date.toDateString() === today.toDateString();
   const day = isToday
@@ -204,6 +215,28 @@ function formatReportDate(value) {
 
 function getSpeechRecognitionConstructor() {
   return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+function syncTranscriptInputs(value = state.transcript) {
+  document.querySelectorAll("#transcript-input, #mobile-transcript-input").forEach((input) => {
+    if (input.value === value) return;
+    const wasNearBottom = input.scrollTop + input.clientHeight >= input.scrollHeight - 12;
+    input.value = value;
+    if (wasNearBottom) {
+      input.scrollTop = input.scrollHeight;
+    }
+  });
+}
+
+function setTranscriptText(value, options = {}) {
+  const { renderView = false } = options;
+  state.transcript = value;
+  syncTranscriptInputs(value);
+  if (renderView) render();
+}
+
+function appendTranscriptText(previous, next) {
+  return joinTranscriptParts(previous, next);
 }
 
 function vibrateRecordingFeedback() {
@@ -355,6 +388,17 @@ function resetWorkspaceState() {
   state.report = null;
   state.dataHealthItems = [];
   state.status = "Ready";
+  state.dashboardData = null;
+  state.dashboardError = "";
+  state.dashboardLoading = false;
+  state.mobileCountSessions = [];
+  state.mobileCountsLoading = false;
+  state.mobileCountsError = "";
+  state.mobileSelectedCountId = null;
+  state.mobileSelectedReport = null;
+  state.mobileReportLoading = false;
+  state.mobileReportError = "";
+  state.mobileExportLoading = false;
 }
 
 function renderVoiceMeter() {
@@ -549,6 +593,67 @@ function groupEntriesByCategory(entries) {
     .filter((group) => group.entries.length);
 }
 
+function getCountTimestamp(count) {
+  return count?.completed_at || count?.started_at || count?.created_at || null;
+}
+
+function sortCountSessions(sessions) {
+  return [...(sessions || [])].sort((a, b) => {
+    const bTime = new Date(getCountTimestamp(b) || 0).getTime();
+    const aTime = new Date(getCountTimestamp(a) || 0).getTime();
+    return bTime - aTime || Number(b.id || 0) - Number(a.id || 0);
+  });
+}
+
+function applyMobileCountSessions(sessions) {
+  state.mobileCountSessions = sortCountSessions(sessions);
+  const selectedExists = state.mobileCountSessions.some((session) => Number(session.id) === Number(state.mobileSelectedCountId));
+  if (!selectedExists) {
+    state.mobileSelectedCountId = state.mobileCountSessions[0]?.id ? Number(state.mobileCountSessions[0].id) : null;
+    state.mobileSelectedReport = null;
+  }
+}
+
+function getCountSummaryValue(session, key, fallback = 0) {
+  const value = session?.summary?.[key];
+  return Number.isFinite(Number(value)) ? Number(value) : fallback;
+}
+
+function getCountItemCount(session) {
+  return getCountSummaryValue(session, "total_entries", 0);
+}
+
+function getCountReviewCount(session) {
+  return getCountSummaryValue(session, "entries_needing_review", 0);
+}
+
+function getRecentCountCount(sessions) {
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  return sessions.filter((session) => {
+    const time = new Date(getCountTimestamp(session) || 0).getTime();
+    return Number.isFinite(time) && time >= weekAgo;
+  }).length;
+}
+
+function getCountArea(session) {
+  return normalizeItemName(session?.area || "Not set");
+}
+
+function getCountStatusLabel(session) {
+  const status = normalizeItemName(session?.status || "");
+  if (status) return status;
+  return session?.completed_at ? "Completed" : "In Progress";
+}
+
+function handleMobileTabActivation(tab = state.mobileActiveTab) {
+  if (state.view !== "ready" || !state.session) return;
+  if (tab === "dashboard") {
+    loadMobileDashboardSummary();
+  } else if (tab === "reports") {
+    loadMobileCountSessions({ loadReport: true });
+  }
+}
+
 async function initializeAuthFlow() {
   state.view = "checking";
   state.authReady = false;
@@ -613,6 +718,7 @@ function initialize() {
     state.mobileActiveTab = getMobileTabFromHash();
     state.lastScrolledHash = "";
     render();
+    handleMobileTabActivation(state.mobileActiveTab);
   });
 
   supabase.auth.onAuthStateChange((_event, session) => {
@@ -734,14 +840,102 @@ async function loadCurrentWorkspace() {
 async function loadMobileDashboardSummary() {
   if (state.dashboardLoading) return;
   state.dashboardLoading = true;
+  state.mobileCountsLoading = true;
   state.dashboardError = "";
+  state.mobileCountsError = "";
   try {
-    state.dashboardData = await getDashboardSummary();
+    const [summary, sessions] = await Promise.all([getDashboardSummary(), getCountSessions()]);
+    state.dashboardData = summary;
+    applyMobileCountSessions(sessions);
+    if (state.mobileActiveTab === "reports" && state.mobileSelectedCountId) {
+      await loadMobileSelectedReport(state.mobileSelectedCountId, { renderBefore: false });
+    }
   } catch (error) {
     state.dashboardError = error.message || "Dashboard summary unavailable.";
+    state.mobileCountsError = error.message || "Could not load saved counts.";
   } finally {
     state.dashboardLoading = false;
+    state.mobileCountsLoading = false;
     if (state.view === "ready") render();
+  }
+}
+
+async function loadMobileCountSessions(options = {}) {
+  const { selectCountId = null, loadReport = false } = options;
+  if (state.mobileCountsLoading) return;
+  state.mobileCountsLoading = true;
+  state.mobileCountsError = "";
+  if (selectCountId) {
+    state.mobileSelectedCountId = Number(selectCountId);
+  }
+  if (state.view === "ready") render();
+  try {
+    const sessions = await getCountSessions();
+    applyMobileCountSessions(sessions);
+    if (selectCountId) {
+      state.mobileSelectedCountId = Number(selectCountId);
+    }
+    if (loadReport && state.mobileSelectedCountId) {
+      await loadMobileSelectedReport(state.mobileSelectedCountId, { renderBefore: false });
+    } else if (!state.mobileSelectedCountId) {
+      state.mobileSelectedReport = null;
+    }
+  } catch (error) {
+    state.mobileCountsError = error.message || "Could not load past counts.";
+  } finally {
+    state.mobileCountsLoading = false;
+    if (state.view === "ready") render();
+  }
+}
+
+async function loadMobileSelectedReport(countId, options = {}) {
+  const { renderBefore = true } = options;
+  if (!countId) return;
+  state.mobileSelectedCountId = Number(countId);
+  state.mobileReportLoading = true;
+  state.mobileReportError = "";
+  if (renderBefore && state.view === "ready") render();
+  try {
+    state.mobileSelectedReport = await getReport(countId);
+  } catch (error) {
+    state.mobileSelectedReport = null;
+    state.mobileReportError = error.message || "Could not load this count.";
+  } finally {
+    state.mobileReportLoading = false;
+    if (renderBefore && state.view === "ready") render();
+  }
+}
+
+function openMobilePastCount(countId) {
+  if (!countId) return;
+  state.mobileSelectedCountId = Number(countId);
+  if (state.mobileActiveTab !== "reports") {
+    setMobileTab("reports");
+  } else {
+    render();
+  }
+  loadMobileSelectedReport(countId);
+}
+
+async function exportMobileSelectedCount() {
+  clearMessages();
+  if (!state.mobileSelectedCountId || state.mobileExportLoading) {
+    setError("CSV export failed. Missing count id.");
+    render();
+    return;
+  }
+  state.mobileExportLoading = true;
+  render();
+  try {
+    if (!state.session || state.view !== "ready") throw new Error("Sign in before exporting CSV.");
+    await downloadCsv(state.mobileSelectedCountId);
+    setNotice("CSV export started.");
+  } catch (error) {
+    state.mobileReportError = error.message || "CSV export failed.";
+    setError(`CSV export failed. ${error.message}`);
+  } finally {
+    state.mobileExportLoading = false;
+    render();
   }
 }
 
@@ -986,7 +1180,7 @@ async function processCount() {
   clearMessages();
   const transcriptInput = document.querySelector("#mobile-transcript-input") || document.querySelector("#transcript-input");
   const transcript = (transcriptInput?.value || state.transcript).trim();
-  state.transcript = transcript;
+  setTranscriptText(transcript);
   state.selectedArea = getCurrentSelectedArea();
   if (!transcript) {
     setError("Add a transcript before processing the count.");
@@ -1031,6 +1225,7 @@ async function processCount() {
     state.status = "In Progress";
     if (state.parsedEntries.length) {
       setNotice(`Processed ${state.parsedEntries.length} inventory item${state.parsedEntries.length === 1 ? "" : "s"}.`);
+      loadMobileDashboardSummary();
     } else {
       setError("No inventory items were parsed. Include quantities and units, for example: three bottles of olive oil, two boxes of cheese.");
     }
@@ -1055,6 +1250,9 @@ async function generateReport() {
   try {
     if (!state.session || state.view !== "ready") throw new Error("Sign in before generating a report.");
     state.report = await getReport(state.activeCountId);
+    state.mobileSelectedCountId = Number(state.activeCountId);
+    state.mobileSelectedReport = state.report;
+    loadMobileCountSessions({ selectCountId: state.activeCountId });
     setNotice("Report preview generated.");
   } catch (error) {
     setError(error.message);
@@ -1103,11 +1301,9 @@ function handleClearParsedInventory() {
 
 function handleClearTranscript() {
   clearMessages();
-  state.transcript = "";
+  setTranscriptText("");
   state.recognitionBaseTranscript = "";
-  document.querySelectorAll("#transcript-input, #mobile-transcript-input").forEach((input) => {
-    input.value = "";
-  });
+  state.recognitionFinalTranscript = "";
   setNotice("Transcript cleared.");
   render();
 }
@@ -1117,7 +1313,7 @@ async function startRecording() {
 
   const SpeechRecognition = getSpeechRecognitionConstructor();
   if (!SpeechRecognition) {
-    setError("Live speech-to-text is not supported in this browser. Use Chrome or type the transcript manually.");
+    setError("Live speech recognition is not supported in this browser. Paste or type the count, or use desktop.");
     render();
     return;
   }
@@ -1130,6 +1326,7 @@ async function startRecording() {
 
     state.speechRecognition = recognition;
     state.recognitionBaseTranscript = state.transcript.trim();
+    state.recognitionFinalTranscript = "";
     state.shouldRestartRecognition = true;
     state.isRecording = true;
     state.recordingMode = "recording";
@@ -1137,21 +1334,23 @@ async function startRecording() {
     setVoiceLevel(0);
 
     recognition.onresult = (event) => {
-      let finalText = "";
       let interimText = "";
 
-      for (let index = 0; index < event.results.length; index += 1) {
+      for (let index = event.resultIndex || 0; index < event.results.length; index += 1) {
         const result = event.results[index];
         const transcript = result[0]?.transcript || "";
         if (result.isFinal) {
-          finalText = joinTranscriptParts(finalText, transcript);
+          state.recognitionFinalTranscript = appendTranscriptText(state.recognitionFinalTranscript, transcript);
         } else {
           interimText = joinTranscriptParts(interimText, transcript);
         }
       }
 
-      state.transcript = joinTranscriptParts(state.recognitionBaseTranscript, finalText, interimText);
-      render();
+      const nextTranscript = appendTranscriptText(
+        state.recognitionBaseTranscript,
+        joinTranscriptParts(state.recognitionFinalTranscript, interimText),
+      );
+      setTranscriptText(nextTranscript);
     };
 
     recognition.onerror = (event) => {
@@ -1161,6 +1360,10 @@ async function startRecording() {
         setError("Microphone permission was denied. Allow microphone access or type the transcript manually.");
       } else if (event.error === "no-speech") {
         setError("No speech was detected. Try recording again or type the transcript manually.");
+      } else if (event.error === "audio-capture") {
+        setError("No microphone was found. Check your microphone access, or paste/type the count.");
+      } else if (event.error === "network") {
+        setError("Speech recognition could not reach the browser speech service. Paste/type the count or try again.");
       } else {
         setError(`Speech recognition stopped: ${event.error || "unknown error"}. You can type the transcript manually.`);
       }
@@ -1214,8 +1417,9 @@ function resetRecording() {
   stopRecording();
   state.recordingMode = "idle";
   state.recordingSeconds = 0;
-  state.transcript = "";
+  setTranscriptText("");
   state.recognitionBaseTranscript = "";
+  state.recognitionFinalTranscript = "";
   setNotice("Recording reset.");
   render();
 }
@@ -1511,24 +1715,27 @@ function renderMobilePageTitle(title, subtitle) {
 
 function renderMobileDashboardScreen({ totalItems, needsReview }) {
   const summary = state.dashboardData?.last_count_summary || {};
-  const itemsCounted = summary.total_items_counted ?? totalItems;
-  const flagged = summary.needs_review_count ?? needsReview;
+  const latestSession = state.mobileCountSessions[0] || null;
+  const itemsCounted = summary.total_items_counted ?? getCountItemCount(latestSession) ?? totalItems;
+  const flagged = summary.needs_review_count ?? getCountReviewCount(latestSession) ?? needsReview;
+  const countsThisWeek = getRecentCountCount(state.mobileCountSessions);
+  const qualityValue = state.dashboardLoading && !state.dashboardData ? "Loading" : itemsCounted ? (flagged ? "Review" : "Clean") : "No data";
+  const qualityDetail = itemsCounted ? `${itemsCounted} latest item${itemsCounted === 1 ? "" : "s"}` : "Start a saved count";
   return `
     <main class="mobile-tab-panel mobile-dashboard-screen" id="dashboard">
       ${renderMobilePageTitle("Dashboard", "Today's inventory snapshot and recent activity.")}
+      ${state.dashboardError ? `<div class="mobile-dashboard-status">${escapeHtml(state.dashboardError)}</div>` : ""}
       <section class="mobile-stats-grid" aria-label="Dashboard stats">
-        ${renderMobileStatCard("chart", "Counts this week", "4", "vs last week 3 ↗", "green")}
-        ${renderMobileStatCard("flag", "Items flagged", String(flagged || 2), "vs last week 1 ↗", "gold")}
-        ${renderMobileStatCard("shield", "Estimated waste risk", "Low", "Very good", "green", true)}
+        ${renderMobileStatCard("chart", "Counts this week", String(countsThisWeek), countsThisWeek ? "saved in last 7 days" : "No saved counts", "green")}
+        ${renderMobileStatCard("flag", "Items flagged", String(flagged || 0), latestSession ? "latest saved count" : "No saved count", "gold")}
+        ${renderMobileStatCard("shield", "Data status", qualityValue, qualityDetail, flagged ? "gold" : "green", true)}
       </section>
       <section class="mobile-recent-card">
         <div class="mobile-card-heading">
-          <h2>Recent Counts</h2>
+          <h2>Past Counts</h2>
           <button type="button" data-mobile-tab-target="reports">View all</button>
         </div>
-        ${renderRecentCountRow("Walk-in", "Today 9:12 AM", "Completed", "store")}
-        ${renderRecentCountRow("Bar", "Yesterday 6:40 PM", "Completed", "chart")}
-        ${renderRecentCountRow("Dry Storage", "Mon 8:05 AM", "In Review", "file", true)}
+        ${renderMobilePastCountsPreview()}
       </section>
       <section class="mobile-quick-actions">
         <h2>Quick Actions</h2>
@@ -1541,6 +1748,42 @@ function renderMobileDashboardScreen({ totalItems, needsReview }) {
   `;
 }
 
+function renderMobilePastCountsPreview() {
+  if (state.mobileCountsLoading && !state.mobileCountSessions.length) {
+    return `<div class="mobile-past-count-empty">Loading saved counts...</div>`;
+  }
+  if (state.mobileCountsError && !state.mobileCountSessions.length) {
+    return `<div class="mobile-past-count-empty">${escapeHtml(state.mobileCountsError)}</div>`;
+  }
+  if (!state.mobileCountSessions.length) {
+    return `<div class="mobile-past-count-empty">No saved counts yet. Start a count and it will stay here after refresh or login.</div>`;
+  }
+  return state.mobileCountSessions
+    .slice(0, 5)
+    .map((session) => renderMobilePastCountRow(session))
+    .join("");
+}
+
+function renderMobilePastCountRow(session, options = {}) {
+  const { compact = false } = options;
+  const reviewCount = getCountReviewCount(session);
+  const status = getCountStatusLabel(session);
+  const isReview = reviewCount > 0 || /review/i.test(status);
+  const itemCount = getCountItemCount(session);
+  const active = Number(session.id) === Number(state.mobileSelectedCountId);
+  return `
+    <button class="mobile-recent-row mobile-past-count-row ${active ? "is-active" : ""}" type="button" data-mobile-count-id="${escapeHtml(session.id)}">
+      <span class="mobile-row-icon">${ProductIcon(compact ? "file" : "store")}</span>
+      <span>
+        <strong>${escapeHtml(getCountArea(session))}</strong>
+        <small>${escapeHtml(formatReportDate(getCountTimestamp(session)))}${compact ? "" : ` · ${itemCount} item${itemCount === 1 ? "" : "s"}`}</small>
+      </span>
+      <em class="${isReview ? "is-review" : ""}">${ProductIcon(isReview ? "calendar" : "check")} ${escapeHtml(status)}</em>
+      <i aria-hidden="true">${ProductIcon("chevron")}</i>
+    </button>
+  `;
+}
+
 function renderMobileStatCard(iconName, label, value, detail, tone, isTextValue = false) {
   return `
     <article class="mobile-stat-card">
@@ -1549,17 +1792,6 @@ function renderMobileStatCard(iconName, label, value, detail, tone, isTextValue 
       <strong class="${isTextValue ? "is-text-value" : ""}">${escapeHtml(value)}</strong>
       <small>${escapeHtml(detail)}</small>
     </article>
-  `;
-}
-
-function renderRecentCountRow(area, time, status, iconName, review = false) {
-  return `
-    <button class="mobile-recent-row" type="button" data-mobile-tab-target="reports">
-      <span class="mobile-row-icon">${ProductIcon(iconName)}</span>
-      <span><strong>${escapeHtml(area)}</strong><small>${escapeHtml(time)}</small></span>
-      <em class="${review ? "is-review" : ""}">${review ? ProductIcon("calendar") : ProductIcon("check")} ${escapeHtml(status)}</em>
-      <i aria-hidden="true">${ProductIcon("chevron")}</i>
-    </button>
   `;
 }
 
@@ -1621,64 +1853,83 @@ function renderMobileCountScreen({ totalItems, needsReview, primaryRecordingLabe
 }
 
 function getMobileReportEntries() {
-  const entries = state.report?.entries || [];
-  if (entries.length) {
-    return entries.map((entry) => ({
+  const entries = state.mobileSelectedReport?.entries || [];
+  return entries.map((entry) => {
+    const status = getEntryStatus(entry);
+    return {
       name: getEntryCleanName(entry),
-      quantity: `${entry.quantity} ${entry.unit || ""}`.trim(),
-      status: getEntryStatus(entry).label === "Clean" ? "Confirmed" : getEntryStatus(entry).label,
-    }));
-  }
-  if (state.parsedEntries.length) {
-    return state.parsedEntries.map((entry) => {
-      const status = getEntryStatus(entry);
-      return {
-        name: getEntryCleanName(entry),
-        quantity: `${entry.quantity} ${entry.unit || ""}`.trim(),
-        status: status.label === "Clean" ? "Confirmed" : status.label,
-      };
-    });
-  }
-  return [
-    { name: "Olive oil", quantity: "2.5 bottles", status: "Confirmed" },
-    { name: "Lettuce", quantity: "3 heads", status: "Confirmed" },
-    { name: "Tomatoes", quantity: "5 boxes", status: "Confirmed" },
-    { name: "Cheese", quantity: "2 boxes", status: "Confirmed" },
-  ];
+      quantity: `${entry.quantity ?? ""} ${entry.unit || ""}`.trim() || "Quantity not set",
+      status: status.label === "Clean" ? "Confirmed" : status.label,
+    };
+  });
 }
 
 function renderMobileReportsScreen() {
+  const sessions = state.mobileCountSessions;
+  const selectedSession = sessions.find((session) => Number(session.id) === Number(state.mobileSelectedCountId)) || sessions[0] || null;
   const entries = getMobileReportEntries();
-  const summary = state.report?.summary || {};
-  const total = summary.total_items ?? entries.length;
-  const review = summary.items_needing_review ?? entries.filter((entry) => entry.status !== "Confirmed").length;
-  const hasCount = Boolean(state.activeCountId || state.report || state.parsedEntries.length);
-  if (!hasCount) {
+  const reportSummary = state.mobileSelectedReport?.summary || {};
+  const total = reportSummary.total_items ?? getCountItemCount(selectedSession) ?? entries.length;
+  const review = reportSummary.items_needing_review ?? getCountReviewCount(selectedSession) ?? entries.filter((entry) => entry.status !== "Confirmed").length;
+
+  if (state.mobileCountsLoading && !sessions.length) {
     return `
       <main class="mobile-tab-panel mobile-reports-screen" id="reports">
-        ${renderMobilePageTitle("Reports", "Clean, exportable inventory summaries.")}
+        ${renderMobilePageTitle("Past Counts", "Saved count history for this restaurant.")}
         <section class="mobile-empty-report-card">
           <span>${ProductIcon("file")}</span>
-          <h2>Complete a count to generate your first report.</h2>
+          <h2>Loading saved counts...</h2>
+        </section>
+      </main>
+    `;
+  }
+
+  if (state.mobileCountsError && !sessions.length) {
+    return `
+      <main class="mobile-tab-panel mobile-reports-screen" id="reports">
+        ${renderMobilePageTitle("Past Counts", "Saved count history for this restaurant.")}
+        <section class="mobile-empty-report-card">
+          <span>${ProductIcon("file")}</span>
+          <h2>Count history is unavailable.</h2>
+          <p>${escapeHtml(state.mobileCountsError)}</p>
+          <button class="mobile-primary-action" id="mobile-past-refresh-button" type="button">Try again <i>→</i></button>
+        </section>
+      </main>
+    `;
+  }
+
+  if (!sessions.length) {
+    return `
+      <main class="mobile-tab-panel mobile-reports-screen" id="reports">
+        ${renderMobilePageTitle("Past Counts", "Saved count history for this restaurant.")}
+        ${renderMessages()}
+        <section class="mobile-empty-report-card">
+          <span>${ProductIcon("file")}</span>
+          <h2>No saved counts yet.</h2>
+          <p>Run a count from this restaurant and Koe will load it here after refresh or login.</p>
           <button class="mobile-primary-action" type="button" data-mobile-tab-target="count">Start Count <i>→</i></button>
         </section>
       </main>
     `;
   }
+
   return `
     <main class="mobile-tab-panel mobile-reports-screen" id="reports">
-      ${renderMobilePageTitle("Reports", "Clean, exportable inventory summaries.")}
-      <div class="mobile-filter-chips">
-        <button class="is-active" type="button">${ProductIcon("calendar")} This Week</button>
-        <button type="button">${ProductIcon("calendar")} This Month</button>
-        <button type="button">${ProductIcon("calendar")} Custom</button>
-      </div>
+      ${renderMobilePageTitle("Past Counts", "Saved count history for this restaurant.")}
+      ${renderMessages()}
+      <section class="mobile-recent-card mobile-past-counts-list" aria-label="Saved counts">
+        <div class="mobile-card-heading">
+          <h2>Saved Counts</h2>
+          <button id="mobile-past-refresh-button" type="button">Refresh</button>
+        </div>
+        ${sessions.map((session) => renderMobilePastCountRow(session, { compact: true })).join("")}
+      </section>
       <section class="mobile-report-card">
         <div class="mobile-report-title-row">
           <span>${ProductIcon("file")}</span>
           <div>
-            <h2>Latest Count Report</h2>
-            <p>${escapeHtml(state.selectedArea || "Walk-in")} <b>•</b> ${escapeHtml(formatReportDate(state.countStartedAt))}</p>
+            <h2>${escapeHtml(selectedSession ? `${getCountArea(selectedSession)} Count` : "Saved Count")}</h2>
+            <p>${escapeHtml(formatReportDate(getCountTimestamp(selectedSession)))} <b>•</b> ${escapeHtml(getCountStatusLabel(selectedSession))}</p>
           </div>
         </div>
         <div class="mobile-report-summary-strip">
@@ -1688,10 +1939,19 @@ function renderMobileReportsScreen() {
         </div>
       </section>
       <section class="mobile-report-items" aria-label="Inventory report rows">
-        ${entries.map((entry) => renderMobileReportItem(entry)).join("")}
+        ${
+          state.mobileReportLoading
+            ? `<div class="mobile-past-count-empty">Loading saved report...</div>`
+            : state.mobileReportError
+              ? `<div class="mobile-past-count-empty">${escapeHtml(state.mobileReportError)}</div>`
+              : entries.length
+                ? entries.map((entry) => renderMobileReportItem(entry)).join("")
+                : `<div class="mobile-past-count-empty">Tap a saved count to load its report rows.</div>`
+        }
       </section>
-      <button class="mobile-process-button" id="mobile-export-csv-button" type="button" ${!state.activeCountId ? "disabled" : ""}>${ProductIcon("export")} Export CSV</button>
-      <button class="mobile-share-button" type="button" disabled>${ProductIcon("export")} Share Report</button>
+      <button class="mobile-process-button" id="mobile-past-export-button" type="button" ${!state.mobileSelectedCountId || state.mobileExportLoading ? "disabled" : ""}>
+        ${ProductIcon("export")} ${state.mobileExportLoading ? "Exporting" : "Export CSV"}
+      </button>
     </main>
   `;
 }
@@ -2168,6 +2428,11 @@ function bindEvents() {
   document.querySelector("#export-csv-button")?.addEventListener("click", exportCsv);
   document.querySelector("#mobile-export-csv-button")?.addEventListener("click", exportCsv);
   document.querySelector("#mobile-export-action-button")?.addEventListener("click", exportCsv);
+  document.querySelector("#mobile-past-export-button")?.addEventListener("click", exportMobileSelectedCount);
+  document.querySelector("#mobile-past-refresh-button")?.addEventListener("click", () => loadMobileCountSessions({ loadReport: true }));
+  document.querySelectorAll("[data-mobile-count-id]").forEach((button) => {
+    button.addEventListener("click", () => openMobilePastCount(button.dataset.mobileCountId));
+  });
   document.querySelector("#mobile-logout-button")?.addEventListener("click", logout);
   document.querySelector("#send-sheets-button")?.addEventListener("click", () => {
     setNotice("Google Sheets export is not enabled yet. Use CSV export for now.");
@@ -2188,7 +2453,7 @@ function bindEvents() {
   });
   document.querySelectorAll("#transcript-input, #mobile-transcript-input").forEach((input) => {
     input.addEventListener("input", (event) => {
-      state.transcript = event.target.value;
+      setTranscriptText(event.target.value);
       event.target.scrollTop = event.target.scrollHeight;
     });
   });
