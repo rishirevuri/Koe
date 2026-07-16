@@ -52,13 +52,13 @@ export function renderSidebar({ restaurantName, active, mobileActive = active })
       </button>
     </aside>
     <nav class="mobile-bottom-nav" aria-label="Mobile navigation">
-      <a class="mobile-bottom-link ${mobileActive === "dashboard" ? "is-active" : ""}" href="./product.html#dashboard" ${mobileActive === "dashboard" ? 'aria-current="page"' : ""}>
+      <a class="mobile-bottom-link ${mobileActive === "dashboard" ? "is-active" : ""}" href="./dashboard.html" ${mobileActive === "dashboard" ? 'aria-current="page"' : ""}>
         ${icon("grid")}<span>Dashboard</span>
       </a>
       <a class="mobile-bottom-link ${mobileActive === "count" ? "is-active" : ""}" href="./product.html#count" ${mobileActive === "count" ? 'aria-current="page"' : ""}>
         ${icon("mic")}<span>Count</span>
       </a>
-      <a class="mobile-bottom-link ${mobileActive === "reports" ? "is-active" : ""}" href="./product.html#reports" ${mobileActive === "reports" ? 'aria-current="page"' : ""}>
+      <a class="mobile-bottom-link ${mobileActive === "reports" ? "is-active" : ""}" href="./dashboard.html#past-counts" ${mobileActive === "reports" ? 'aria-current="page"' : ""}>
         ${icon("report")}<span>Reports</span>
       </a>
       <a class="mobile-bottom-link ${mobileActive === "account" ? "is-active" : ""}" href="./product.html#account" ${mobileActive === "account" ? 'aria-current="page"' : ""}>

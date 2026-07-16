@@ -223,6 +223,24 @@ function getCountTimestamp(count) {
   return count?.completed_at || count?.started_at || null;
 }
 
+function sortCountSessions(sessions) {
+  return [...(sessions || [])].sort((a, b) => {
+    const bTime = new Date(getCountTimestamp(b) || 0).getTime();
+    const aTime = new Date(getCountTimestamp(a) || 0).getTime();
+    return bTime - aTime || Number(b.id || 0) - Number(a.id || 0);
+  });
+}
+
+function applyCountSessions(sessions, selectCountId = null) {
+  state.countSessions = sortCountSessions(sessions);
+  const preferredId = selectCountId || state.selectedCountId || state.countSessions[0]?.id || null;
+  const selectedExists = state.countSessions.some((session) => Number(session.id) === Number(preferredId));
+  state.selectedCountId = selectedExists && preferredId ? Number(preferredId) : state.countSessions[0]?.id ? Number(state.countSessions[0].id) : null;
+  if (!state.selectedCountId) {
+    state.selectedReport = null;
+  }
+}
+
 function setDashboardTab(tab, countId = null) {
   state.activeTab = tab;
   if (countId) {
@@ -609,7 +627,7 @@ async function initialize() {
     return;
   }
 
-  if (arrivedFromLogin) {
+  if (arrivedFromLogin && state.restaurants.length > 1) {
     setSelectedRestaurantId("");
     state.phase = "select-restaurant";
     debugAuthFlow("dashboard route decision", { route: "chooser", restaurantCount: state.restaurants.length, reason: "fresh_login" });
@@ -671,6 +689,8 @@ window.addEventListener("hashchange", () => {
     } else if (state.selectedCountId) {
       loadSelectedReport(state.selectedCountId);
     }
+  } else if (!state.data && state.phase !== "loading") {
+    loadSummary();
   }
 });
 
@@ -693,13 +713,7 @@ async function loadPastCounts({ selectCountId = null } = {}) {
   renderShell();
   try {
     const sessions = await getCountSessions();
-    state.countSessions = [...sessions].sort((a, b) => {
-      const bTime = new Date(getCountTimestamp(b) || 0).getTime();
-      const aTime = new Date(getCountTimestamp(a) || 0).getTime();
-      return bTime - aTime || Number(b.id) - Number(a.id);
-    });
-    const preferredId = selectCountId || state.selectedCountId || state.countSessions[0]?.id || null;
-    state.selectedCountId = preferredId ? Number(preferredId) : null;
+    applyCountSessions(sessions, selectCountId);
     if (state.selectedCountId) {
       await loadSelectedReport(state.selectedCountId, { renderBefore: false });
     } else {
@@ -814,6 +828,7 @@ async function loadSummary() {
     state.data = await getDashboardSummary();
     const latestCountId = getLatestCountId(state.data);
     state.selectedCountId = state.selectedCountId || latestCountId || null;
+    state.countsError = "";
     state.latestReport = null;
     state.latestReportError = "";
     if (latestCountId) {
@@ -825,6 +840,15 @@ async function loadSummary() {
       } finally {
         state.latestReportLoading = false;
       }
+    }
+    state.countsLoading = true;
+    try {
+      const sessions = await getCountSessions();
+      applyCountSessions(sessions, state.selectedCountId || latestCountId);
+    } catch (countsError) {
+      state.countsError = countsError.message || "Could not load past counts.";
+    } finally {
+      state.countsLoading = false;
     }
     state.phase = "ready";
   } catch (error) {
@@ -840,7 +864,11 @@ async function loadSummary() {
 function renderShell() {
   app.innerHTML = `
     <div class="app-shell">
-      ${renderSidebar({ restaurantName: state.restaurantName, active: "dashboard" })}
+      ${renderSidebar({
+        restaurantName: state.restaurantName,
+        active: "dashboard",
+        mobileActive: state.activeTab === "past-counts" ? "reports" : "dashboard",
+      })}
       <main class="app-main dashboard-main">
         ${renderContent()}
       </main>
@@ -872,6 +900,13 @@ function renderShell() {
       }
     });
   });
+  document.querySelector("[data-dashboard-mobile-action='past-counts']")?.addEventListener("click", () => {
+    setDashboardTab("past-counts", state.selectedCountId);
+  });
+  document.querySelectorAll("[data-dashboard-mobile-count-id]").forEach((button) => {
+    button.addEventListener("click", () => setDashboardTab("past-counts", button.dataset.dashboardMobileCountId));
+  });
+  document.querySelector("#mobile-dashboard-counts-refresh")?.addEventListener("click", () => loadPastCounts({ selectCountId: state.selectedCountId }));
   document.querySelector("#past-count-export")?.addEventListener("click", exportSelectedCount);
   document.querySelector("#past-count-refresh")?.addEventListener("click", () => loadPastCounts({ selectCountId: state.selectedCountId }));
 }
@@ -975,6 +1010,7 @@ function renderOverviewContent(data) {
 function renderPostCountOverview(data, latestCount, rows) {
   return `
     ${renderKpiCards(rows, data)}
+    ${renderMobilePastCountsPreview()}
     ${renderMainSummaryGrid(data, latestCount, rows)}
     ${renderEstimatedReorderWatchlist(data, rows)}
     <section class="dashboard-analytics-grid">
@@ -986,6 +1022,67 @@ function renderPostCountOverview(data, latestCount, rows) {
       ${renderDataQualitySummary(rows)}
     </section>
     ${renderBottomActionStrip(rows)}
+  `;
+}
+
+function renderMobilePastCountsPreview() {
+  if (state.countsLoading && !state.countSessions.length) {
+    return `
+      <section class="mobile-dashboard-past-counts">
+        <div class="mobile-dashboard-section-heading">
+          <h2>Past Counts</h2>
+        </div>
+        <div class="dashboard-calm">Loading saved counts...</div>
+      </section>
+    `;
+  }
+
+  if (state.countsError && !state.countSessions.length) {
+    return `
+      <section class="mobile-dashboard-past-counts">
+        <div class="mobile-dashboard-section-heading">
+          <h2>Past Counts</h2>
+          <button id="mobile-dashboard-counts-refresh" type="button">Retry</button>
+        </div>
+        <div class="dashboard-calm">${escapeHtml(state.countsError)}</div>
+      </section>
+    `;
+  }
+
+  if (!state.countSessions.length) {
+    return `
+      <section class="mobile-dashboard-past-counts">
+        <div class="mobile-dashboard-section-heading">
+          <h2>Past Counts</h2>
+        </div>
+        <div class="dashboard-calm">No saved counts yet. Start a count to see dashboard insights.</div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="mobile-dashboard-past-counts" aria-label="Recent saved counts">
+      <div class="mobile-dashboard-section-heading">
+        <h2>Past Counts</h2>
+        <button data-dashboard-mobile-action="past-counts" type="button">View all</button>
+      </div>
+      <div class="mobile-dashboard-count-list">
+        ${state.countSessions
+          .slice(0, 4)
+          .map(
+            (session) => `
+              <button class="mobile-dashboard-count-row" data-dashboard-mobile-count-id="${escapeHtml(session.id)}" type="button">
+                <span>
+                  <strong>${escapeHtml(session.area || "Not set")}</strong>
+                  <small>${escapeHtml(formatDateTime(getCountTimestamp(session)))}</small>
+                </span>
+                <em>${escapeHtml(session.summary?.total_entries ?? 0)} rows</em>
+              </button>
+            `,
+          )
+          .join("")}
+      </div>
+    </section>
   `;
 }
 
@@ -1602,27 +1699,6 @@ function statusClass(status) {
   if (normalized.includes("partial")) return "status-pill--partial";
   if (normalized.includes("converted")) return "status-pill--converted";
   return "status-pill--clean";
-}
-
-function renderMobileDashboardPanel(data) {
-  const summary = data.last_count_summary || {};
-  const insights = data.data_quality_insights || [];
-  const partialCount = insights.filter((line) => /partial/i.test(String(line))).length;
-  return `
-    <section class="mobile-dashboard-panel" aria-label="Mobile count summary">
-      <div class="mobile-dashboard-heading">
-        <span>${escapeHtml(state.restaurantName)}</span>
-        <h2>Last count</h2>
-      </div>
-      <dl>
-        <div><dt>Items counted</dt><dd>${summary.total_items_counted ?? 0}</dd></div>
-        <div><dt>Needs review</dt><dd>${summary.needs_review_count ?? 0}</dd></div>
-        <div><dt>Partial quantities</dt><dd>${partialCount}</dd></div>
-        <div><dt>Area</dt><dd>${escapeHtml(summary.area || "Not set")}</dd></div>
-      </dl>
-      <a class="new-count-button" href="./product.html">Start Count</a>
-    </section>
-  `;
 }
 
 function renderLowStock(items) {

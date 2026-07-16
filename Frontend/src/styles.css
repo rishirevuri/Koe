@@ -5231,7 +5231,7 @@ button:disabled,
 .mobile-inventory-list,
 .mobile-report-section,
 .mobile-account-section,
-.mobile-dashboard-panel {
+.mobile-dashboard-past-counts {
   display: none;
 }
 
@@ -5526,72 +5526,96 @@ button:disabled,
   }
 
   .dashboard-empty .new-count-button,
-  .dashboard-cta .new-count-button,
-  .mobile-dashboard-panel .new-count-button {
+  .dashboard-cta .new-count-button {
     width: 100%;
     min-height: 52px;
   }
 
-  .mobile-dashboard-panel {
+  .mobile-dashboard-past-counts {
     display: grid;
-    gap: 16px;
+    gap: 10px;
     width: 100%;
-    margin: 0 0 18px;
-    padding: 18px;
+    margin: 0 0 12px;
+    padding: 16px;
     background: var(--product-panel-strong);
     border: 1px solid var(--product-line);
     border-radius: 12px;
     box-shadow: var(--product-shadow);
   }
 
-  .mobile-dashboard-heading {
-    display: grid;
-    gap: 3px;
+  .mobile-dashboard-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
   }
 
-  .mobile-dashboard-heading span {
-    color: var(--product-accent);
-    font-size: 13px;
-    font-weight: 600;
-  }
-
-  .mobile-dashboard-heading h2 {
+  .mobile-dashboard-section-heading h2 {
     margin: 0;
     color: var(--ink);
     font-family: var(--serif);
-    font-size: 1.85rem;
-    font-weight: 600;
+    font-size: 1.55rem;
     line-height: 1;
   }
 
-  .mobile-dashboard-panel dl {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    margin: 0;
+  .mobile-dashboard-section-heading button {
+    min-height: 36px;
+    padding: 0 12px;
+    color: var(--product-accent-strong);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    background: rgba(255, 250, 242, 0.72);
+    border: 1px solid rgba(16, 35, 31, 0.12);
+    border-radius: 999px;
   }
 
-  .mobile-dashboard-panel dl div {
-    min-width: 0;
-    padding: 13px 12px;
+  .mobile-dashboard-count-list {
+    display: grid;
+    gap: 8px;
+  }
+
+  .mobile-dashboard-count-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 58px;
+    padding: 10px 12px;
+    color: var(--ink);
+    font: inherit;
+    text-align: left;
     background: rgba(255, 250, 242, 0.72);
     border: 1px solid rgba(16, 35, 31, 0.1);
     border-radius: 10px;
   }
 
-  .mobile-dashboard-panel dt {
-    color: var(--product-muted);
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
+  .mobile-dashboard-count-row strong,
+  .mobile-dashboard-count-row small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  .mobile-dashboard-panel dd {
-    margin: 5px 0 0;
-    color: var(--ink);
-    font-size: 19px;
-    font-weight: 600;
-    overflow-wrap: anywhere;
+  .mobile-dashboard-count-row strong {
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .mobile-dashboard-count-row small {
+    margin-top: 3px;
+    color: var(--product-muted);
+    font-size: 12px;
+  }
+
+  .mobile-dashboard-count-row em {
+    color: var(--product-accent-strong);
+    font-size: 13px;
+    font-style: normal;
+    font-weight: 700;
+    white-space: nowrap;
   }
 
   .dashboard-section {

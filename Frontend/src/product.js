@@ -191,6 +191,7 @@ function storeAuthHandoff(session) {
 }
 
 function setMobileTab(tab) {
+  if (redirectProductDashboardTabIfNeeded(tab)) return;
   state.mobileActiveTab = tab;
   if (window.location.hash !== `#${tab}`) {
     window.location.hash = tab;
@@ -198,6 +199,20 @@ function setMobileTab(tab) {
   }
   render();
   handleMobileTabActivation(tab);
+}
+
+function getProductDashboardRedirect(tab = state.mobileActiveTab) {
+  if (tab === "dashboard") return "/dashboard.html";
+  if (tab === "reports") return "/dashboard.html#past-counts";
+  return "";
+}
+
+function redirectProductDashboardTabIfNeeded(tab = state.mobileActiveTab) {
+  const target = getProductDashboardRedirect(tab);
+  if (!target) return false;
+  state.navigatingAway = true;
+  window.location.assign(target);
+  return true;
 }
 
 function formatReportDate(value) {
@@ -717,6 +732,7 @@ function initialize() {
   window.addEventListener("hashchange", () => {
     state.mobileActiveTab = getMobileTabFromHash();
     state.lastScrolledHash = "";
+    if (redirectProductDashboardTabIfNeeded(state.mobileActiveTab)) return;
     render();
     handleMobileTabActivation(state.mobileActiveTab);
   });
@@ -787,6 +803,7 @@ async function loadCurrentWorkspace() {
     state.userEmail = me.email || state.userEmail;
     state.authStatus = "Ready";
     clearMessages();
+    if (redirectProductDashboardTabIfNeeded()) return;
     loadMobileDashboardSummary();
     console.log("Workspace loaded");
     if (state.pendingDashboardRedirect || shouldRedirectToDashboard) {
@@ -1692,7 +1709,7 @@ function renderMobileTopBar() {
   const restaurantName = state.selectedRestaurantName || "Massimo's";
   return `
     <header class="mobile-app-bar">
-      <a class="mobile-app-logo" href="#dashboard" aria-label="Koe dashboard">Koe</a>
+      <a class="mobile-app-logo" href="./dashboard.html" aria-label="Koe dashboard">Koe</a>
       <div class="mobile-restaurant-name" aria-label="Current restaurant">${escapeHtml(restaurantName)}</div>
       <a class="mobile-avatar" href="#account" aria-label="Open account">
         <span>${escapeHtml((state.userEmail || "K").slice(0, 1).toUpperCase())}</span>
