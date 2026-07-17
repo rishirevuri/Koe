@@ -25,6 +25,26 @@ python -m app.seed
 uvicorn app.main:app --reload --port 8000
 ```
 
+## Production persistence
+
+Counts and reports are permanent only when `DATABASE_URL` points at persistent storage.
+For production on Render, use a managed Postgres database such as Render Postgres
+or Supabase Postgres:
+
+```env
+ENVIRONMENT=production
+DATABASE_URL=postgresql+psycopg://user:password@host:5432/database
+```
+
+Do not use the default `sqlite:///./data/koe.db` on a Render web service for
+permanent data. Render service filesystems are ephemeral unless a persistent disk
+is mounted, so SQLite data can disappear after restart or redeploy. If you
+intentionally use SQLite with a mounted persistent disk, set
+`ALLOW_PRODUCTION_SQLITE=true` and point `DATABASE_URL` at that disk path.
+
+The seed command resets local demo data and is blocked when
+`ENVIRONMENT=production`.
+
 ## Useful Commands
 
 Health check:

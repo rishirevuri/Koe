@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from app.config import BASE_DIR
+from app.config import BASE_DIR, get_settings
 from app.database import Base, SessionLocal, engine
 from app.models import InventoryItem, Restaurant
 from app.services.normalization_service import normalize_text
@@ -25,6 +25,9 @@ SEED_RESTAURANTS = [
 
 
 def seed(reset: bool = True) -> None:
+    settings = get_settings()
+    if reset and settings.is_production:
+        raise RuntimeError("Refusing to reset seed data in production.")
     Path(BASE_DIR / "data").mkdir(parents=True, exist_ok=True)
     if reset:
         Base.metadata.drop_all(bind=engine)

@@ -1,4 +1,5 @@
 from functools import lru_cache
+import os
 from pathlib import Path
 
 from pydantic import Field
@@ -15,6 +16,7 @@ class Settings(BaseSettings):
     app_name: str = "Koe Backend"
     environment: str = "development"
     database_url: str = Field(default="sqlite:///./data/koe.db")
+    allow_production_sqlite: bool = False
     enable_external_ai: bool = False
     debug_parse: bool = False
 
@@ -37,6 +39,38 @@ class Settings(BaseSettings):
 
     payments_enabled: bool = False
     payments_provider: str = "none"
+
+    @property
+    def sqlalchemy_database_url(self) -> str:
+        url = self.database_url.strip()
+        if url.startswith("postgres://"):
+            return "postgresql+psycopg://" + url.removeprefix("postgres://")
+        if url.startswith("postgresql://"):
+            return "postgresql+psycopg://" + url.removeprefix("postgresql://")
+        return url
+
+    @property
+    def is_production(self) -> bool:
+        return self.environment.strip().lower() in {"prod", "production"}
+
+    @property
+    def is_render_runtime(self) -> bool:
+        return any(os.getenv(name) for name in ("RENDER", "RENDER_SERVICE_ID", "RENDER_EXTERNAL_URL"))
+
+    @property
+    def is_sqlite_database(self) -> bool:
+        return self.sqlalchemy_database_url.startswith("sqlite")
+
+    def validate_persistent_database(self) -> None:
+        if not (self.is_production or self.is_render_runtime) or not self.is_sqlite_database or self.allow_production_sqlite:
+            return
+        raise RuntimeError(
+            "Unsafe production database configuration: DATABASE_URL is SQLite. "
+            "Render web service filesystems are ephemeral unless a persistent disk is mounted, "
+            "so saved counts can disappear after restart/redeploy. Use a persistent Postgres/Supabase "
+            "DATABASE_URL, or set ALLOW_PRODUCTION_SQLITE=true only when the SQLite file is on a "
+            "Render persistent disk."
+        )
 
     @staticmethod
     def _has_real_value(value: str | None) -> bool:

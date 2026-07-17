@@ -1,5 +1,6 @@
 import csv
 import io
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from fastapi.testclient import TestClient
@@ -611,6 +612,16 @@ def test_saved_counts_persist_for_same_user_and_are_account_scoped() -> None:
         },
     )
     assert first_parse.status_code == 200
+    two_days_ago = datetime.now(timezone.utc) - timedelta(days=2)
+    db = SessionLocal()
+    try:
+        first_count = db.get(CountSession, first_count_id)
+        first_count.started_at = two_days_ago - timedelta(minutes=5)
+        first_count.completed_at = two_days_ago
+        db.add(first_count)
+        db.commit()
+    finally:
+        db.close()
 
     second_count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
     second_parse = client.post(
@@ -623,6 +634,16 @@ def test_saved_counts_persist_for_same_user_and_are_account_scoped() -> None:
         },
     )
     assert second_parse.status_code == 200
+    yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+    db = SessionLocal()
+    try:
+        second_count = db.get(CountSession, second_count_id)
+        second_count.started_at = yesterday - timedelta(minutes=5)
+        second_count.completed_at = yesterday
+        db.add(second_count)
+        db.commit()
+    finally:
+        db.close()
 
     draft_count_id = client.post("/counts", json={"area": "Prep Station"}).json()["id"]
 
@@ -635,6 +656,7 @@ def test_saved_counts_persist_for_same_user_and_are_account_scoped() -> None:
     assert counts_response.status_code == 200
     counts = counts_response.json()
     assert [count["id"] for count in counts[:3]] == [second_count_id, first_count_id, draft_count_id]
+    assert {first_count_id, second_count_id}.issubset({count["id"] for count in counts})
     completed = [count for count in counts if count["id"] in {first_count_id, second_count_id}]
     assert all(count["status"] == "completed" for count in completed)
     assert all(count["completed_at"] for count in completed)
@@ -655,6 +677,12 @@ def test_saved_counts_persist_for_same_user_and_are_account_scoped() -> None:
     csv_response = client.get(f"/reports/{first_count_id}/csv")
     assert csv_response.status_code == 200
     assert "Olive oil" in csv_response.text
+
+    dashboard_response = client.get("/dashboard/summary")
+    assert dashboard_response.status_code == 200
+    counts_after_dashboard = client.get("/counts")
+    assert counts_after_dashboard.status_code == 200
+    assert {first_count_id, second_count_id, draft_count_id}.issubset({count["id"] for count in counts_after_dashboard.json()})
 
     other_user = auth_deps.SupabaseUser(user_id="other-persist-user", email="other@example.com")
     db = SessionLocal()
