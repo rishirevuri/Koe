@@ -29,6 +29,7 @@ CSV_HEADER = [
     "Raw Item Name",
     "Quantity",
     "Unit",
+    "Needed Quantity",
     "Status",
     "Original Phrase",
     "Counted By",
@@ -266,7 +267,7 @@ def test_voice_parse_save_report_and_csv() -> None:
     csv_text = csv_response.text
     csv_rows = list(csv.reader(io.StringIO(csv_text)))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:11] == [
+    assert csv_rows[1][:12] == [
         str(count_id),
         "2",
         "Dry Storage",
@@ -275,15 +276,47 @@ def test_voice_parse_save_report_and_csv() -> None:
         "olive oil",
         "2.5",
         "bottles",
+        "TBD",
         "Partial Quantity",
         "3 bottles of olive oil, one of which is half empty",
         TEST_USER.email,
     ]
-    assert ["Lettuce", "lettuce", "3.0", "heads", "Clean"] in [row[4:9] for row in csv_rows[1:]]
-    assert ["Tomatoes", "tomatoes", "5.0", "boxes", "Clean"] in [row[4:9] for row in csv_rows[1:]]
-    assert ["Cheese", "cheese", "2.0", "boxes", "Clean"] in [row[4:9] for row in csv_rows[1:]]
+    assert ["Lettuce", "lettuce", "3.0", "heads", "TBD", "Clean"] in [row[4:10] for row in csv_rows[1:]]
+    assert ["Tomatoes", "tomatoes", "5.0", "boxes", "TBD", "Clean"] in [row[4:10] for row in csv_rows[1:]]
+    assert ["Cheese", "cheese", "2.0", "boxes", "TBD", "Clean"] in [row[4:10] for row in csv_rows[1:]]
     assert "Needs Review" not in csv_text
     assert "Manager Note" not in csv_text
+
+
+def test_voice_parse_needed_quantity_saves_report_and_csv() -> None:
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "We have 2 boxes of tomatoes and need 6 more boxes.",
+            "area": "Walk-in",
+            "save": True,
+        },
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["item_name_clean"] == "Tomatoes"
+    assert entry["quantity"] == 2
+    assert entry["unit"] == "boxes"
+    assert entry["needed_quantity"] == "6 boxes"
+
+    report = client.get(f"/reports/{count_id}").json()
+    assert report["entries"][0]["quantity"] == 2
+    assert report["entries"][0]["needed_quantity"] == "6 boxes"
+
+    csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
+    assert list(csv_rows[0].keys()) == CSV_HEADER
+    assert csv_rows[0]["Quantity"] == "2.0"
+    assert csv_rows[0]["Unit"] == "boxes"
+    assert csv_rows[0]["Needed Quantity"] == "6 boxes"
 
 
 def test_voice_parse_repairs_legacy_count_entry_category_column() -> None:
@@ -314,12 +347,39 @@ def test_voice_parse_repairs_legacy_count_entry_category_column() -> None:
     assert all(entry["is_demo_estimate"] is True for entry in payload["entries"])
 
 
+def test_voice_parse_repairs_legacy_count_entry_needed_quantity_column() -> None:
+    with engine.begin() as connection:
+        if "needed_quantity" in count_entry_columns():
+            connection.execute(text("ALTER TABLE count_entries DROP COLUMN needed_quantity"))
+    assert "needed_quantity" not in count_entry_columns()
+
+    count_response = client.post("/counts", json={"area": "Dry Storage"})
+    assert count_response.status_code == 200
+    count_id = count_response.json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "3 bottles of olive oil.",
+            "area": "Dry Storage",
+            "save": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "needed_quantity" in count_entry_columns()
+    assert response.json()["entries"][0]["needed_quantity"] == "TBD"
+
+
 def test_count_entry_model_accepts_category_constructor_keyword() -> None:
     assert "category" in inspect(CountEntry).attrs.keys()
+    assert "needed_quantity" in inspect(CountEntry).attrs.keys()
 
-    entry = CountEntry(category="Produce")
+    entry = CountEntry(category="Produce", needed_quantity="6 boxes")
 
     assert entry.category == "Produce"
+    assert entry.needed_quantity == "6 boxes"
 
 
 def test_voice_parse_saves_claude_category(monkeypatch) -> None:
@@ -338,6 +398,7 @@ def test_voice_parse_saves_claude_category(monkeypatch) -> None:
                 review_reason=None,
                 status="Clean",
                 category="Produce",
+                needed_quantity="6 boxes",
             )
         ]
 
@@ -360,13 +421,23 @@ def test_voice_parse_saves_claude_category(monkeypatch) -> None:
     assert entry["quantity"] == 16
     assert entry["unit"] == "individual"
     assert entry["category"] == "Produce"
+    assert entry["needed_quantity"] == "6 boxes"
 
     db = SessionLocal()
     try:
         saved_entry = db.query(CountEntry).filter(CountEntry.count_session_id == count_id).one()
         assert saved_entry.category == "Produce"
+        assert saved_entry.needed_quantity == "6 boxes"
     finally:
         db.close()
+
+    report = client.get(f"/reports/{count_id}").json()
+    assert report["entries"][0]["needed_quantity"] == "6 boxes"
+
+    csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
+    assert csv_rows[0]["Quantity"] == "16.0"
+    assert csv_rows[0]["Unit"] == "individual"
+    assert csv_rows[0]["Needed Quantity"] == "6 boxes"
 
 
 def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
@@ -413,7 +484,7 @@ def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
 
     csv_rows = list(csv.reader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:11] == [
+    assert csv_rows[1][:12] == [
         str(count_id),
         "2",
         "Storage",
@@ -422,6 +493,7 @@ def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
         "Takeout containers",
         "",
         "",
+        "TBD",
         "Needs Review",
         "a few takeout containers, but I do not know the exact count",
         TEST_USER.email,

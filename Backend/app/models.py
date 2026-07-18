@@ -75,6 +75,7 @@ class CountEntry(Base):
     category: Mapped[str | None] = mapped_column(String(120), nullable=True)
     quantity: Mapped[float | None] = mapped_column(Float, nullable=True)
     unit: Mapped[str] = mapped_column(String(80), nullable=False)
+    needed_quantity: Mapped[str] = mapped_column(String(120), default="TBD", nullable=False)
     status: Mapped[str] = mapped_column(String(80), default="Clean", nullable=False)
     area: Mapped[str | None] = mapped_column(String(120), nullable=True)
     source: Mapped[str] = mapped_column(String(40), default="manual")

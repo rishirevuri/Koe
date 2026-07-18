@@ -390,6 +390,11 @@ function formatQty(value) {
   return Number.isInteger(value) ? String(value) : String(value);
 }
 
+function formatNeededQuantity(value) {
+  const neededQuantity = String(value ?? "").trim();
+  return neededQuantity || "TBD";
+}
+
 function getLatestCount(data = state.data) {
   return data?.last_count_summary || null;
 }
@@ -1965,6 +1970,7 @@ function renderPastCountSpreadsheet(entries) {
             <th>Category</th>
             <th>Qty</th>
             <th>Unit</th>
+            <th>Needed Quantity</th>
             <th>Status</th>
             <th>Original phrase</th>
             <th>Counted by</th>
@@ -1982,6 +1988,7 @@ function renderPastCountSpreadsheet(entries) {
                   <td>${escapeHtml(getCategory(entry))}</td>
                   <td>${escapeHtml(formatQty(entry.quantity ?? ""))}</td>
                   <td>${escapeHtml(entry.unit || "")}</td>
+                  <td>${escapeHtml(formatNeededQuantity(entry.needed_quantity))}</td>
                   <td><span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status || "Clean")}</span></td>
                   <td>${escapeHtml(entry.original_phrase || "")}</td>
                   <td>${escapeHtml(entry.counted_by || "—")}</td>

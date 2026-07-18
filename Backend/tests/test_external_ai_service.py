@@ -13,6 +13,8 @@ def test_claude_prompt_requires_manager_ready_json_shape() -> None:
     assert '"item_name_raw"' in SYSTEM_PROMPT
     assert '"item_name_clean"' in SYSTEM_PROMPT
     assert '"category"' in SYSTEM_PROMPT
+    assert '"needed_quantity"' in SYSTEM_PROMPT
+    assert "Do not infer needed_quantity from par levels" in SYSTEM_PROMPT
     assert '"items"' in SYSTEM_PROMPT
     assert '"summary"' in SYSTEM_PROMPT
     assert "No text outside JSON" in SYSTEM_PROMPT
@@ -29,6 +31,7 @@ def test_normalize_claude_inventory_payload_items_shape() -> None:
                 "category": "Liquids",
                 "quantity": 2.5,
                 "unit": "bottles",
+                "needed_quantity": "6 bottles",
                 "status": "Partial Quantity",
                 "original_phrase": "3 bottles of olive oil, one is half empty",
             },
@@ -52,7 +55,7 @@ def test_normalize_claude_inventory_payload_items_shape() -> None:
             **payload["items"][0],
             "category": "Oils & Liquids",
         },
-        payload["items"][1],
+        {**payload["items"][1], "needed_quantity": "TBD"},
     ]
     assert parsed["summary"] == {
         "items_counted": 2,
@@ -88,6 +91,7 @@ def test_normalize_claude_inventory_payload_legacy_entries_shape() -> None:
             "category": "Produce",
             "quantity": None,
             "unit": None,
+            "needed_quantity": "TBD",
             "status": "Needs Review",
             "original_phrase": "a few tomatoes",
         }
@@ -118,6 +122,25 @@ def test_coerce_candidate_cleans_obvious_units_and_vague_quantity() -> None:
         ("Hamburger buns", 4.0, "buns", "Clean"),
         ("Takeout containers", None, None, "Needs Review"),
     ]
+
+
+def test_coerce_candidate_preserves_needed_quantity_without_overwriting_quantity() -> None:
+    candidate = _coerce_candidate(
+        {
+            "item_name_clean": "Tomatoes",
+            "quantity": 2,
+            "unit": "boxes",
+            "needed_quantity": "6 boxes",
+            "status": "Clean",
+            "original_phrase": "We have 2 boxes of tomatoes and need 6 more boxes.",
+        }
+    )
+
+    assert candidate is not None
+    assert candidate.item_name == "Tomatoes"
+    assert candidate.quantity == 2
+    assert candidate.unit == "boxes"
+    assert candidate.needed_quantity == "6 boxes"
 
 
 class EnabledClaudeSettings:

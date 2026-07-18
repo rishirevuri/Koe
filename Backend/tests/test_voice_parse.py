@@ -108,3 +108,12 @@ def test_voice_parse_obvious_item_units() -> None:
         ("veggie burger patties", 30, "patties"),
         ("hamburger buns", 4, "buns"),
     ]
+
+
+def test_voice_parse_simple_needed_quantity_stays_separate() -> None:
+    parsed = parse_voice_text("We have 2 boxes of tomatoes and need 6 more boxes. We have 10 lemons and need 30 more.")
+
+    assert [(item.item_name, item.quantity, item.unit, item.needed_quantity) for item in parsed] == [
+        ("tomatoes", 2, "boxes", "6 boxes"),
+        ("lemons", 10, "individual", "30 individual"),
+    ]

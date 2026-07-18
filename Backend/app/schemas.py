@@ -79,6 +79,7 @@ class CountEntryCreate(BaseModel):
     item_name: str
     quantity: float
     unit: str
+    needed_quantity: str = "TBD"
     area: str | None = None
     source: str = "manual"
     raw_input: str | None = None
@@ -94,6 +95,7 @@ class CountEntryRead(BaseModel):
     item_name_clean: str
     quantity: float | None
     unit: str
+    needed_quantity: str = "TBD"
     status: str
     original_phrase: str | None
     created_at: datetime
@@ -117,6 +119,7 @@ class ParsedEntry(BaseModel):
     restaurant_id: int
     quantity: float | None
     unit: str | None
+    needed_quantity: str = "TBD"
     area: str | None = None
     item_name_raw: str
     item_name_clean: str
@@ -206,6 +209,7 @@ class ReportEntry(BaseModel):
     category: str | None = None
     quantity: float | None
     unit: str
+    needed_quantity: str = "TBD"
     status: str
     original_phrase: str | None = None
     created_at: datetime

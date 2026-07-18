@@ -2563,7 +2563,7 @@ button:disabled,
   }
 
   .product-table {
-    min-width: 720px;
+    min-width: 840px;
   }
 }
 
@@ -5522,7 +5522,7 @@ button:disabled,
 
 .past-count-spreadsheet table {
   width: 100%;
-  min-width: 780px;
+  min-width: 920px;
   border-collapse: collapse;
 }
 
@@ -8055,6 +8055,12 @@ button:disabled,
     color: var(--ink);
     font-size: 15px;
     white-space: nowrap;
+  }
+
+  .mobile-report-item small {
+    grid-column: 2 / -1;
+    color: var(--ink-soft);
+    font-size: 12px;
   }
 
   .mobile-report-item em {

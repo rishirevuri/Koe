@@ -475,6 +475,7 @@ function isInvalidFallbackEntry(entry) {
 function normalizeParsedEntry(entry, fallbackArea = "") {
   const itemNameClean = normalizeItemName(entry.item_name_clean || entry.item_name || entry.name);
   const itemNameRaw = normalizeItemName(entry.item_name_raw || entry.raw_phrase || itemNameClean);
+  const neededQuantity = String(entry.needed_quantity ?? "").trim() || "TBD";
   return {
     ...entry,
     count_id: entry.count_id ?? state.activeCountId ?? null,
@@ -485,6 +486,7 @@ function normalizeParsedEntry(entry, fallbackArea = "") {
     category: entry.category || "",
     quantity: entry.quantity,
     unit: entry.unit || "",
+    needed_quantity: neededQuantity,
     status: normalizeStatus(entry),
     original_phrase: entry.original_phrase || entry.raw_phrase || itemNameRaw,
     created_at: entry.created_at || null,
@@ -509,6 +511,11 @@ function getEntryRawName(entry) {
 
 function getEntryOriginalPhrase(entry) {
   return entry.original_phrase || getEntryRawName(entry);
+}
+
+function getEntryNeededQuantity(entry) {
+  const neededQuantity = String(entry?.needed_quantity ?? "").trim();
+  return neededQuantity || "TBD";
 }
 
 function entryNeedsReview(entry) {
@@ -1539,12 +1546,13 @@ function renderInventoryTable() {
           <td>${escapeHtml(cleanName)}</td>
           <td>${escapeHtml(entry.quantity)}</td>
           <td>${escapeHtml(entry.unit)}</td>
+          <td>${escapeHtml(getEntryNeededQuantity(entry))}</td>
           <td>${escapeHtml(area)}</td>
           <td><span class="status-pill ${status.className}">${escapeHtml(status.label)}</span></td>
         </tr>
         ${
           detail
-            ? `<tr class="detail-row"><td></td><td colspan="5">${escapeHtml(detail)}</td></tr>`
+            ? `<tr class="detail-row"><td></td><td colspan="6">${escapeHtml(detail)}</td></tr>`
             : ""
         }
       `;
@@ -1552,7 +1560,7 @@ function renderInventoryTable() {
         .join("");
 
       return `
-        <tr class="category-row"><td colspan="6">${escapeHtml(group.category)}</td></tr>
+        <tr class="category-row"><td colspan="7">${escapeHtml(group.category)}</td></tr>
         ${itemRows}
       `;
     })
@@ -1566,6 +1574,7 @@ function renderInventoryTable() {
           <th>Name</th>
           <th>Quantity</th>
           <th>Unit</th>
+          <th>Needed Quantity</th>
           <th>Area</th>
           <th>Status</th>
         </tr>
@@ -1635,6 +1644,7 @@ function renderMobileInventoryCards() {
             <p>${escapeHtml(entry.quantity)} ${escapeHtml(entry.unit || "unit")}</p>
           </div>
           <span class="status-pill ${status.className}">${escapeHtml(status.label)}</span>
+          <small>Needed Quantity: ${escapeHtml(getEntryNeededQuantity(entry))}</small>
           ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
           <button class="mobile-card-edit" type="button" aria-label="Edit ${escapeHtml(cleanName)}">Edit</button>
         </article>
@@ -1684,6 +1694,7 @@ function renderReportPreview() {
             <th>Name</th>
             <th>Quantity</th>
             <th>Unit</th>
+            <th>Needed Quantity</th>
             <th>Area</th>
             <th>Status</th>
           </tr>
@@ -1696,6 +1707,7 @@ function renderReportPreview() {
                   <td>${escapeHtml(getEntryCleanName(entry))}</td>
                   <td>${escapeHtml(entry.quantity)}</td>
                   <td>${escapeHtml(entry.unit)}</td>
+                  <td>${escapeHtml(getEntryNeededQuantity(entry))}</td>
                   <td>${escapeHtml(entry.area || "—")}</td>
                   <td>${escapeHtml(getEntryStatus(entry).label)}</td>
                 </tr>
@@ -1895,6 +1907,7 @@ function getMobileReportEntries() {
     return {
       name: getEntryCleanName(entry),
       quantity: `${entry.quantity ?? ""} ${entry.unit || ""}`.trim() || "Quantity not set",
+      neededQuantity: getEntryNeededQuantity(entry),
       status: status.label === "Clean" ? "Confirmed" : status.label,
     };
   });
@@ -1998,6 +2011,7 @@ function renderMobileReportItem(entry) {
       <span class="mobile-row-icon">${ProductIcon("store")}</span>
       <strong>${escapeHtml(entry.name)}</strong>
       <p>${escapeHtml(entry.quantity)}</p>
+      <small>Needed Quantity: ${escapeHtml(entry.neededQuantity)}</small>
       <em>${ProductIcon("check")} ${escapeHtml(entry.status)}</em>
     </article>
   `;

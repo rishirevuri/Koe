@@ -136,7 +136,19 @@ Examples:
 - If later corrected, use the correction:
   "boxes of bacon, not sure how many, actually 2 boxes" -> Bacon, 2 boxes, Clean
 
-9. Differentiate similar items.
+9. Extract explicitly stated needed quantities.
+Add needed_quantity only when the transcript explicitly states that more of the same item is needed, required, should be ordered, should be restocked, or needs to be bought.
+Keep quantity as the current counted amount, and keep needed_quantity as the amount the staff says they still need.
+If no needed amount is explicitly stated, set needed_quantity to "TBD".
+If the needed amount is vague, like "need more" without a number, set needed_quantity to "TBD".
+Do not infer needed_quantity from par levels, common restaurant usage, or demand estimates.
+
+Examples:
+- "We have 2 boxes of tomatoes and need 6 more boxes" -> Tomatoes, quantity 2, unit boxes, needed_quantity "6 boxes"
+- "We have 10 lemons and need 30 more" -> Lemons, quantity 10, unit individual, needed_quantity "30 individual"
+- "We have 3 bottles of olive oil" -> Olive oil, needed_quantity "TBD"
+
+10. Differentiate similar items.
 Keep distinct items separate when the transcript clearly separates them.
 
 Examples:
@@ -147,7 +159,7 @@ Examples:
 - Olive oil and canola oil are separate.
 - Chicken breasts and chicken wings are separate.
 
-10. Merge duplicates only when clearly same item and compatible units.
+11. Merge duplicates only when clearly same item and compatible units.
 If same item appears multiple times with same or convertible units, merge them.
 
 Example:
@@ -155,7 +167,7 @@ Example:
 
 If units are incompatible and no conversion is given, keep separate or mark Possible Duplicate.
 
-11. Status values.
+12. Status values.
 Use exactly one:
 - Clean
 - Partial Quantity
@@ -169,7 +181,7 @@ Needs Review > Possible Duplicate > Missing Unit > Partial Quantity > Converted 
 
 But do not mark every row Needs Review. Clean rows should be Clean. Converted rows should be Converted Unit. Partial rows should be Partial Quantity.
 
-12. Category inference.
+13. Category inference.
 Infer category yourself from the item, but do not force weird categories.
 
 Allowed categories:
@@ -192,7 +204,7 @@ Examples:
 - Tonic water, sparkling water, lemons/limes if bar context -> Bar
 - Frozen fries, mozzarella sticks, veggie patties, ice cream -> Frozen
 
-13. Output JSON only.
+14. Output JSON only.
 Return this exact shape:
 
 {
@@ -203,6 +215,7 @@ Return this exact shape:
       "category": "Produce | Dairy & Eggs | Meats | Liquids | Dry Goods | Bar | Frozen | Supplies | Other",
       "quantity": number | null,
       "unit": "string" | null,
+      "needed_quantity": "string",
       "status": "Clean | Partial Quantity | Missing Unit | Needs Review | Possible Duplicate | Converted Unit",
       "original_phrase": "string"
     }
@@ -222,7 +235,7 @@ No markdown.
 No explanation.
 No text outside JSON.
 
-14. Required behavior on this hard transcript:
+15. Required behavior on this hard transcript:
 For this input:
 
 "Okay I'm doing the inventory count now. I see 10 tomatoes, actually make that 12 tomatoes because there are 2 more on the bottom shelf. There are also 10 Roma tomatoes in the corner, those are separate from the regular tomatoes. I have 5 heads of lettuce and 2 boxes of cucumbers. There is cilantro too, looks like 3 bunches, wait no scratch that, it is 4 bunches of cilantro. I have 10 gallons of whole milk and 3 gallons of two percent milk. There is half a gallon of heavy cream. I see 12 dozen eggs, but 6 eggs are cracked so do not count those as usable. There are also 2 trays of 30 eggs. I have 10 ounces of ground beef and 3 chicken breasts. There are boxes of bacon on the side, I am not sure how many, actually I just checked, it is 2 boxes of bacon. I have 4 boxes of pizza dough, 2 cases of 24 water bottles, and 3 packs of 6 Coke cans. There is half a case of napkins. I have 5 bags of flour, but one bag is half empty. There are 2 ten-pound bags of rice and a quarter bag of sugar. I see 3 bottles of olive oil and one of the bottles is half empty. There are 5 gallons of canola oil and 2 jars of marinara sauce. I also have 6 cans of tomato sauce, actually change that to 8 cans of tomato sauce. Behind the bar there are 7 bottles of sparkling water, 2 cases of 12 tonic waters, and 1 dozen lemons. There are a few limes but I do not know the exact count, so that should probably be reviewed. In the freezer there are 2 boxes of frozen fries, 1 open box of mozzarella sticks, and half a box of veggie patties. There are 3 tubs of ice cream, but one tub is only a quarter full. That should be everything."
@@ -335,6 +348,29 @@ def _safe_int(value: object, fallback: int) -> int:
         return fallback
 
 
+def _format_needed_number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _normalize_needed_quantity(value: object, unit: str | None = None) -> str:
+    if value is None:
+        return "TBD"
+    if isinstance(value, (int, float)):
+        quantity = float(value)
+        return f"{_format_needed_number(quantity)} {unit}" if unit else _format_needed_number(quantity)
+
+    text = re.sub(r"\s+", " ", _safe_string(value)).strip()
+    if not text:
+        return "TBD"
+    if text.lower() in {"tbd", "unknown", "none", "null", "n/a", "na"}:
+        return "TBD"
+    text = re.sub(r"\bmore\b", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\s+", " ", text).strip()
+    if re.fullmatch(r"\d+(?:\.\d+)?", text) and unit:
+        return f"{_format_needed_number(float(text))} {unit}"
+    return text or "TBD"
+
+
 def _debug_parse_enabled(settings) -> bool:
     return bool(getattr(settings, "debug_parse", False)) or getattr(settings, "environment", "") == "development"
 
@@ -393,6 +429,7 @@ def _normalize_claude_item(entry: dict) -> dict | None:
         "category": _normalize_category(entry.get("category"), item_name=item_name_clean),
         "quantity": quantity,
         "unit": unit,
+        "needed_quantity": _normalize_needed_quantity(entry.get("needed_quantity"), unit),
         "status": status,
         "original_phrase": original_phrase,
     }
@@ -469,6 +506,7 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
         review_reason=str(review_reason) if review_reason else None,
         status=status or None,
         category=normalize_inventory_category(item_name, _safe_string(entry.get("category")) or None),
+        needed_quantity=_normalize_needed_quantity(entry.get("needed_quantity"), resolved_unit),
     )
 
 

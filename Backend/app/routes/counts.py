@@ -122,6 +122,7 @@ def add_count_entry(
         category=normalize_inventory_category(clean_name),
         quantity=payload.quantity,
         unit=normalize_unit(payload.unit),
+        needed_quantity=payload.needed_quantity or "TBD",
         status=status,
         area=payload.area or count.area,
         source=payload.source,

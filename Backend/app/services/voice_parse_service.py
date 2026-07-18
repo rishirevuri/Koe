@@ -16,6 +16,7 @@ class ParsedCandidate:
     review_reason: str | None
     status: str | None = None
     category: str | None = None
+    needed_quantity: str = "TBD"
 
 
 NUMBER_WORDS = {
@@ -71,6 +72,17 @@ UNKNOWN_TAIL = re.compile(
     re.IGNORECASE,
 )
 UNUSABLE_ITEM_PATTERN = re.compile(r"\b(?:spoiled|unusable|rotten|bad|discard|throw away|thrown away)\b", re.IGNORECASE)
+NEEDED_VERB_PATTERN = (
+    r"(?:need(?:s|ed)?(?:\s+to\s+(?:order|restock|buy))?|require(?:s|d)?|"
+    r"order(?:ed)?|restock(?:ed)?|buy|bought|should\s+(?:order|restock|buy))"
+)
+NEEDED_START_PREFIX = re.compile(rf"\b{NEEDED_VERB_PATTERN}\s*$", re.IGNORECASE)
+NEEDED_QUANTITY_PATTERN = re.compile(
+    rf"\b{NEEDED_VERB_PATTERN}\s+"
+    rf"(?P<qty>\d+(?:\.\d+)?)"
+    rf"(?:\s+(?:more\b(?:\s+(?P<unit_after_more>{UNITS_PATTERN}))?|(?P<unit>{UNITS_PATTERN})))?",
+    re.IGNORECASE,
+)
 
 
 def _normalize_spoken_numbers(text: str) -> str:
@@ -85,7 +97,7 @@ def _split_inventory_phrases(text: str) -> list[str]:
     cleaned = _normalize_spoken_numbers(text)
     cleaned = re.sub(r"\s+", " ", cleaned.replace("\n", ", ").replace(";", ", ")).strip()
     cleaned = LEADING_NOISE.sub("", cleaned)
-    matches = list(QUANTITY_START_PATTERN.finditer(cleaned))
+    matches = [match for match in QUANTITY_START_PATTERN.finditer(cleaned) if not _is_needed_quantity_start(cleaned, match)]
     phrases: list[str] = []
     for index, match in enumerate(matches):
         start = match.start()
@@ -98,6 +110,11 @@ def _split_inventory_phrases(text: str) -> list[str]:
     return phrases
 
 
+def _is_needed_quantity_start(text: str, match: re.Match[str]) -> bool:
+    prefix = text[max(0, match.start() - 48) : match.start()]
+    return bool(NEEDED_START_PREFIX.search(prefix))
+
+
 def _clean_item_name(value: str) -> str:
     cleaned = value.strip(" ,.")
     previous = None
@@ -107,6 +124,26 @@ def _clean_item_name(value: str) -> str:
         cleaned = TRAILING_CONNECTOR_FRAGMENT.sub("", cleaned).strip(" ,.")
         cleaned = re.sub(r"(?:,?\s+(?:and|andn|then|also))$", "", cleaned, flags=re.IGNORECASE).strip(" ,.")
     return cleaned
+
+
+def _format_needed_number(value: float) -> str:
+    return str(int(value)) if float(value).is_integer() else f"{value:g}"
+
+
+def _extract_needed_quantity(value: str, fallback_unit: str | None = None) -> str:
+    match = NEEDED_QUANTITY_PATTERN.search(value)
+    if not match:
+        return "TBD"
+    quantity = float(match.group("qty"))
+    unit = match.group("unit_after_more") or match.group("unit")
+    normalized_unit = normalize_unit(unit) if unit else fallback_unit
+    if normalized_unit:
+        return f"{_format_needed_number(quantity)} {normalized_unit}"
+    return _format_needed_number(quantity)
+
+
+def _remove_needed_quantity_clause(value: str) -> str:
+    return NEEDED_QUANTITY_PATTERN.sub("", value).strip(" ,.")
 
 
 def normalize_obvious_item_unit(item_name: str, unit: str | None) -> str | None:
@@ -184,6 +221,8 @@ def parse_voice_text(text: str) -> list[ParsedCandidate]:
         if not parsed:
             continue
         match, qty, unit, item_part = parsed
+        needed_quantity = _extract_needed_quantity(phrase, unit)
+        item_part = _remove_needed_quantity_clause(item_part)
         partial_match = PARTIAL_TAIL.search(item_part)
         if partial_match:
             item_name = _clean_item_name(item_part[: partial_match.start()])
@@ -204,6 +243,7 @@ def parse_voice_text(text: str) -> list[ParsedCandidate]:
                 needs_review=partial.needs_review,
                 review_reason=partial.review_reason,
                 status="Needs Review" if partial.needs_review else "Partial Quantity" if partial.partial_detail else "Clean",
+                needed_quantity=needed_quantity,
             )
         )
     candidates.extend(_parse_vague_quantity_phrases(text))

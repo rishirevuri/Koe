@@ -14,6 +14,7 @@ CSV_HEADER = [
     "Raw Item Name",
     "Quantity",
     "Unit",
+    "Needed Quantity",
     "Status",
     "Original Phrase",
     "Counted By",
@@ -50,6 +51,7 @@ def test_report_summary_and_csv() -> None:
         partial_detail="2 full bottles + 1 half bottle",
         needs_review=False,
         counted_by="tester@example.com",
+        needed_quantity="2 bottles",
     )
     count.entries = [entry]
 
@@ -64,7 +66,7 @@ def test_report_summary_and_csv() -> None:
     csv_text = build_csv(count)
     csv_rows = list(csv.reader(io.StringIO(csv_text)))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:11] == [
+    assert csv_rows[1][:12] == [
         "1",
         "1",
         "Dry Storage",
@@ -73,6 +75,7 @@ def test_report_summary_and_csv() -> None:
         "olive oil",
         "2.5",
         "bottles",
+        "2 bottles",
         "Partial Quantity",
         "3 bottles olive oil, one half empty",
         "tester@example.com",
@@ -108,10 +111,11 @@ def test_csv_blanks_unknown_vague_quantity() -> None:
     report = build_report(count)
     assert report["entries"][0]["quantity"] is None
     assert report["entries"][0]["status"] == "Needs Review"
+    assert report["entries"][0]["needed_quantity"] == "TBD"
 
     csv_rows = list(csv.reader(io.StringIO(build_csv(count))))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:11] == [
+    assert csv_rows[1][:12] == [
         "1",
         "1",
         "Storage",
@@ -120,6 +124,7 @@ def test_csv_blanks_unknown_vague_quantity() -> None:
         "takeout containers",
         "",
         "",
+        "TBD",
         "Needs Review",
         "a few takeout containers, not sure how many",
         "tester@example.com",
@@ -161,5 +166,6 @@ def test_report_prefers_saved_count_entry_category() -> None:
     report = build_report(count)
 
     assert report["entries"][0]["category"] == "Dairy & Eggs"
+    assert report["entries"][0]["needed_quantity"] == "TBD"
     assert report["entries"][0]["par_status"] == "sufficient"
     assert report["entries"][0]["estimated_par_quantity"] == 4

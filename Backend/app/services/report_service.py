@@ -43,6 +43,11 @@ def _entry_quantity(entry: CountEntry, status: str) -> float | None:
     return entry.quantity
 
 
+def _entry_needed_quantity(entry: CountEntry) -> str:
+    needed_quantity = str(getattr(entry, "needed_quantity", None) or "").strip()
+    return needed_quantity or "TBD"
+
+
 def _entry_row(entry: CountEntry) -> dict:
     status = _entry_status(entry)
     item_name_clean = entry.item_name or (entry.inventory_item.name if entry.inventory_item else "")
@@ -60,6 +65,7 @@ def _entry_row(entry: CountEntry) -> dict:
         "category": category,
         "quantity": quantity,
         "unit": entry.unit,
+        "needed_quantity": _entry_needed_quantity(entry),
         "status": status,
         "original_phrase": entry.original_phrase or entry.raw_input or entry.item_name_raw or entry.item_name,
         "created_at": entry.created_at,
@@ -106,6 +112,7 @@ def build_csv(count: CountSession) -> str:
             "Raw Item Name",
             "Quantity",
             "Unit",
+            "Needed Quantity",
             "Status",
             "Original Phrase",
             "Counted By",
@@ -123,6 +130,7 @@ def build_csv(count: CountSession) -> str:
                 entry["item_name_raw"] or "",
                 "" if entry["quantity"] is None else entry["quantity"],
                 entry["unit"] or "",
+                entry["needed_quantity"] or "TBD",
                 entry["status"],
                 entry["original_phrase"] or "",
                 entry["counted_by"] or "",
