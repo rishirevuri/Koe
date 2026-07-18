@@ -1225,14 +1225,14 @@ function renderOverviewContent(data) {
 
 function renderPostCountOverview(data, latestCount, rows) {
   return `
+    <section class="dashboard-priority-grid" aria-label="Top inventory overview">
+      ${renderInventoryBreakdown(rows)}
+      ${renderReorderPriorityCard(data, rows)}
+    </section>
     ${renderKpiCards(rows, data)}
     ${renderMobilePastCountsPreview()}
     ${renderMainSummaryGrid(data, latestCount, rows)}
     ${renderEstimatedReorderWatchlist(data, rows)}
-    <section class="dashboard-analytics-grid">
-      ${renderInventoryBreakdown(rows)}
-      ${renderCategoryStatusCard(rows)}
-    </section>
     <section class="dashboard-lower-grid">
       ${renderLatestSnapshot(rows)}
       ${renderDataQualitySummary(rows)}
@@ -1307,11 +1307,11 @@ function renderKpiCards(rows, data = state.data || {}) {
   const quality = getDataQualityScore(rows);
   const parCounts = getParCounts(rows, data);
   const cards = [
-    { icon: "Σ", label: "Total items counted", value: counts.total, text: "Rows saved from latest count" },
-    { icon: "✓", label: "Clean items", value: counts.clean, text: "No cleanup flags" },
-    { icon: "!", label: "Needs review", value: counts.review, text: "Review before export" },
     { icon: "R", label: "Reorder watchlist", value: parCounts.watchlist, text: "Low + critical demo par" },
     { icon: "!", label: "Critical items", value: parCounts.critical, text: "Review before ordering" },
+    { icon: "!", label: "Needs review", value: counts.review, text: "Review before export" },
+    { icon: "Σ", label: "Total items counted", value: counts.total, text: "Rows saved from latest count" },
+    { icon: "✓", label: "Clean items", value: counts.clean, text: "No cleanup flags" },
     { icon: "½", label: "Partial quantities", value: counts.partial, text: "Fractions or partial containers" },
     { icon: "↔", label: "Converted units", value: counts.converted, text: "Package conversions handled" },
     { icon: "%", label: "Data quality score", value: quality.value === null ? "—" : `${quality.value}%`, text: quality.label },
@@ -1528,6 +1528,47 @@ function renderManagerActionsCard(rows) {
   `;
 }
 
+function renderReorderPriorityCard(data, rows) {
+  const parCounts = getParCounts(rows, data);
+  const calculatedWatchlist = parCounts.critical + parCounts.low;
+  const watchlistCount = calculatedWatchlist || parCounts.watchlist;
+  const criticalPercent = calculatedWatchlist ? Math.round((parCounts.critical / calculatedWatchlist) * 100) : 0;
+  const lowPercent = calculatedWatchlist ? Math.max(0, 100 - criticalPercent) : 0;
+  const statusCopy = watchlistCount
+    ? `${watchlistCount} item${watchlistCount === 1 ? "" : "s"} need reorder review`
+    : "No low or critical demo par rows";
+  return `
+    <article class="post-count-card reorder-priority-card">
+      <div class="post-count-card-heading">
+        <span>Demo Estimate</span>
+        <h2>Low and critical items</h2>
+        <p>Estimated par based on common restaurant usage patterns. Review before ordering.</p>
+      </div>
+      <div class="reorder-priority-display ${watchlistCount ? "has-watchlist" : "is-clear"}">
+        <div class="reorder-priority-total">
+          <span>Reorder watchlist</span>
+          <strong>${escapeHtml(watchlistCount)}</strong>
+          <small>${escapeHtml(statusCopy)}</small>
+        </div>
+        <div class="reorder-priority-stat reorder-priority-stat--critical">
+          <span>Critical</span>
+          <strong>${escapeHtml(parCounts.critical)}</strong>
+          <small>Below 50% estimated par</small>
+        </div>
+        <div class="reorder-priority-stat reorder-priority-stat--low">
+          <span>Low</span>
+          <strong>${escapeHtml(parCounts.low)}</strong>
+          <small>Below estimated par</small>
+        </div>
+      </div>
+      <div class="reorder-priority-bar" aria-hidden="true">
+        <i class="reorder-priority-bar-critical" style="width: ${escapeHtml(criticalPercent)}%"></i>
+        <i class="reorder-priority-bar-low" style="width: ${escapeHtml(lowPercent)}%"></i>
+      </div>
+    </article>
+  `;
+}
+
 function renderInventoryBreakdown(rows) {
   const categories = getCategoryCounts(rows);
   const total = rows.length;
@@ -1559,7 +1600,7 @@ function renderDonutChart(categories, total) {
     : `conic-gradient(${CATEGORY_COLORS.Uncategorized} 0 100%)`;
   return `
     <div class="donut-layout">
-      <div class="donut-chart" style="background: ${escapeHtml(gradient)}">
+      <div class="donut-chart" style="--donut-gradient: ${escapeHtml(gradient)}">
         <div><strong>${total || "—"}</strong><span>Total items</span></div>
       </div>
       <div class="donut-legend">
