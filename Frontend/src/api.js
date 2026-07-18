@@ -125,6 +125,12 @@ export async function getCountSessions() {
   return request("/counts");
 }
 
+export async function deleteCountSession(countId) {
+  return request(`/counts/${encodeURIComponent(countId)}`, {
+    method: "DELETE",
+  });
+}
+
 export async function getInventoryItems(restaurantId = null) {
   const suffix = restaurantId ? `?restaurant_id=${encodeURIComponent(restaurantId)}` : "";
   return request(`/inventory/items${suffix}`);

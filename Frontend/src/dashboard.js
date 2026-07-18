@@ -1,5 +1,6 @@
 import {
   createRestaurant,
+  deleteCountSession,
   downloadCsv,
   getAuthMe,
   getCountSessions,
@@ -48,6 +49,10 @@ const state = {
   selectedReport: null,
   reportLoading: false,
   reportError: "",
+  expandedCountMonthKey: "",
+  deleteTargetCountId: null,
+  deleteLoading: false,
+  deleteError: "",
   latestReport: null,
   latestReportLoading: false,
   latestReportError: "",
@@ -92,6 +97,16 @@ function formatCountMonth(value) {
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatCountMonthLong(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
     year: "numeric",
   }).format(date);
 }
@@ -231,6 +246,34 @@ function sortCountSessions(sessions) {
   });
 }
 
+function getCountMonthKey(session) {
+  const value = getCountTimestamp(session);
+  if (!value) return "unscheduled";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unscheduled";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getCountMonthLabel(session) {
+  const value = getCountTimestamp(session);
+  return formatCountMonthLong(value) || "Unscheduled";
+}
+
+function groupCountSessionsByMonth(sessions) {
+  const groups = [];
+  const byKey = new Map();
+  sortCountSessions(sessions).forEach((session) => {
+    const key = getCountMonthKey(session);
+    if (!byKey.has(key)) {
+      const group = { key, label: getCountMonthLabel(session), sessions: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    byKey.get(key).sessions.push(session);
+  });
+  return groups;
+}
+
 function applyCountSessions(sessions, selectCountId = null) {
   state.countSessions = sortCountSessions(sessions);
   const preferredId = selectCountId || state.selectedCountId || state.countSessions[0]?.id || null;
@@ -239,6 +282,29 @@ function applyCountSessions(sessions, selectCountId = null) {
   if (!state.selectedCountId) {
     state.selectedReport = null;
   }
+  if (state.expandedCountMonthKey && !state.countSessions.some((session) => getCountMonthKey(session) === state.expandedCountMonthKey)) {
+    state.expandedCountMonthKey = "";
+  }
+}
+
+function renderTrashIcon() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 4h6"></path>
+      <path d="M4 7h16"></path>
+      <path d="M10 11v6"></path>
+      <path d="M14 11v6"></path>
+      <path d="M6 7l1 14h10l1-14"></path>
+    </svg>
+  `;
+}
+
+function renderChevronIcon() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 9l6 6 6-6"></path>
+    </svg>
+  `;
 }
 
 function setDashboardTab(tab, countId = null) {
@@ -760,6 +826,67 @@ async function exportSelectedCount() {
   }
 }
 
+function getDeleteTargetSession() {
+  return state.countSessions.find((session) => Number(session.id) === Number(state.deleteTargetCountId)) || null;
+}
+
+function openDeleteCountDialog(countId) {
+  state.deleteTargetCountId = Number(countId);
+  state.deleteError = "";
+  renderShell();
+}
+
+function closeDeleteCountDialog() {
+  if (state.deleteLoading) return;
+  state.deleteTargetCountId = null;
+  state.deleteError = "";
+  renderShell();
+}
+
+function toggleCountMonth(monthKey) {
+  state.expandedCountMonthKey = state.expandedCountMonthKey === monthKey ? "" : monthKey;
+  renderShell();
+}
+
+async function confirmDeleteCount() {
+  const targetId = state.deleteTargetCountId;
+  if (!targetId || state.deleteLoading) return;
+  state.deleteLoading = true;
+  state.deleteError = "";
+  renderShell();
+  try {
+    await deleteCountSession(targetId);
+    const remaining = state.countSessions.filter((session) => Number(session.id) !== Number(targetId));
+    const nextSelectedId = Number(state.selectedCountId) === Number(targetId) ? remaining[0]?.id || null : state.selectedCountId;
+    state.deleteTargetCountId = null;
+    state.deleteLoading = false;
+    const [summary, sessions] = await Promise.all([getDashboardSummary(), getCountSessions()]);
+    state.data = summary;
+    state.latestReport = null;
+    state.latestReportError = "";
+    const latestCountId = getLatestCountId(summary);
+    if (latestCountId) {
+      try {
+        state.latestReport = await getReport(latestCountId);
+      } catch (reportError) {
+        state.latestReportError = reportError.message || "Could not load latest count rows.";
+      }
+    }
+    applyCountSessions(sessions, nextSelectedId);
+    if (state.selectedCountId) {
+      await loadSelectedReport(state.selectedCountId, { renderBefore: false });
+    } else {
+      state.selectedReport = null;
+      state.reportError = "";
+      renderShell();
+    }
+  } catch (error) {
+    state.deleteLoading = false;
+    state.deleteError = error.message || "Could not delete this count.";
+    renderShell();
+  }
+}
+
 async function exportLatestCount() {
   const countId = getLatestCountId();
   if (!countId || state.exportLoading) return;
@@ -872,6 +999,7 @@ function renderShell() {
       <main class="app-main dashboard-main">
         ${renderContent()}
       </main>
+      ${renderDeleteCountDialog()}
     </div>
   `;
   bindSidebar({ onLogout: logout });
@@ -909,6 +1037,41 @@ function renderShell() {
   document.querySelector("#mobile-dashboard-counts-refresh")?.addEventListener("click", () => loadPastCounts({ selectCountId: state.selectedCountId }));
   document.querySelector("#past-count-export")?.addEventListener("click", exportSelectedCount);
   document.querySelector("#past-count-refresh")?.addEventListener("click", () => loadPastCounts({ selectCountId: state.selectedCountId }));
+  document.querySelectorAll("[data-count-month-key]").forEach((button) => {
+    button.addEventListener("click", () => toggleCountMonth(button.dataset.countMonthKey));
+  });
+  document.querySelectorAll("[data-delete-count-id]").forEach((button) => {
+    button.addEventListener("click", () => openDeleteCountDialog(button.dataset.deleteCountId));
+  });
+  document.querySelector("#delete-count-cancel")?.addEventListener("click", closeDeleteCountDialog);
+  document.querySelector("#delete-count-confirm")?.addEventListener("click", confirmDeleteCount);
+}
+
+function renderDeleteCountDialog() {
+  const session = getDeleteTargetSession();
+  if (!session) return "";
+  return `
+    <div class="delete-count-backdrop" role="presentation">
+      <section class="delete-count-dialog" role="dialog" aria-modal="true" aria-labelledby="delete-count-title">
+        <div class="delete-count-icon" aria-hidden="true">${renderTrashIcon()}</div>
+        <div>
+          <span>Delete Past Count</span>
+          <h2 id="delete-count-title">Are you sure you want to delete this?</h2>
+          <p>
+            Count #${escapeHtml(session.id)} from ${escapeHtml(formatDateTime(getCountTimestamp(session)))} will be removed from Past Counts.
+            This cannot be undone.
+          </p>
+          ${state.deleteError ? `<p class="delete-count-error">${escapeHtml(state.deleteError)}</p>` : ""}
+        </div>
+        <div class="delete-count-actions">
+          <button class="dashboard-secondary-button" id="delete-count-cancel" type="button" ${state.deleteLoading ? "disabled" : ""}>Cancel</button>
+          <button class="delete-count-confirm-button" id="delete-count-confirm" type="button" ${state.deleteLoading ? "disabled" : ""}>
+            ${state.deleteLoading ? "Deleting..." : "Confirm"}
+          </button>
+        </div>
+      </section>
+    </div>
+  `;
 }
 
 function renderContent() {
@@ -1526,7 +1689,8 @@ function renderBottomActionStrip(rows) {
 function renderPastCounts() {
   const sessions = state.countSessions;
   const selectedSession = sessions.find((session) => Number(session.id) === Number(state.selectedCountId)) || sessions[0] || null;
-  const monthLabel = formatCountMonth(getCountTimestamp(selectedSession) || getCountTimestamp(sessions[0]));
+  const groups = groupCountSessionsByMonth(sessions);
+  const monthLabel = groups[0]?.label || formatCountMonth(getCountTimestamp(selectedSession) || getCountTimestamp(sessions[0]));
 
   if (state.countsLoading && !sessions.length) {
     return `
@@ -1571,8 +1735,8 @@ function renderPastCounts() {
           <span>Count History</span>
           <strong>${escapeHtml(monthLabel || "Recent")}</strong>
         </div>
-        <div class="past-count-list">
-          ${sessions.map((session) => renderPastCountListItem(session)).join("")}
+        <div class="past-count-list past-count-month-list">
+          ${groups.map((group) => renderPastCountMonthGroup(group)).join("")}
         </div>
       </aside>
       <section class="past-counts-detail">
@@ -1582,21 +1746,47 @@ function renderPastCounts() {
   `;
 }
 
+function renderPastCountMonthGroup(group) {
+  const isExpanded = state.expandedCountMonthKey === group.key;
+  const countLabel = `${group.sessions.length} count${group.sessions.length === 1 ? "" : "s"}`;
+  return `
+    <section class="past-count-month-group">
+      <button class="past-count-month-button ${isExpanded ? "is-expanded" : ""}" data-count-month-key="${escapeHtml(group.key)}" type="button" aria-expanded="${isExpanded}">
+        <span>
+          <strong>${escapeHtml(group.label)} Count History</strong>
+          <small>${escapeHtml(countLabel)} • most recent first</small>
+        </span>
+        <i aria-hidden="true">${renderChevronIcon()}</i>
+      </button>
+      <div class="past-count-month-panel ${isExpanded ? "is-expanded" : ""}">
+        <div class="past-count-month-stack">
+          ${group.sessions.map((session) => renderPastCountListItem(session)).join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
 function renderPastCountListItem(session) {
   const isActive = Number(session.id) === Number(state.selectedCountId);
   const entryCount = session.summary?.total_entries ?? null;
   const reviewCount = session.summary?.entries_needing_review ?? null;
   return `
-    <button class="past-count-item ${isActive ? "is-active" : ""}" data-count-id="${session.id}" type="button">
-      <span class="past-count-date">
-        <strong>${escapeHtml(formatCountDay(getCountTimestamp(session)))}</strong>
-        <small>${escapeHtml(formatCountTime(getCountTimestamp(session)))}</small>
-      </span>
-      <span class="past-count-meta">
-        <b>${escapeHtml(session.area || "Not set")}</b>
-        <small>${entryCount === null ? "Open spreadsheet" : `${entryCount} rows${reviewCount ? ` • ${reviewCount} review` : ""}`}</small>
-      </span>
-    </button>
+    <div class="past-count-item-row ${isActive ? "is-active" : ""}">
+      <button class="past-count-item ${isActive ? "is-active" : ""}" data-count-id="${session.id}" type="button">
+        <span class="past-count-date">
+          <strong>${escapeHtml(formatCountDay(getCountTimestamp(session)))}</strong>
+          <small>${escapeHtml(formatCountTime(getCountTimestamp(session)))}</small>
+        </span>
+        <span class="past-count-meta">
+          <b>${escapeHtml(session.area || "Not set")}</b>
+          <small>${entryCount === null ? "Open spreadsheet" : `${entryCount} rows${reviewCount ? ` • ${reviewCount} review` : ""}`}</small>
+        </span>
+      </button>
+      <button class="past-count-delete-button" data-delete-count-id="${escapeHtml(session.id)}" type="button" aria-label="Delete count ${escapeHtml(session.id)}" title="Delete count">
+        ${renderTrashIcon()}
+      </button>
+    </div>
   `;
 }
 
@@ -1612,9 +1802,14 @@ function renderSelectedCountDetail(session) {
         <h2>${escapeHtml(session.area || "Inventory Count")}</h2>
         <p>Saved count #${escapeHtml(session.id)}${session.status ? ` • ${escapeHtml(session.status)}` : ""}</p>
       </div>
-      <button class="report-button report-button--primary" id="past-count-export" type="button" ${state.exportLoading || !entries.length ? "disabled" : ""}>
-        ${state.exportLoading ? "Exporting..." : "Export CSV"}
-      </button>
+      <div class="past-count-detail-actions">
+        <button class="past-count-delete-button past-count-delete-button--detail" data-delete-count-id="${escapeHtml(session.id)}" type="button" aria-label="Delete count ${escapeHtml(session.id)}" title="Delete count">
+          ${renderTrashIcon()}
+        </button>
+        <button class="report-button report-button--primary" id="past-count-export" type="button" ${state.exportLoading || !entries.length ? "disabled" : ""}>
+          ${state.exportLoading ? "Exporting..." : "Export CSV"}
+        </button>
+      </div>
     </div>
     <dl class="past-count-summary">
       <div><dt>Rows</dt><dd>${summary.total_items ?? entries.length}</dd></div>

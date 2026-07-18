@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.auth import (
@@ -12,7 +12,7 @@ from app.auth import (
     get_current_supabase_user,
 )
 from app.database import get_db
-from app.models import CountEntry, CountSession, Restaurant
+from app.models import CountEntry, CountSession, Issue, Restaurant
 from app.schemas import CountEntryCreate, CountEntryRead, CountSessionCreate, CountSessionRead, CountSessionSummary
 from app.services.category_service import normalize_inventory_category
 from app.services.issue_service import create_issue
@@ -77,6 +77,25 @@ def get_count_session(
         raise HTTPException(status_code=404, detail="Count session not found")
     ensure_count_belongs_to_restaurant(count.restaurant_id, current_restaurant)
     return {**CountSessionRead.model_validate(count).model_dump(), "summary": _summary(count)}
+
+
+@router.delete("/{count_id}")
+def delete_count_session(
+    count_id: int,
+    db: Session = Depends(get_db),
+    current_restaurant: Restaurant = Depends(get_current_restaurant),
+) -> dict:
+    count = db.get(CountSession, count_id)
+    if not count:
+        raise HTTPException(status_code=404, detail="Count session not found")
+    ensure_count_belongs_to_restaurant(count.restaurant_id, current_restaurant)
+    entry_ids = [entry.id for entry in count.entries]
+    if entry_ids:
+        db.execute(delete(Issue).where(Issue.count_entry_id.in_(entry_ids)))
+    db.execute(delete(Issue).where(Issue.count_session_id == count.id))
+    db.delete(count)
+    db.commit()
+    return {"status": "deleted", "id": count_id}
 
 
 @router.post("/{count_id}/entries", response_model=CountEntryRead)

@@ -10,7 +10,7 @@ from app import auth as auth_deps
 from app.config import Settings
 from app.database import SessionLocal, engine
 from app.main import app
-from app.models import CountEntry, CountSession, InventoryItem, Restaurant
+from app.models import CountEntry, CountSession, InventoryItem, Issue, Restaurant
 from app.routes import ai, integrations
 from app.routes import auth as auth_routes
 from app.seed import seed
@@ -888,6 +888,59 @@ def test_parse_voice_cannot_append_to_another_users_count_session() -> None:
     )
 
     assert response.status_code == 404
+    app.dependency_overrides[auth_deps.get_current_supabase_user] = override_current_user
+    assert client.get(f"/reports/{count_id}").status_code == 200
+
+
+def test_delete_count_session_removes_saved_report_rows_and_csv() -> None:
+    count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+    parse_response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "some limes in the back, but I do not know the exact count",
+            "area": "Dry Storage",
+            "save": True,
+        },
+    )
+    assert parse_response.status_code == 200
+    assert client.get(f"/reports/{count_id}").status_code == 200
+
+    delete_response = client.delete(f"/counts/{count_id}")
+
+    assert delete_response.status_code == 200
+    assert delete_response.json() == {"status": "deleted", "id": count_id}
+    assert count_id not in {count["id"] for count in client.get("/counts").json()}
+    assert client.get(f"/reports/{count_id}").status_code == 404
+    assert client.get(f"/reports/{count_id}/csv").status_code == 404
+
+    db = SessionLocal()
+    try:
+        assert db.get(CountSession, count_id) is None
+        assert db.query(CountEntry).filter(CountEntry.count_session_id == count_id).count() == 0
+        assert db.query(Issue).filter(Issue.count_session_id == count_id).count() == 0
+    finally:
+        db.close()
+
+
+def test_delete_count_session_is_account_scoped() -> None:
+    count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+    assert client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": "3 bottles of olive oil", "area": "Dry Storage", "save": True},
+    ).status_code == 200
+
+    other_user = auth_deps.SupabaseUser(user_id="other-delete-user", email="other-delete@example.com")
+    db = SessionLocal()
+    try:
+        db.add(Restaurant(name="Other Delete Owner", owner_user_id=other_user.user_id))
+        db.commit()
+    finally:
+        db.close()
+    app.dependency_overrides[auth_deps.get_current_supabase_user] = lambda: other_user
+
+    assert client.delete(f"/counts/{count_id}").status_code == 404
+
     app.dependency_overrides[auth_deps.get_current_supabase_user] = override_current_user
     assert client.get(f"/reports/{count_id}").status_code == 200
 
