@@ -95,11 +95,63 @@ def _issue_type(match: MatchResult, candidate: ParsedCandidate) -> str | None:
     return None
 
 
+def _clean_area(area: str | None) -> str | None:
+    return area.strip() if isinstance(area, str) and area.strip() else None
+
+
+def _is_closed_count_session(count: CountSession) -> bool:
+    return count.completed_at is not None or (count.status or "").lower() in {"completed", "approved"}
+
+
+def _create_count_session(db: Session, restaurant_id: int, area: str | None) -> CountSession:
+    count = CountSession(restaurant_id=restaurant_id, area=area)
+    db.add(count)
+    db.flush()
+    return count
+
+
+def _resolve_count_session(
+    db: Session,
+    *,
+    restaurant_id: int,
+    count_session_id: int | None,
+    area: str | None,
+    save: bool,
+    source: str,
+) -> CountSession:
+    requested_area = _clean_area(area)
+    if count_session_id is None:
+        if not save:
+            raise HTTPException(status_code=400, detail="count_session_id is required when save is false")
+        count = _create_count_session(db, restaurant_id, requested_area)
+        logger.info("%s_parse: created count session count_session_id=%s reason=missing_request_id", source, count.id)
+        return count
+
+    count = db.get(CountSession, count_session_id)
+    if not count or count.restaurant_id != restaurant_id:
+        raise HTTPException(status_code=404, detail="Count session not found for restaurant")
+
+    if save and _is_closed_count_session(count):
+        count = _create_count_session(db, restaurant_id, requested_area or count.area)
+        logger.info(
+            "%s_parse: created count session count_session_id=%s reason=requested_session_closed requested_count_session_id=%s",
+            source,
+            count.id,
+            count_session_id,
+        )
+        return count
+
+    if save and requested_area and count.area != requested_area:
+        count.area = requested_area
+        db.add(count)
+    return count
+
+
 def _handle_candidates(
     db: Session,
     *,
     restaurant_id: int,
-    count_session_id: int,
+    count_session_id: int | None,
     text: str,
     area: str | None,
     source: str,
@@ -108,28 +160,37 @@ def _handle_candidates(
     counted_by: str | None,
     parser_debug: dict | None = None,
 ) -> ParseResponse:
-    count = db.get(CountSession, count_session_id)
-    if not count or count.restaurant_id != restaurant_id:
-        raise HTTPException(status_code=404, detail="Count session not found for restaurant")
-
-    resolved_area = area.strip() if isinstance(area, str) and area.strip() else count.area
-    if save and resolved_area and count.area != resolved_area:
-        count.area = resolved_area
-        db.add(count)
+    count = _resolve_count_session(
+        db,
+        restaurant_id=restaurant_id,
+        count_session_id=count_session_id,
+        area=area,
+        save=save,
+        source=source,
+    )
+    resolved_count_session_id = count.id
+    resolved_area = _clean_area(area) or count.area
 
     parser_source = (parser_debug or {}).get("parser_source")
     parsed: list[ParsedEntry] = []
-    logger.info("%s_parse: candidate handling started count_session_id=%s candidate_count=%s save=%s", source, count_session_id, len(candidates), save)
+    logger.info(
+        "%s_parse: candidate handling started count_session_id=%s requested_count_session_id=%s candidate_count=%s save=%s",
+        source,
+        resolved_count_session_id,
+        count_session_id,
+        len(candidates),
+        save,
+    )
     if save:
         try:
-            logger.info("%s_parse: schema check started count_session_id=%s", source, count_session_id)
+            logger.info("%s_parse: schema check started count_session_id=%s", source, resolved_count_session_id)
             ensure_count_entry_columns()
-            logger.info("%s_parse: schema check finished count_session_id=%s", source, count_session_id)
+            logger.info("%s_parse: schema check finished count_session_id=%s", source, resolved_count_session_id)
         except Exception as error:
             logger.exception(
                 "%s_parse: schema check failed count_session_id=%s error_type=%s",
                 source,
-                count_session_id,
+                resolved_count_session_id,
                 type(error).__name__,
             )
             raise
@@ -153,7 +214,7 @@ def _handle_candidates(
             if save:
                 stage = "row_save"
                 entry = CountEntry(
-                    count_session_id=count_session_id,
+                    count_session_id=resolved_count_session_id,
                     inventory_item_id=match.matched_item_id,
                     item_name_raw=candidate.item_name,
                     item_name=clean_name,
@@ -181,7 +242,7 @@ def _handle_candidates(
                 create_issue(
                     db,
                     restaurant_id=restaurant_id,
-                    count_session_id=count_session_id,
+                    count_session_id=resolved_count_session_id,
                     inventory_item_id=match.matched_item_id,
                     count_entry_id=entry.id if entry else None,
                     issue_type=issue_type,
@@ -209,7 +270,7 @@ def _handle_candidates(
             stage = "response_row"
             parsed.append(
                 ParsedEntry(
-                    count_id=count_session_id,
+                    count_id=resolved_count_session_id,
                     restaurant_id=restaurant_id,
                     quantity=candidate.quantity,
                     unit=candidate.unit,
@@ -228,7 +289,7 @@ def _handle_candidates(
             logger.exception(
                 "%s_parse: row failed count_session_id=%s stage=%s error_type=%s row=%s",
                 source,
-                count_session_id,
+                resolved_count_session_id,
                 stage,
                 type(error).__name__,
                 row_summary,
@@ -240,9 +301,9 @@ def _handle_candidates(
         count.completed_at = count.completed_at or utc_now()
         db.add(count)
         db.commit()
-        logger.info("%s_parse: rows saved count_session_id=%s row_count=%s", source, count_session_id, len(parsed))
-    logger.info("%s_parse: response returned count_session_id=%s row_count=%s", source, count_session_id, len(parsed))
-    return ParseResponse(entries=parsed, saved=save, **(parser_debug or {}))
+        logger.info("%s_parse: rows saved count_session_id=%s row_count=%s", source, resolved_count_session_id, len(parsed))
+    logger.info("%s_parse: response returned count_session_id=%s row_count=%s", source, resolved_count_session_id, len(parsed))
+    return ParseResponse(count_session_id=resolved_count_session_id, entries=parsed, saved=save, **(parser_debug or {}))
 
 
 @router.post("/parse-voice", response_model=ParseResponse)

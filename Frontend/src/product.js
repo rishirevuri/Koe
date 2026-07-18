@@ -59,6 +59,7 @@ const state = {
   selectedArea: "",
   status: "Ready",
   activeCountId: null,
+  activeCountCompleted: false,
   countStartedAt: null,
   transcript: "",
   parsedEntries: [],
@@ -397,6 +398,7 @@ function resetWorkspaceState() {
   state.selectedRestaurantName = "";
   state.selectedRestaurantLocation = "";
   state.activeCountId = null;
+  state.activeCountCompleted = false;
   state.countStartedAt = null;
   state.parsedEntries = [];
   state.parserDebug = null;
@@ -1150,7 +1152,7 @@ async function linkWorkspace(restaurantName) {
 }
 
 async function ensureCountSession() {
-  if (state.activeCountId) return state.activeCountId;
+  if (state.activeCountId && !state.activeCountCompleted) return state.activeCountId;
   if (!state.session || state.view !== "ready") throw new Error("Sign in before starting a count.");
   if (!state.backendConnected) throw new Error("Backend not connected. Start FastAPI on port 8000.");
 
@@ -1163,6 +1165,7 @@ async function ensureCountSession() {
       notes: "Frontend local demo count",
     });
     state.activeCountId = count.id;
+    state.activeCountCompleted = false;
     state.countStartedAt = new Date(count.started_at || Date.now());
     state.status = "In Progress";
     state.parsedEntries = [];
@@ -1179,8 +1182,10 @@ async function ensureCountSession() {
 async function startNewCount() {
   clearMessages();
   state.activeCountId = null;
+  state.activeCountCompleted = false;
   state.countStartedAt = null;
   state.status = "Ready";
+  setTranscriptText("");
   state.parsedEntries = [];
   state.parserDebug = null;
   state.report = null;
@@ -1206,7 +1211,7 @@ async function processCount() {
   }
 
   state.isProcessing = true;
-  state.status = state.activeCountId ? "In Progress" : "Ready";
+  state.status = state.activeCountId && !state.activeCountCompleted ? "In Progress" : "Ready";
   render();
 
   try {
@@ -1217,6 +1222,9 @@ async function processCount() {
       area: state.selectedArea,
       save: true,
     });
+    const savedCountId = result.count_session_id ?? result.entries?.[0]?.count_id ?? countId;
+    state.activeCountId = savedCountId;
+    state.activeCountCompleted = true;
     state.parserDebug = {
       parser_source: result.parser_source || "deterministic_fallback",
       external_ai_enabled: Boolean(result.external_ai_enabled),
@@ -1234,12 +1242,12 @@ async function processCount() {
       item_count: state.parsedEntries.length,
       first_item: state.parsedEntries[0] || null,
       first_2_table_rows: state.parsedEntries.slice(0, 2),
-      count_id: countId,
+      count_id: savedCountId,
       area: state.selectedArea || firstArea || "",
     });
     state.dataHealthItems = buildDataHealth(state.parsedEntries);
     state.report = null;
-    state.status = "In Progress";
+    state.status = "Completed";
     if (state.parsedEntries.length) {
       setNotice(`Processed ${state.parsedEntries.length} inventory item${state.parsedEntries.length === 1 ? "" : "s"}.`);
       loadMobileDashboardSummary();
@@ -1309,6 +1317,7 @@ function handleClearParsedInventory() {
   state.dataHealthItems = [];
   state.report = null;
   state.activeCountId = null;
+  state.activeCountCompleted = false;
   state.countStartedAt = null;
   state.isGeneratingReport = false;
   state.status = "Ready";
@@ -1425,7 +1434,7 @@ function pauseRecording() {
   if (!state.isRecording) return;
   stopRecording({ preserveMode: true });
   state.recordingMode = "paused";
-  state.status = state.activeCountId ? "In Progress" : "Ready";
+  state.status = state.activeCountId && !state.activeCountCompleted ? "In Progress" : "Ready";
   setNotice("Recording paused. Resume when you are ready, or reset the capture.");
   render();
 }
@@ -1478,7 +1487,7 @@ function stopRecording(options = {}) {
   if (!options.preserveMode) {
     state.recordingMode = "idle";
   }
-  state.status = state.activeCountId ? "In Progress" : "Ready";
+  state.status = state.activeCountId && !state.activeCountCompleted ? "In Progress" : "Ready";
 }
 
 function renderMessages() {

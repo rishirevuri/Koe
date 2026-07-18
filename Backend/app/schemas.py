@@ -102,7 +102,7 @@ class CountEntryRead(BaseModel):
 
 class ParseVoiceRequest(BaseModel):
     restaurant_id: int | None = None
-    count_session_id: int
+    count_session_id: int | None = None
     text: str
     area: str | None = None
     save: bool = False
@@ -134,6 +134,7 @@ class ParsedEntry(BaseModel):
 
 
 class ParseResponse(BaseModel):
+    count_session_id: int | None = None
     entries: list[ParsedEntry]
     saved: bool
     parser_source: Literal["claude", "deterministic_fallback"] = "deterministic_fallback"

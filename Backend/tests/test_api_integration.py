@@ -704,6 +704,97 @@ def test_saved_counts_persist_for_same_user_and_are_account_scoped() -> None:
     app.dependency_overrides[auth_deps.get_current_supabase_user] = override_current_user
 
 
+def test_parse_voice_reused_completed_session_id_creates_separate_count() -> None:
+    first_count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+    first_parse = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": first_count_id,
+            "text": "3 bottles of olive oil",
+            "area": "Dry Storage",
+            "save": True,
+        },
+    )
+    assert first_parse.status_code == 200
+    assert first_parse.json()["count_session_id"] == first_count_id
+
+    second_parse = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": first_count_id,
+            "text": "5 heads of lettuce",
+            "area": "Walk-in",
+            "save": True,
+        },
+    )
+
+    assert second_parse.status_code == 200
+    second_count_id = second_parse.json()["count_session_id"]
+    assert second_count_id != first_count_id
+    assert {entry["count_id"] for entry in second_parse.json()["entries"]} == {second_count_id}
+
+    counts_response = client.get("/counts")
+    assert counts_response.status_code == 200
+    count_summaries = {count["id"]: count["summary"]["total_entries"] for count in counts_response.json()}
+    assert count_summaries[first_count_id] == 1
+    assert count_summaries[second_count_id] == 1
+
+    first_report = client.get(f"/reports/{first_count_id}").json()
+    second_report = client.get(f"/reports/{second_count_id}").json()
+    assert [entry["item_name_clean"] for entry in first_report["entries"]] == ["Olive oil"]
+    assert [entry["item_name_clean"] for entry in second_report["entries"]] == ["Lettuce"]
+
+    first_csv = client.get(f"/reports/{first_count_id}/csv").text
+    second_csv = client.get(f"/reports/{second_count_id}/csv").text
+    assert "Olive oil" in first_csv
+    assert "Lettuce" not in first_csv
+    assert "Lettuce" in second_csv
+    assert "Olive oil" not in second_csv
+
+
+def test_parse_voice_without_session_id_creates_saved_count_session() -> None:
+    response = client.post(
+        "/ai/parse-voice",
+        json={"text": "5 heads of lettuce", "area": "Walk-in", "save": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    count_id = payload["count_session_id"]
+    assert isinstance(count_id, int)
+    assert {entry["count_id"] for entry in payload["entries"]} == {count_id}
+
+    report = client.get(f"/reports/{count_id}").json()
+    assert report["count_id"] == count_id
+    assert [entry["item_name_clean"] for entry in report["entries"]] == ["Lettuce"]
+
+
+def test_parse_voice_cannot_append_to_another_users_count_session() -> None:
+    count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+    other_user = auth_deps.SupabaseUser(user_id="other-append-user", email="other-append@example.com")
+    db = SessionLocal()
+    try:
+        db.add(Restaurant(name="Other Append Owner", owner_user_id=other_user.user_id))
+        db.commit()
+    finally:
+        db.close()
+    app.dependency_overrides[auth_deps.get_current_supabase_user] = lambda: other_user
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "5 heads of lettuce",
+            "area": "Walk-in",
+            "save": True,
+        },
+    )
+
+    assert response.status_code == 404
+    app.dependency_overrides[auth_deps.get_current_supabase_user] = override_current_user
+    assert client.get(f"/reports/{count_id}").status_code == 200
+
+
 def test_ownership_checks_prevent_other_restaurant_count_and_report() -> None:
     db = SessionLocal()
     try:
