@@ -56,9 +56,25 @@ def _has_anthropic_key(settings) -> bool:
     return bool(value and str(value).strip() and not str(value).strip().startswith("your_"))
 
 
-def _parser_debug(settings, parser_source: str) -> dict:
+def _safe_error_message(error: Exception, limit: int = 180) -> str:
+    message = " ".join(str(error).split())
+    return message[:limit]
+
+
+def _claude_skip_reason(settings, provider: str, anthropic_key_present: bool) -> str | None:
+    if not getattr(settings, "enable_external_ai", False):
+        return "external_ai_disabled"
+    if (provider or "claude").lower() != "claude":
+        return "text_ai_provider_not_claude"
+    if not anthropic_key_present:
+        return "anthropic_api_key_missing"
+    return None
+
+
+def _parser_debug(settings, parser_source: str, fallback_reason: str | None = None) -> dict:
     return {
         "parser_source": parser_source,
+        "fallback_reason": fallback_reason or "",
         "external_ai_enabled": bool(getattr(settings, "enable_external_ai", False)),
         "text_ai_provider": getattr(settings, "text_ai_provider", None) or "",
         "anthropic_model": getattr(settings, "anthropic_model", None) or "",
@@ -327,6 +343,7 @@ def parse_voice(
         model = getattr(settings, "anthropic_model", "") or ""
         anthropic_key_present = _has_anthropic_key(settings)
         parser_source = "deterministic_fallback"
+        fallback_reason = _claude_skip_reason(settings, provider, anthropic_key_present)
 
         logger.info(
             "parse_voice: external_ai_enabled=%s provider=%s anthropic_key_present=%s model=%s",
@@ -339,23 +356,35 @@ def parse_voice(
         logger.info("parse_voice: deterministic parse started")
         candidates = parse_voice_text(payload.text)
         logger.info("parse_voice: deterministic parse finished candidate_count=%s", len(candidates))
-        if settings.enable_external_ai and settings.is_claude_configured and (settings.text_ai_provider or "claude").lower() == "claude":
+        if fallback_reason:
+            logger.warning(
+                "parse_voice: Claude parse skipped; using deterministic_fallback; fallback_reason=%s model=%s",
+                fallback_reason,
+                model,
+            )
+        else:
             try:
                 logger.info("parse_voice: Claude parse started")
                 claude_candidates = parse_inventory_with_claude(payload.text)
                 candidates = claude_candidates
                 parser_source = "claude"
+                fallback_reason = None
                 logger.info("parse_voice: Claude parse finished candidate_count=%s", len(candidates))
             except Exception as error:
+                fallback_reason = f"claude_error:{type(error).__name__}"
+                safe_message = _safe_error_message(error)
+                if safe_message:
+                    fallback_reason = f"{fallback_reason}:{safe_message}"
                 logger.warning(
-                    "parse_voice: Claude parse failed; using deterministic_fallback; error_type=%s; model=%s",
+                    "parse_voice: Claude parse failed; using deterministic_fallback; error_type=%s error_message=%s model=%s",
                     type(error).__name__,
+                    safe_message,
                     model,
                 )
                 logger.info("parse_voice: deterministic fallback parse started")
                 candidates = parse_voice_text(payload.text)
                 logger.info("parse_voice: deterministic fallback parse finished candidate_count=%s", len(candidates))
-        logger.info("parse_voice: using parser_source=%s", parser_source)
+        logger.info("parse_voice: using parser_source=%s fallback_reason=%s", parser_source, fallback_reason or "")
 
         return _handle_candidates(
             db,
@@ -367,7 +396,7 @@ def parse_voice(
             save=payload.save,
             candidates=candidates,
             counted_by=current_user.email or current_user.user_id,
-            parser_debug=_parser_debug(settings, parser_source),
+            parser_debug=_parser_debug(settings, parser_source, fallback_reason),
         )
     except HTTPException:
         raise

@@ -237,6 +237,7 @@ def test_voice_parse_save_report_and_csv() -> None:
     assert {entry["area"] for entry in entries} == {"Dry Storage"}
     payload = parse_response.json()
     assert payload["parser_source"] == "deterministic_fallback"
+    assert payload["fallback_reason"] == "external_ai_disabled"
     assert payload["external_ai_enabled"] is False
     assert payload["text_ai_provider"] == "claude"
     assert payload["anthropic_model"] == "claude-test-model"
@@ -541,6 +542,7 @@ def test_voice_parse_mocked_claude_success_returns_claude_source(monkeypatch) ->
     assert response.status_code == 200
     payload = response.json()
     assert payload["parser_source"] == "claude"
+    assert payload["fallback_reason"] == ""
     assert payload["external_ai_enabled"] is True
     assert payload["text_ai_provider"] == "claude"
     assert payload["anthropic_model"] == "claude-test-model"
@@ -569,6 +571,7 @@ def test_voice_parse_mocked_claude_failure_returns_fallback_source(monkeypatch) 
     assert response.status_code == 200
     payload = response.json()
     assert payload["parser_source"] == "deterministic_fallback"
+    assert payload["fallback_reason"].startswith("claude_error:TimeoutError:mock Claude timeout")
     assert payload["external_ai_enabled"] is True
     assert payload["text_ai_provider"] == "claude"
     assert payload["anthropic_model"] == "claude-test-model"
@@ -576,6 +579,100 @@ def test_voice_parse_mocked_claude_failure_returns_fallback_source(monkeypatch) 
     assert [(entry["item_name_clean"], entry["quantity"], entry["unit"]) for entry in payload["entries"]] == [
         ("Olive oil", 3.0, "bottles")
     ]
+
+
+def test_voice_parse_mocked_claude_complex_transcript_returns_clean_global_rows(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+    transcript = (
+        "I am counting the walk-in inventory now. We have 18 regular tomatoes, but 5 of those tomatoes are spoiled "
+        "and should not be counted as usable. There are also 14 Roma tomatoes, and 3 of those are bruised but still "
+        "usable, so keep the full Roma tomato count. I see 6 heads of lettuce, but one head is brown and should be "
+        "thrown out. There are 4 boxes of cucumbers and 2 bunches of cilantro. We also have 1 case of 24 lemons, "
+        "but 8 lemons are soft and unusable. There are some limes in the back, but I do not know the exact count. "
+        "For dairy, we have 8 gallons of whole milk, 2 gallons of 2 percent milk, and 1 half gallon of heavy cream. "
+        "There are 10 dozen eggs, but 7 eggs are cracked, so do not include those. For proteins, we have 3 ten-pound "
+        "boxes of chicken breast, 12 pounds of ground beef, and 2 boxes of bacon. One bacon box is already open but "
+        "still full, so count both boxes. In dry storage, there are 5 bags of flour, 2 bags of rice at 25 pounds each, "
+        "3 jars of marinara sauce, and 10 cans of tomato sauce. We have 4 bags of burger buns, each bag has 12 buns, "
+        "but one bag is stale and should not be counted. Behind the bar, there are 2 cases of 24 water bottles, "
+        "18 cans of Coke, and 3 bottles of olive oil. One olive oil bottle is half empty. There are 2 gallons of "
+        "canola oil. In the freezer, there are 3 boxes of frozen fries, but one box is half empty. There are 4 tubs "
+        "of ice cream, but one tub is only a quarter full. We also have 2 boxes of mozzarella sticks. For supplies, "
+        "I see 1 case of napkins, half a box of straws, and 3 rolls of receipt paper."
+    )
+
+    expected_rows = [
+        ("Tomatoes", 13, "individual", "Clean", "Produce"),
+        ("Roma tomatoes", 14, "individual", "Clean", "Produce"),
+        ("Lettuce", 5, "heads", "Clean", "Produce"),
+        ("Cucumbers", 4, "boxes", "Clean", "Produce"),
+        ("Cilantro", 2, "bunches", "Clean", "Produce"),
+        ("Lemons", 16, "individual", "Converted Unit", "Produce"),
+        ("Limes", None, None, "Needs Review", "Produce"),
+        ("Whole milk", 8, "gallons", "Clean", "Dairy & Eggs"),
+        ("2 percent milk", 2, "gallons", "Clean", "Dairy & Eggs"),
+        ("Heavy cream", 0.5, "gallons", "Converted Unit", "Dairy & Eggs"),
+        ("Eggs", 113, "eggs", "Converted Unit", "Dairy & Eggs"),
+        ("Chicken breast", 30, "pounds", "Converted Unit", "Proteins"),
+        ("Ground beef", 12, "pounds", "Clean", "Proteins"),
+        ("Bacon", 2, "boxes", "Clean", "Proteins"),
+        ("Flour", 5, "bags", "Clean", "Dry Goods"),
+        ("Rice", 50, "pounds", "Converted Unit", "Dry Goods"),
+        ("Marinara sauce", 3, "jars", "Clean", "Sauces & Condiments"),
+        ("Tomato sauce", 10, "cans", "Clean", "Sauces & Condiments"),
+        ("Burger buns", 36, "buns", "Converted Unit", "Bakery"),
+        ("Water bottles", 48, "bottles", "Converted Unit", "Beverages"),
+        ("Coke", 18, "cans", "Clean", "Beverages"),
+        ("Olive oil", 2.5, "bottles", "Partial Quantity", "Oils & Liquids"),
+        ("Canola oil", 2, "gallons", "Clean", "Oils & Liquids"),
+        ("Frozen fries", 2.5, "boxes", "Partial Quantity", "Frozen"),
+        ("Ice cream", 3.25, "tubs", "Partial Quantity", "Frozen"),
+        ("Mozzarella sticks", 2, "boxes", "Clean", "Frozen"),
+        ("Napkins", 1, "cases", "Clean", "Supplies"),
+        ("Straws", 0.5, "boxes", "Partial Quantity", "Supplies"),
+        ("Receipt paper", 3, "rolls", "Clean", "Supplies"),
+    ]
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        assert text == transcript
+        return [
+            ParsedCandidate(
+                raw_phrase=name,
+                quantity=quantity,
+                unit=unit,
+                item_name=name,
+                partial_detail=name if status == "Partial Quantity" else None,
+                needs_review=status == "Needs Review",
+                review_reason=name if status == "Needs Review" else None,
+                status=status,
+                category=category,
+            )
+            for name, quantity, unit, status, category in expected_rows
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": transcript, "area": "Walk-in", "save": True},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parser_source"] == "claude"
+    assert payload["fallback_reason"] == ""
+    actual_rows = [
+        (entry["item_name_clean"], entry["quantity"], entry["unit"], entry["status"], entry["category"])
+        for entry in payload["entries"]
+    ]
+    assert actual_rows == [
+        (name, None if quantity is None else float(quantity), unit, status, category)
+        for name, quantity, unit, status, category in expected_rows
+    ]
+    bad_fragments = {"regular tomatoes, but", "of those tomatoes are spoiled and should not be counted", "lemons but", "dozen eggs, but"}
+    assert not any(entry["item_name_clean"].lower() in bad_fragments for entry in payload["entries"])
 
 
 def test_parse_voice_area_updates_entries_report_and_csv_when_count_started_without_area() -> None:

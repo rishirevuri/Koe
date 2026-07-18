@@ -526,6 +526,15 @@ function formatParserSource() {
 function renderParserDebugLine() {
   const parser = formatParserSource();
   if (!parser) return "";
+  if (state.parserDebug?.parser_source === "deterministic_fallback") {
+    const reason = state.parserDebug?.fallback_reason ? ` Reason: ${state.parserDebug.fallback_reason}` : "";
+    return `
+      <div class="parser-debug-line parser-debug-line--warning">
+        Parser: <strong>${escapeHtml(parser)}</strong>
+        <span>Fallback parser used - Claude unavailable. Review rows carefully.${escapeHtml(reason)}</span>
+      </div>
+    `;
+  }
   return `<div class="parser-debug-line">Parser: <strong>${escapeHtml(parser)}</strong></div>`;
 }
 
@@ -1227,6 +1236,7 @@ async function processCount() {
     state.activeCountCompleted = true;
     state.parserDebug = {
       parser_source: result.parser_source || "deterministic_fallback",
+      fallback_reason: result.fallback_reason || "",
       external_ai_enabled: Boolean(result.external_ai_enabled),
       text_ai_provider: result.text_ai_provider || "",
       anthropic_model: result.anthropic_model || "",

@@ -138,6 +138,7 @@ class ParseResponse(BaseModel):
     entries: list[ParsedEntry]
     saved: bool
     parser_source: Literal["claude", "deterministic_fallback"] = "deterministic_fallback"
+    fallback_reason: str = ""
     external_ai_enabled: bool = False
     text_ai_provider: str = ""
     anthropic_model: str = ""

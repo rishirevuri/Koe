@@ -2034,6 +2034,18 @@ button:disabled,
   font-weight: 650;
 }
 
+.parser-debug-line--warning {
+  max-width: 100%;
+  color: rgba(102, 66, 12, 0.86);
+  background: rgba(255, 244, 214, 0.88);
+  border-color: rgba(196, 135, 36, 0.28);
+  border-radius: 8px;
+}
+
+.parser-debug-line--warning span {
+  margin-left: 6px;
+}
+
 .food-icon {
   display: inline-flex;
   width: 30px;
