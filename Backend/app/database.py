@@ -1,5 +1,8 @@
 from collections.abc import Generator
+import logging
+import os
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.engine import make_url
@@ -8,9 +11,72 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from app.config import get_settings
 
 
+logger = logging.getLogger("app.database")
+
+
+def _log_database_configuration(raw_url: str, effective_url: str) -> None:
+    """Print, at startup (before any DB connection is opened), exactly which
+    database config the app resolved. This is diagnostic-only: it NEVER prints
+    the password, just whether one is present and its length. Safe to keep on.
+    """
+    env_value = os.getenv("DATABASE_URL")
+    default_value = type(settings).model_fields["database_url"].default
+    if env_value is not None:
+        source = "DATABASE_URL os-environment variable (e.g. Render dashboard)"
+    elif settings.database_url != default_value:
+        source = "DATABASE_URL from a .env file (NOT an os-environment variable)"
+    else:
+        source = "hardcoded Field default in config.py (no DATABASE_URL set anywhere)"
+
+    try:
+        parsed = urlsplit(effective_url)
+        username = parsed.username
+        host = parsed.hostname
+        try:
+            port = parsed.port
+        except ValueError:
+            port = "<unparseable>"
+        database = parsed.path.lstrip("/") or None
+        password = parsed.password
+    except Exception as exc:  # pragma: no cover - defensive: never block startup on logging
+        logger.warning("koe.db-config could not parse database URL: %s", exc)
+        return
+
+    raw_scheme = urlsplit(raw_url).scheme
+    effective_scheme = parsed.scheme
+
+    # PG* libpq environment variables are read by psycopg/libpq at connect time.
+    # Explicit URL parameters override them, but surfacing their presence rules
+    # out interference from a stray PGUSER/PGPASSWORD in the deploy environment.
+    pg_env_present = {
+        name: (name in os.environ) for name in ("PGUSER", "PGPASSWORD", "PGHOST", "PGPORT", "PGDATABASE", "PGSSLMODE")
+    }
+
+    lines = [
+        "koe.db-config ==================================================",
+        f"koe.db-config source            : {source}",
+        f"koe.db-config raw scheme        : {raw_scheme}",
+        f"koe.db-config effective driver  : {effective_scheme}",
+        f"koe.db-config username          : {username!r}",
+        f"koe.db-config host              : {host!r}",
+        f"koe.db-config port              : {port!r}",
+        f"koe.db-config database          : {database!r}",
+        f"koe.db-config password_present  : {bool(password)}",
+        f"koe.db-config password_length   : {len(password) if password else 0}",
+        f"koe.db-config PG* env present    : {pg_env_present}",
+        "koe.db-config ==================================================",
+    ]
+    message = "\n".join(lines)
+    # Use print(flush=True) as well as logging: this runs at import time, before
+    # uvicorn configures logging, so print guarantees the diagnostics reach Render logs.
+    print(message, flush=True)
+    logger.info("Resolved database configuration:\n%s", message)
+
+
 settings = get_settings()
 settings.validate_persistent_database()
 database_url = settings.sqlalchemy_database_url
+_log_database_configuration(settings.database_url, database_url)
 
 
 def _ensure_sqlite_parent_dir(url: str) -> None:
