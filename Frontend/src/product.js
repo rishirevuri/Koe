@@ -1574,7 +1574,7 @@ function renderInventoryTable() {
           <th>Name</th>
           <th>Quantity</th>
           <th>Unit</th>
-          <th>Needed Quantity</th>
+          <th>Quantity to Purchase</th>
           <th>Area</th>
           <th>Status</th>
         </tr>
@@ -1644,7 +1644,7 @@ function renderMobileInventoryCards() {
             <p>${escapeHtml(entry.quantity)} ${escapeHtml(entry.unit || "unit")}</p>
           </div>
           <span class="status-pill ${status.className}">${escapeHtml(status.label)}</span>
-          <small>Needed Quantity: ${escapeHtml(getEntryNeededQuantity(entry))}</small>
+          <small>Quantity to Purchase: ${escapeHtml(getEntryNeededQuantity(entry))}</small>
           ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
           <button class="mobile-card-edit" type="button" aria-label="Edit ${escapeHtml(cleanName)}">Edit</button>
         </article>
@@ -1694,7 +1694,7 @@ function renderReportPreview() {
             <th>Name</th>
             <th>Quantity</th>
             <th>Unit</th>
-            <th>Needed Quantity</th>
+            <th>Quantity to Purchase</th>
             <th>Area</th>
             <th>Status</th>
           </tr>
@@ -2011,7 +2011,7 @@ function renderMobileReportItem(entry) {
       <span class="mobile-row-icon">${ProductIcon("store")}</span>
       <strong>${escapeHtml(entry.name)}</strong>
       <p>${escapeHtml(entry.quantity)}</p>
-      <small>Needed Quantity: ${escapeHtml(entry.neededQuantity)}</small>
+      <small>Quantity to Purchase: ${escapeHtml(entry.neededQuantity)}</small>
       <em>${ProductIcon("check")} ${escapeHtml(entry.status)}</em>
     </article>
   `;

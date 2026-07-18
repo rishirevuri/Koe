@@ -1970,7 +1970,7 @@ function renderPastCountSpreadsheet(entries) {
             <th>Category</th>
             <th>Qty</th>
             <th>Unit</th>
-            <th>Needed Quantity</th>
+            <th>Quantity to Purchase</th>
             <th>Status</th>
             <th>Original phrase</th>
             <th>Counted by</th>

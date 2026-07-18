@@ -14,7 +14,7 @@ CSV_HEADER = [
     "Raw Item Name",
     "Quantity",
     "Unit",
-    "Needed Quantity",
+    "Quantity to Purchase",
     "Status",
     "Original Phrase",
     "Counted By",

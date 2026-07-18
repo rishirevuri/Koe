@@ -29,7 +29,7 @@ CSV_HEADER = [
     "Raw Item Name",
     "Quantity",
     "Unit",
-    "Needed Quantity",
+    "Quantity to Purchase",
     "Status",
     "Original Phrase",
     "Counted By",
@@ -316,7 +316,7 @@ def test_voice_parse_needed_quantity_saves_report_and_csv() -> None:
     assert list(csv_rows[0].keys()) == CSV_HEADER
     assert csv_rows[0]["Quantity"] == "2.0"
     assert csv_rows[0]["Unit"] == "boxes"
-    assert csv_rows[0]["Needed Quantity"] == "6 boxes"
+    assert csv_rows[0]["Quantity to Purchase"] == "6 boxes"
 
 
 def test_voice_parse_repairs_legacy_count_entry_category_column() -> None:
@@ -437,7 +437,7 @@ def test_voice_parse_saves_claude_category(monkeypatch) -> None:
     csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
     assert csv_rows[0]["Quantity"] == "16.0"
     assert csv_rows[0]["Unit"] == "individual"
-    assert csv_rows[0]["Needed Quantity"] == "6 boxes"
+    assert csv_rows[0]["Quantity to Purchase"] == "6 boxes"
 
 
 def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
