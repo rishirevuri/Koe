@@ -3254,7 +3254,7 @@ button:disabled,
 .sidebar-restaurant {
   overflow: hidden;
   font-family: var(--script);
-  font-size: 1.5rem;
+  font-size: 1.68rem;
   font-weight: 500;
   line-height: 1.15;
   color: var(--ink);
@@ -4357,8 +4357,8 @@ button:disabled,
 .dashboard-header--post-count span {
   margin-bottom: 7px;
   color: #b8873b;
-  font-size: 12px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 700;
   letter-spacing: 0.045em;
 }
 
@@ -4920,7 +4920,7 @@ button:disabled,
 .past-counts-calendar-header {
   display: grid;
   gap: 5px;
-  padding: 20px 20px 16px;
+  padding: 0;
   background:
     linear-gradient(180deg, rgba(248, 229, 190, 0.28), transparent),
     rgba(255, 250, 242, 0.74);
@@ -4944,6 +4944,84 @@ button:disabled,
   line-height: 1;
 }
 
+.past-count-year-button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 34px;
+  gap: 8px 12px;
+  width: 100%;
+  padding: 20px 20px 16px;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+
+.past-count-year-button span,
+.past-count-year-button strong {
+  grid-column: 1;
+}
+
+.past-count-year-button i {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: center;
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  color: var(--product-accent);
+  background: rgba(170, 132, 80, 0.1);
+  border-radius: 999px;
+  transition: transform 220ms ease;
+}
+
+.past-count-year-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2;
+}
+
+.past-count-year-button.is-expanded i {
+  transform: rotate(180deg);
+}
+
+.past-count-year-panel {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 280ms ease,
+    opacity 180ms ease;
+}
+
+.past-count-year-panel.is-expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.past-count-year-panel .past-count-list {
+  min-height: 0;
+  max-height: 0;
+  overflow: hidden;
+  padding-block: 0;
+  transition:
+    max-height 300ms ease,
+    padding-block 220ms ease;
+}
+
+.past-count-year-panel.is-expanded .past-count-list {
+  max-height: 560px;
+  overflow: auto;
+  padding-block: 12px;
+}
+
 .past-count-list {
   display: grid;
   gap: 8px;
@@ -4959,6 +5037,12 @@ button:disabled,
 .past-count-month-group {
   display: grid;
   gap: 0;
+  transform-origin: top;
+}
+
+.past-count-year-panel.is-expanded .past-count-month-group {
+  animation: past-count-month-drop 320ms ease both;
+  animation-delay: calc(var(--month-index, 0) * 70ms);
 }
 
 .past-count-month-button {
@@ -5068,6 +5152,18 @@ button:disabled,
 .past-count-month-panel.is-expanded .past-count-month-stack {
   padding-top: 8px;
   transform: translateY(0) rotateX(0);
+}
+
+@keyframes past-count-month-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) rotateX(-10deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) rotateX(0);
+  }
 }
 
 .past-count-item-row {
@@ -5744,7 +5840,15 @@ button:disabled,
   }
 
   .past-counts-calendar-header {
+    padding: 0;
+  }
+
+  .past-count-year-button {
     padding: 16px;
+  }
+
+  .past-count-year-panel.is-expanded .past-count-list {
+    padding-block: 10px;
   }
 
   .past-count-list {

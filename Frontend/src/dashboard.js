@@ -49,6 +49,7 @@ const state = {
   selectedReport: null,
   reportLoading: false,
   reportError: "",
+  expandedCountYearKey: "",
   expandedCountMonthKey: "",
   deleteTargetCountId: null,
   deleteLoading: false,
@@ -107,6 +108,24 @@ function formatCountMonthLong(value) {
   if (Number.isNaN(date.getTime())) return "";
   return new Intl.DateTimeFormat(undefined, {
     month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+function formatCountMonthName(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
+    month: "long",
+  }).format(date);
+}
+
+function formatCountYear(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return new Intl.DateTimeFormat(undefined, {
     year: "numeric",
   }).format(date);
 }
@@ -256,22 +275,45 @@ function getCountMonthKey(session) {
 
 function getCountMonthLabel(session) {
   const value = getCountTimestamp(session);
-  return formatCountMonthLong(value) || "Unscheduled";
+  return formatCountMonthName(value) || "Unscheduled";
 }
 
-function groupCountSessionsByMonth(sessions) {
-  const groups = [];
-  const byKey = new Map();
+function getCountYearKey(session) {
+  const value = getCountTimestamp(session);
+  if (!value) return "unscheduled";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "unscheduled";
+  return String(date.getFullYear());
+}
+
+function getCountYearLabel(session) {
+  const value = getCountTimestamp(session);
+  return formatCountYear(value) || "Unscheduled";
+}
+
+function groupCountSessionsByYear(sessions) {
+  const yearGroups = [];
+  const byYearKey = new Map();
   sortCountSessions(sessions).forEach((session) => {
-    const key = getCountMonthKey(session);
-    if (!byKey.has(key)) {
-      const group = { key, label: getCountMonthLabel(session), sessions: [] };
-      byKey.set(key, group);
-      groups.push(group);
+    const yearKey = getCountYearKey(session);
+    const monthKey = getCountMonthKey(session);
+    if (!byYearKey.has(yearKey)) {
+      const yearGroup = { key: yearKey, label: getCountYearLabel(session), months: [], monthMap: new Map() };
+      byYearKey.set(yearKey, yearGroup);
+      yearGroups.push(yearGroup);
     }
-    byKey.get(key).sessions.push(session);
+    const yearGroup = byYearKey.get(yearKey);
+    if (!yearGroup.monthMap.has(monthKey)) {
+      const monthGroup = { key: monthKey, label: getCountMonthLabel(session), sessions: [] };
+      yearGroup.monthMap.set(monthKey, monthGroup);
+      yearGroup.months.push(monthGroup);
+    }
+    yearGroup.monthMap.get(monthKey).sessions.push(session);
   });
-  return groups;
+  return yearGroups.map((group) => {
+    const { monthMap, ...publicGroup } = group;
+    return publicGroup;
+  });
 }
 
 function applyCountSessions(sessions, selectCountId = null) {
@@ -284,6 +326,9 @@ function applyCountSessions(sessions, selectCountId = null) {
   }
   if (state.expandedCountMonthKey && !state.countSessions.some((session) => getCountMonthKey(session) === state.expandedCountMonthKey)) {
     state.expandedCountMonthKey = "";
+  }
+  if (state.expandedCountYearKey && !state.countSessions.some((session) => getCountYearKey(session) === state.expandedCountYearKey)) {
+    state.expandedCountYearKey = "";
   }
 }
 
@@ -848,6 +893,11 @@ function toggleCountMonth(monthKey) {
   renderShell();
 }
 
+function toggleCountYear(yearKey) {
+  state.expandedCountYearKey = state.expandedCountYearKey === yearKey ? "" : yearKey;
+  renderShell();
+}
+
 async function confirmDeleteCount() {
   const targetId = state.deleteTargetCountId;
   if (!targetId || state.deleteLoading) return;
@@ -1040,6 +1090,9 @@ function renderShell() {
   document.querySelectorAll("[data-count-month-key]").forEach((button) => {
     button.addEventListener("click", () => toggleCountMonth(button.dataset.countMonthKey));
   });
+  document.querySelectorAll("[data-count-year-key]").forEach((button) => {
+    button.addEventListener("click", () => toggleCountYear(button.dataset.countYearKey));
+  });
   document.querySelectorAll("[data-delete-count-id]").forEach((button) => {
     button.addEventListener("click", () => openDeleteCountDialog(button.dataset.deleteCountId));
   });
@@ -1108,7 +1161,7 @@ function renderPostCountHeader(data) {
     <header class="dashboard-header dashboard-header--post-count">
       <div>
         <span>${escapeHtml(state.restaurantName)}</span>
-        <h1>Post-count overview</h1>
+        <h1>Dashboard</h1>
         <p>Insights and data quality from your latest inventory count.</p>
       </div>
       <div class="dashboard-header-actions">
@@ -1689,8 +1742,7 @@ function renderBottomActionStrip(rows) {
 function renderPastCounts() {
   const sessions = state.countSessions;
   const selectedSession = sessions.find((session) => Number(session.id) === Number(state.selectedCountId)) || sessions[0] || null;
-  const groups = groupCountSessionsByMonth(sessions);
-  const monthLabel = groups[0]?.label || formatCountMonth(getCountTimestamp(selectedSession) || getCountTimestamp(sessions[0]));
+  const yearGroups = groupCountSessionsByYear(sessions);
 
   if (state.countsLoading && !sessions.length) {
     return `
@@ -1731,13 +1783,7 @@ function renderPastCounts() {
   return `
     <section class="past-counts-shell">
       <aside class="past-counts-calendar" aria-label="Past count dates">
-        <div class="past-counts-calendar-header">
-          <span>Count History</span>
-          <strong>${escapeHtml(monthLabel || "Recent")}</strong>
-        </div>
-        <div class="past-count-list past-count-month-list">
-          ${groups.map((group) => renderPastCountMonthGroup(group)).join("")}
-        </div>
+        ${yearGroups.map((group) => renderPastCountYearGroup(group)).join("")}
       </aside>
       <section class="past-counts-detail">
         ${renderSelectedCountDetail(selectedSession)}
@@ -1746,14 +1792,34 @@ function renderPastCounts() {
   `;
 }
 
-function renderPastCountMonthGroup(group) {
+function renderPastCountYearGroup(group) {
+  const isExpanded = state.expandedCountYearKey === group.key;
+  return `
+    <section class="past-count-year-group">
+      <div class="past-counts-calendar-header">
+        <button class="past-count-year-button ${isExpanded ? "is-expanded" : ""}" data-count-year-key="${escapeHtml(group.key)}" type="button" aria-expanded="${isExpanded}">
+          <span>Count History</span>
+          <strong>${escapeHtml(group.label || "Recent")}</strong>
+          <i aria-hidden="true">${renderChevronIcon()}</i>
+        </button>
+      </div>
+      <div class="past-count-year-panel ${isExpanded ? "is-expanded" : ""}">
+        <div class="past-count-list past-count-month-list">
+          ${group.months.map((monthGroup, index) => renderPastCountMonthGroup(monthGroup, index)).join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderPastCountMonthGroup(group, index = 0) {
   const isExpanded = state.expandedCountMonthKey === group.key;
   const countLabel = `${group.sessions.length} count${group.sessions.length === 1 ? "" : "s"}`;
   return `
-    <section class="past-count-month-group">
+    <section class="past-count-month-group" style="--month-index: ${index}">
       <button class="past-count-month-button ${isExpanded ? "is-expanded" : ""}" data-count-month-key="${escapeHtml(group.key)}" type="button" aria-expanded="${isExpanded}">
         <span>
-          <strong>${escapeHtml(group.label)} Count History</strong>
+          <strong>${escapeHtml(group.label)}</strong>
           <small>${escapeHtml(countLabel)} • most recent first</small>
         </span>
         <i aria-hidden="true">${renderChevronIcon()}</i>
