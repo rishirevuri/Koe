@@ -694,9 +694,9 @@ h1 em {
   color: var(--landing-ink);
   font-family: var(--landing-sans);
   font-size: clamp(3rem, 5.6vw, 6.5rem);
-  font-weight: 760;
-  line-height: 0.92;
-  letter-spacing: -0.02em;
+  font-weight: 640;
+  line-height: 0.96;
+  letter-spacing: -0.035em;
 }
 
 .koe-short-line {
@@ -789,9 +789,9 @@ h1 em {
   color: var(--landing-ink);
   font-family: var(--landing-sans);
   font-size: 2.05rem;
-  font-weight: 780;
-  line-height: 1;
-  letter-spacing: -0.02em;
+  font-weight: 650;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
 }
 
 .koe-flow-visual {
@@ -829,11 +829,14 @@ h1 em {
 
 .koe-flow-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "item status"
+    "current purchase";
+  gap: 6px 14px;
   align-items: center;
-  min-height: 54px;
-  padding: 0 14px;
+  min-height: 70px;
+  padding: 10px 14px;
   opacity: 0;
   color: #111111;
   background: #ffffff;
@@ -859,11 +862,25 @@ h1 em {
 }
 
 .koe-flow-row span {
+  grid-area: item;
   min-width: 0;
   overflow: hidden;
-  font-weight: 800;
+  font-size: 15px;
+  font-weight: 760;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.koe-flow-row b {
+  grid-area: current;
+}
+
+.koe-flow-row em {
+  grid-area: purchase;
+}
+
+.koe-flow-row i {
+  grid-area: status;
 }
 
 .koe-flow-row b,
@@ -882,7 +899,11 @@ h1 em {
 
 .koe-flow-row i {
   color: #194c34;
+  justify-self: end;
+  padding: 5px 9px;
   font-weight: 900;
+  background: #e9f4ed;
+  border-radius: 999px;
 }
 
 .koe-flow-report {
@@ -894,9 +915,9 @@ h1 em {
 .koe-flow-report strong {
   font-family: var(--landing-sans);
   font-size: 2rem;
-  font-weight: 780;
-  letter-spacing: -0.02em;
-  line-height: 1;
+  font-weight: 660;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
 }
 
 .koe-flow-report small {
@@ -1021,9 +1042,8 @@ h1 em {
 }
 
 .koe-report-topline {
-  display: flex;
+  display: grid;
   align-items: flex-start;
-  justify-content: space-between;
   gap: 20px;
   margin-bottom: 22px;
 }
@@ -1043,9 +1063,9 @@ h1 em {
   color: #111111;
   font-family: var(--landing-sans);
   font-size: clamp(2rem, 3vw, 3rem);
-  font-weight: 780;
-  line-height: 1;
-  letter-spacing: -0.02em;
+  font-weight: 660;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
 }
 
 .koe-report-topline em {
@@ -1152,7 +1172,7 @@ h1 em {
 .koe-accent-title {
   color: var(--landing-accent);
   font-size: 1.04em;
-  font-weight: 840;
+  font-weight: 760;
 }
 
 .koe-feature-card p {
@@ -1345,28 +1365,29 @@ h1 em {
 
 .koe-mini-forecast-flow {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr)) auto minmax(0, 1.3fr);
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
   align-items: center;
 }
 
 .koe-mini-forecast-node {
   display: grid;
-  min-height: 48px;
-  place-items: center;
+  min-height: 38px;
+  align-items: center;
+  padding: 0 12px;
   color: #4d3526;
   font-size: 11px;
   font-weight: 900;
-  text-align: center;
   background: #fff0e6;
   border: 1px solid rgba(200, 107, 50, 0.18);
-  border-radius: 14px;
+  border-radius: 999px;
 }
 
 .koe-mini-forecast-arrow {
   color: var(--landing-accent);
-  font-size: 1.4rem;
+  font-size: 1.2rem;
   font-weight: 900;
+  transform: rotate(90deg);
 }
 
 .koe-mini-forecast-list {
@@ -1375,10 +1396,10 @@ h1 em {
 }
 
 .koe-mini-forecast-list span {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  min-height: 32px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  min-height: 38px;
   align-items: center;
   padding: 0 10px;
   color: #111111;
@@ -1389,8 +1410,17 @@ h1 em {
   border-radius: 12px;
 }
 
+.koe-mini-forecast-list em {
+  min-width: 0;
+  overflow: hidden;
+  font-style: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .koe-mini-forecast-list b {
   color: var(--landing-accent);
+  white-space: nowrap;
 }
 
 .koe-forecast-section {
@@ -1421,7 +1451,7 @@ h1 em {
 
 .koe-forecast-visual {
   display: grid;
-  grid-template-columns: minmax(0, 0.88fr) 72px minmax(0, 1.12fr);
+  grid-template-columns: minmax(0, 0.86fr) 64px minmax(0, 1.14fr);
   gap: 0;
   align-items: center;
 }
@@ -1458,8 +1488,8 @@ h1 em {
 .koe-forecast-input-card b {
   color: #111111;
   font-size: 1.05rem;
-  font-weight: 850;
-  letter-spacing: -0.02em;
+  font-weight: 680;
+  letter-spacing: -0.025em;
 }
 
 .koe-forecast-connector {
@@ -1485,16 +1515,16 @@ h1 em {
 
 .koe-forecast-plan {
   display: grid;
-  gap: 18px;
+  gap: 16px;
   padding: 24px;
 }
 
 .koe-forecast-plan strong {
   color: #111111;
   font-size: clamp(1.75rem, 2.5vw, 2.4rem);
-  font-weight: 820;
-  line-height: 1;
-  letter-spacing: -0.02em;
+  font-weight: 680;
+  line-height: 1.02;
+  letter-spacing: -0.03em;
 }
 
 .koe-forecast-plan div {
@@ -1503,24 +1533,44 @@ h1 em {
 }
 
 .koe-forecast-plan p {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   min-height: 46px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   margin: 0;
   padding: 0 14px;
   color: #111111;
-  font-weight: 850;
+  font-weight: 720;
   background: #faf7f1;
   border: 1px solid rgba(17, 17, 17, 0.08);
   border-radius: 14px;
+}
+
+.koe-forecast-plan p span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .koe-forecast-plan b {
   color: var(--landing-accent);
   font-size: 13px;
   white-space: nowrap;
+}
+
+.koe-forecast-plan i {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 8px;
+  color: #194c34;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  background: #e9f4ed;
+  border-radius: 999px;
 }
 
 .koe-steps-section {
@@ -1547,7 +1597,7 @@ h1 em {
   color: rgba(200, 107, 50, 0.1);
   font-family: var(--landing-sans);
   font-size: 10rem;
-  font-weight: 800;
+  font-weight: 720;
   line-height: 0.8;
   letter-spacing: -0.05em;
 }
@@ -1561,7 +1611,7 @@ h1 em {
   align-items: center;
   justify-content: center;
   color: #ffffff;
-  font-weight: 900;
+  font-weight: 820;
   background: var(--landing-accent);
   border-radius: 14px;
 }
@@ -1838,6 +1888,11 @@ h1 em {
 
   .koe-flow-row {
     grid-template-columns: 1fr;
+    grid-template-areas:
+      "item"
+      "current"
+      "purchase"
+      "status";
     gap: 4px;
     height: auto;
     padding: 12px;
@@ -1846,9 +1901,15 @@ h1 em {
   .koe-flow-report-list span,
   .koe-forecast-plan p {
     align-items: flex-start;
-    flex-direction: column;
-    justify-content: center;
     padding: 10px 12px;
+  }
+
+  .koe-forecast-plan p {
+    grid-template-columns: 1fr;
+  }
+
+  .koe-forecast-plan i {
+    width: fit-content;
   }
 
   .koe-report-mockup {

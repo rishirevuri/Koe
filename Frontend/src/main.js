@@ -161,7 +161,7 @@ function ProductFlowSection() {
             <div class="koe-flow-visual koe-flow-table" aria-hidden="true">
               <div class="koe-flow-row koe-row-delay-1"><span>Tomatoes</span><b>2 boxes</b><em>Buy 6 boxes</em><i>Clean</i></div>
               <div class="koe-flow-row koe-row-delay-2"><span>Olive Oil</span><b>3 bottles</b><em>Buy 2 bottles</em><i>Clean</i></div>
-              <div class="koe-flow-row koe-row-delay-3"><span>Limes</span><b>18 count</b><em>Buy 24 count</em><i>Review</i></div>
+              <div class="koe-flow-row koe-row-delay-3"><span>Limes</span><b>18 count</b><em>Buy 24 count</em><i>Clean</i></div>
             </div>
             <span>Koe structures it</span>
             <h3>Clean Report</h3>
@@ -191,7 +191,7 @@ function DarkProductPanel() {
   const rows = [
     ["Tomatoes", "2 boxes", "6 boxes", "Clean", "clean"],
     ["Olive Oil", "3 bottles", "2 bottles", "Clean", "clean"],
-    ["Limes", "18 count", "24 count", "Review", "review"],
+    ["Limes", "18 count", "24 count", "Clean", "clean"],
     ["Napkins", "1 case", "2 cases", "Clean", "clean"],
   ];
   return `
@@ -208,7 +208,6 @@ function DarkProductPanel() {
               <span>Closing Count Report</span>
               <strong>Walk-in inventory</strong>
             </div>
-            <em>Claude parsed</em>
           </div>
           <div class="koe-report-table" aria-hidden="true">
             <div class="koe-report-row koe-report-row--head">
@@ -251,7 +250,7 @@ function FeatureGridSection() {
       text: "Snap inventory areas and review detected items.",
       visual: `
         <div class="koe-mini-photo-frame">
-          <span class="koe-photo-badge">Review before saving</span>
+          <span class="koe-photo-badge">Clean row preview</span>
           <div class="koe-photo-tags">
             <b>Olive Oil - 3 bottles</b>
             <b>Lettuce - 5 heads</b>
@@ -277,8 +276,8 @@ function FeatureGridSection() {
           <div class="koe-mini-forecast-node">Stock</div>
           <div class="koe-mini-forecast-arrow">→</div>
           <div class="koe-mini-forecast-list">
-            <span>Tomatoes <b>6 boxes</b></span>
-            <span>Milk <b>4 gallons</b></span>
+            <span><em>Tomatoes</em><b>6 boxes</b></span>
+            <span><em>Milk</em><b>4 gallons</b></span>
           </div>
         </div>
       `,
@@ -304,7 +303,7 @@ function FeatureGridSection() {
       <div class="koe-section-inner">
         <div class="koe-section-heading koe-reveal">
           <p class="koe-eyebrow">WHAT KOE KEEPS CLEAN</p>
-          <h2 class="koe-serif-heading" id="feature-grid-title">Built for the handoff.</h2>
+          <h2 class="koe-serif-heading" id="feature-grid-title">Efficient workflow.</h2>
         </div>
         <div class="koe-feature-grid">
           ${cards
@@ -366,7 +365,7 @@ function ForecastSection() {
               ${purchaseRows
                 .map(
                   ([item, quantity]) => `
-                    <p><span>${item}</span><b>${quantity}</b></p>
+                    <p><span>${item}</span><b>${quantity}</b><i>Clean</i></p>
                   `,
                 )
                 .join("")}
