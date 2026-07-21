@@ -111,7 +111,7 @@ def test_csv_blanks_unknown_vague_quantity() -> None:
     report = build_report(count)
     assert report["entries"][0]["quantity"] is None
     assert report["entries"][0]["status"] == "Needs Review"
-    assert report["entries"][0]["needed_quantity"] == "TBD"
+    assert report["entries"][0]["needed_quantity"] == ""
 
     csv_rows = list(csv.reader(io.StringIO(build_csv(count))))
     assert csv_rows[0] == CSV_HEADER
@@ -124,7 +124,7 @@ def test_csv_blanks_unknown_vague_quantity() -> None:
         "takeout containers",
         "",
         "",
-        "TBD",
+        "",
         "Needs Review",
         "a few takeout containers, not sure how many",
         "tester@example.com",
@@ -160,7 +160,7 @@ def test_csv_exports_qualitative_container_quantity_label() -> None:
     assert report["entries"][0]["quantity"] == "Decently filled"
     assert report["entries"][0]["quantity_label"] == "Decently filled"
     assert report["entries"][0]["unit"] == "bucket"
-    assert report["entries"][0]["needed_quantity"] == "TBD"
+    assert report["entries"][0]["needed_quantity"] == ""
 
     csv_rows = list(csv.reader(io.StringIO(build_csv(count))))
     assert csv_rows[0] == CSV_HEADER
@@ -173,7 +173,7 @@ def test_csv_exports_qualitative_container_quantity_label() -> None:
         "peanut butter",
         "Decently filled",
         "bucket",
-        "TBD",
+        "",
         "Needs Review",
         "a bucket of peanut butter and it's pretty full",
         "tester@example.com",
@@ -215,6 +215,6 @@ def test_report_prefers_saved_count_entry_category() -> None:
     report = build_report(count)
 
     assert report["entries"][0]["category"] == "Dairy & Eggs"
-    assert report["entries"][0]["needed_quantity"] == "TBD"
+    assert report["entries"][0]["needed_quantity"] == ""
     assert report["entries"][0]["par_status"] == "sufficient"
     assert report["entries"][0]["estimated_par_quantity"] == 4

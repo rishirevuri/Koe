@@ -52,7 +52,9 @@ def _entry_display_quantity(entry: CountEntry, status: str) -> float | str | Non
 
 def _entry_needed_quantity(entry: CountEntry) -> str:
     needed_quantity = str(getattr(entry, "needed_quantity", None) or "").strip()
-    return needed_quantity or "TBD"
+    if not needed_quantity or needed_quantity.lower() == "tbd":
+        return ""
+    return needed_quantity
 
 
 def _entry_row(entry: CountEntry) -> dict:
@@ -139,7 +141,7 @@ def build_csv(count: CountSession) -> str:
                 entry["item_name_raw"] or "",
                 "" if entry["quantity"] is None else entry["quantity"],
                 entry["unit"] or "",
-                entry["needed_quantity"] or "TBD",
+                entry["needed_quantity"] or "",
                 entry["status"],
                 entry["original_phrase"] or "",
                 entry["counted_by"] or "",

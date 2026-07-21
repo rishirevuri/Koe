@@ -392,7 +392,7 @@ function formatQty(value) {
 
 function formatNeededQuantity(value) {
   const neededQuantity = String(value ?? "").trim();
-  return neededQuantity || "TBD";
+  return !neededQuantity || neededQuantity.toLowerCase() === "tbd" ? "—" : neededQuantity;
 }
 
 function getLatestCount(data = state.data) {

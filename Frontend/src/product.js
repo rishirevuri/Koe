@@ -475,7 +475,8 @@ function isInvalidFallbackEntry(entry) {
 function normalizeParsedEntry(entry, fallbackArea = "") {
   const itemNameClean = normalizeItemName(entry.item_name_clean || entry.item_name || entry.name);
   const itemNameRaw = normalizeItemName(entry.item_name_raw || entry.raw_phrase || itemNameClean);
-  const neededQuantity = String(entry.needed_quantity ?? "").trim() || "TBD";
+  const rawNeededQuantity = String(entry.needed_quantity ?? "").trim();
+  const neededQuantity = rawNeededQuantity.toLowerCase() === "tbd" ? "" : rawNeededQuantity;
   return {
     ...entry,
     count_id: entry.count_id ?? state.activeCountId ?? null,
@@ -515,7 +516,7 @@ function getEntryOriginalPhrase(entry) {
 
 function getEntryNeededQuantity(entry) {
   const neededQuantity = String(entry?.needed_quantity ?? "").trim();
-  return neededQuantity || "TBD";
+  return !neededQuantity || neededQuantity.toLowerCase() === "tbd" ? "—" : neededQuantity;
 }
 
 function entryNeedsReview(entry) {

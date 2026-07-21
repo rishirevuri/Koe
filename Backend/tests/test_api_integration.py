@@ -276,14 +276,14 @@ def test_voice_parse_save_report_and_csv() -> None:
         "olive oil",
         "2.5",
         "bottles",
-        "TBD",
+        "",
         "Partial Quantity",
         "3 bottles of olive oil, one of which is half empty",
         TEST_USER.email,
     ]
-    assert ["Lettuce", "lettuce", "3.0", "heads", "TBD", "Clean"] in [row[4:10] for row in csv_rows[1:]]
-    assert ["Tomatoes", "tomatoes", "5.0", "boxes", "TBD", "Clean"] in [row[4:10] for row in csv_rows[1:]]
-    assert ["Cheese", "cheese", "2.0", "boxes", "TBD", "Clean"] in [row[4:10] for row in csv_rows[1:]]
+    assert ["Lettuce", "lettuce", "3.0", "heads", "", "Clean"] in [row[4:10] for row in csv_rows[1:]]
+    assert ["Tomatoes", "tomatoes", "5.0", "boxes", "", "Clean"] in [row[4:10] for row in csv_rows[1:]]
+    assert ["Cheese", "cheese", "2.0", "boxes", "", "Clean"] in [row[4:10] for row in csv_rows[1:]]
     assert "Needs Review" not in csv_text
     assert "Manager Note" not in csv_text
 
@@ -412,7 +412,7 @@ def test_voice_parse_repairs_legacy_count_entry_needed_quantity_column() -> None
 
     assert response.status_code == 200
     assert "needed_quantity" in count_entry_columns()
-    assert response.json()["entries"][0]["needed_quantity"] == "TBD"
+    assert response.json()["entries"][0]["needed_quantity"] == ""
 
 
 def test_voice_parse_repairs_legacy_count_entry_quantity_label_column() -> None:
@@ -563,7 +563,7 @@ def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
         "Takeout containers",
         "",
         "",
-        "TBD",
+        "",
         "Needs Review",
         "a few takeout containers, but I do not know the exact count",
         TEST_USER.email,

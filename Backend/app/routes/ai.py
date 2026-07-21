@@ -52,6 +52,11 @@ def _candidate_display_quantity(candidate: ParsedCandidate) -> float | str | Non
     return candidate.quantity_label or candidate.quantity
 
 
+def _display_needed_quantity(value: str | None) -> str:
+    normalized = str(value or "").strip()
+    return "" if normalized.lower() == "tbd" else normalized
+
+
 def _has_anthropic_key(settings) -> bool:
     checker = getattr(settings, "_has_real_value", None)
     if callable(checker):
@@ -297,7 +302,7 @@ def _handle_candidates(
                     quantity=_candidate_display_quantity(candidate),
                     quantity_label=candidate.quantity_label,
                     unit=candidate.unit,
-                    needed_quantity=candidate.needed_quantity or "TBD",
+                    needed_quantity=_display_needed_quantity(candidate.needed_quantity),
                     area=resolved_area,
                     item_name_raw=candidate.item_name,
                     item_name_clean=clean_name,
