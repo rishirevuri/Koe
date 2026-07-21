@@ -363,6 +363,7 @@ function ProductIcon(name) {
     sparkle: `<svg viewBox="0 0 24 24"><path d="M12 3l2.2 6.8L21 12l-6.8 2.2L12 21l-2.2-6.8L3 12l6.8-2.2z"></path></svg>`,
     chart: `<svg viewBox="0 0 24 24"><path d="M5 19V9"></path><path d="M12 19V5"></path><path d="M19 19v-7"></path></svg>`,
     flag: `<svg viewBox="0 0 24 24"><path d="M6 21V4"></path><path d="M6 5h11l-2 4 2 4H6"></path></svg>`,
+    cart: `<svg viewBox="0 0 24 24"><circle cx="9" cy="20" r="1.7"></circle><circle cx="18" cy="20" r="1.7"></circle><path d="M3 4h2l2.4 11.5a2 2 0 0 0 2 1.5h8.8a2 2 0 0 0 1.9-1.4L22 8H7"></path></svg>`,
     check: `<svg viewBox="0 0 24 24"><path d="M5 12l4 4 10-10"></path></svg>`,
     chevron: `<svg viewBox="0 0 24 24"><path d="M9 5l6 7-6 7"></path></svg>`,
     plusCircle: `<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8v8M8 12h8"></path></svg>`,
@@ -514,9 +515,63 @@ function getEntryOriginalPhrase(entry) {
   return entry.original_phrase || getEntryRawName(entry);
 }
 
-function getEntryNeededQuantity(entry) {
-  const neededQuantity = String(entry?.needed_quantity ?? "").trim();
-  return !neededQuantity || neededQuantity.toLowerCase() === "tbd" ? "—" : neededQuantity;
+function hasPurchaseQuantity(value) {
+  const neededQuantity = String(value ?? "").trim();
+  return Boolean(neededQuantity && neededQuantity.toLowerCase() !== "tbd" && neededQuantity !== "—");
+}
+
+function getReportPurchaseItems(reportOrEntries) {
+  const directItems = Array.isArray(reportOrEntries?.purchase_items) ? reportOrEntries.purchase_items : [];
+  if (directItems.length) {
+    return directItems
+      .map((item) => ({
+        name: normalizeItemName(item.item_name || item.name),
+        quantity: String(item.quantity_to_purchase || item.needed_quantity || "").trim(),
+      }))
+      .filter((item) => item.name && hasPurchaseQuantity(item.quantity));
+  }
+
+  const entries = Array.isArray(reportOrEntries) ? reportOrEntries : reportOrEntries?.entries || [];
+  return entries
+    .map((entry) => ({
+      name: getEntryCleanName(entry) || getEntryRawName(entry),
+      quantity: String(entry?.needed_quantity ?? "").trim(),
+    }))
+    .filter((item) => item.name && hasPurchaseQuantity(item.quantity));
+}
+
+function renderQuantityToPurchaseSection(reportOrEntries, options = {}) {
+  const purchaseItems = getReportPurchaseItems(reportOrEntries);
+  const className = ["quantity-purchase-card", options.mobile ? "quantity-purchase-card--mobile" : ""]
+    .filter(Boolean)
+    .join(" ");
+  return `
+    <section class="${className}" aria-label="Quantity to Purchase">
+      <div class="quantity-purchase-heading">
+        <span>${ProductIcon("cart")}</span>
+        <div>
+          <h3>Quantity to Purchase</h3>
+          <p>Explicit order or restock amounts mentioned during the count.</p>
+        </div>
+      </div>
+      ${
+        purchaseItems.length
+          ? `<div class="quantity-purchase-list">
+              ${purchaseItems
+                .map(
+                  (item) => `
+                    <div class="quantity-purchase-row">
+                      <span>${escapeHtml(item.name)}</span>
+                      <strong>${escapeHtml(item.quantity)}</strong>
+                    </div>
+                  `,
+                )
+                .join("")}
+            </div>`
+          : `<div class="quantity-purchase-empty">No purchase quantities mentioned.</div>`
+      }
+    </section>
+  `;
 }
 
 function entryNeedsReview(entry) {
@@ -1547,13 +1602,12 @@ function renderInventoryTable() {
           <td>${escapeHtml(cleanName)}</td>
           <td>${escapeHtml(entry.quantity)}</td>
           <td>${escapeHtml(entry.unit)}</td>
-          <td>${escapeHtml(getEntryNeededQuantity(entry))}</td>
           <td>${escapeHtml(area)}</td>
           <td><span class="status-pill ${status.className}">${escapeHtml(status.label)}</span></td>
         </tr>
         ${
           detail
-            ? `<tr class="detail-row"><td></td><td colspan="6">${escapeHtml(detail)}</td></tr>`
+            ? `<tr class="detail-row"><td></td><td colspan="5">${escapeHtml(detail)}</td></tr>`
             : ""
         }
       `;
@@ -1561,7 +1615,7 @@ function renderInventoryTable() {
         .join("");
 
       return `
-        <tr class="category-row"><td colspan="7">${escapeHtml(group.category)}</td></tr>
+        <tr class="category-row"><td colspan="6">${escapeHtml(group.category)}</td></tr>
         ${itemRows}
       `;
     })
@@ -1575,7 +1629,6 @@ function renderInventoryTable() {
           <th>Name</th>
           <th>Quantity</th>
           <th>Unit</th>
-          <th>Quantity to Purchase</th>
           <th>Area</th>
           <th>Status</th>
         </tr>
@@ -1645,7 +1698,6 @@ function renderMobileInventoryCards() {
             <p>${escapeHtml(entry.quantity)} ${escapeHtml(entry.unit || "unit")}</p>
           </div>
           <span class="status-pill ${status.className}">${escapeHtml(status.label)}</span>
-          <small>Quantity to Purchase: ${escapeHtml(getEntryNeededQuantity(entry))}</small>
           ${detail ? `<small>${escapeHtml(detail)}</small>` : ""}
           <button class="mobile-card-edit" type="button" aria-label="Edit ${escapeHtml(cleanName)}">Edit</button>
         </article>
@@ -1689,13 +1741,13 @@ function renderReportPreview() {
           <span>${state.report.summary?.items_needing_review ?? 0} review</span>
         </div>
       </div>
+      ${renderQuantityToPurchaseSection(state.report)}
       <table class="product-table report-table">
         <thead>
           <tr>
             <th>Name</th>
             <th>Quantity</th>
             <th>Unit</th>
-            <th>Quantity to Purchase</th>
             <th>Area</th>
             <th>Status</th>
           </tr>
@@ -1708,7 +1760,6 @@ function renderReportPreview() {
                   <td>${escapeHtml(getEntryCleanName(entry))}</td>
                   <td>${escapeHtml(entry.quantity)}</td>
                   <td>${escapeHtml(entry.unit)}</td>
-                  <td>${escapeHtml(getEntryNeededQuantity(entry))}</td>
                   <td>${escapeHtml(entry.area || "—")}</td>
                   <td>${escapeHtml(getEntryStatus(entry).label)}</td>
                 </tr>
@@ -1908,7 +1959,6 @@ function getMobileReportEntries() {
     return {
       name: getEntryCleanName(entry),
       quantity: `${entry.quantity ?? ""} ${entry.unit || ""}`.trim() || "Quantity not set",
-      neededQuantity: getEntryNeededQuantity(entry),
       status: status.label === "Clean" ? "Confirmed" : status.label,
     };
   });
@@ -1988,6 +2038,11 @@ function renderMobileReportsScreen() {
           <div><strong>${ProductIcon("check")}</strong><span>CSV ready</span></div>
         </div>
       </section>
+      ${
+        !state.mobileSelectedReport || state.mobileReportLoading || state.mobileReportError
+          ? ""
+          : renderQuantityToPurchaseSection(state.mobileSelectedReport, { mobile: true })
+      }
       <section class="mobile-report-items" aria-label="Inventory report rows">
         ${
           state.mobileReportLoading
@@ -2012,7 +2067,6 @@ function renderMobileReportItem(entry) {
       <span class="mobile-row-icon">${ProductIcon("store")}</span>
       <strong>${escapeHtml(entry.name)}</strong>
       <p>${escapeHtml(entry.quantity)}</p>
-      <small>Quantity to Purchase: ${escapeHtml(entry.neededQuantity)}</small>
       <em>${ProductIcon("check")} ${escapeHtml(entry.status)}</em>
     </article>
   `;

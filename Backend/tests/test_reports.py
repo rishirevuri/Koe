@@ -14,7 +14,6 @@ CSV_HEADER = [
     "Raw Item Name",
     "Quantity",
     "Unit",
-    "Quantity to Purchase",
     "Status",
     "Original Phrase",
     "Counted By",
@@ -63,10 +62,11 @@ def test_report_summary_and_csv() -> None:
     assert report["entries"][0]["estimated_par_quantity"] == 3
     assert report["entries"][0]["par_unit"] == "bottles"
     assert report["entries"][0]["is_demo_estimate"] is True
+    assert report["purchase_items"] == [{"item_name": "Olive oil", "quantity_to_purchase": "2 bottles"}]
     csv_text = build_csv(count)
     csv_rows = list(csv.reader(io.StringIO(csv_text)))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:12] == [
+    assert csv_rows[1][:11] == [
         "1",
         "1",
         "Dry Storage",
@@ -75,11 +75,12 @@ def test_report_summary_and_csv() -> None:
         "olive oil",
         "2.5",
         "bottles",
-        "2 bottles",
         "Partial Quantity",
         "3 bottles olive oil, one half empty",
         "tester@example.com",
     ]
+    assert "Quantity to Purchase" not in csv_text
+    assert "2 bottles" not in csv_text
     assert "par_status" not in csv_text
     assert "Needs Review" not in csv_text
     assert "Manager Note" not in csv_text
@@ -112,17 +113,17 @@ def test_csv_blanks_unknown_vague_quantity() -> None:
     assert report["entries"][0]["quantity"] is None
     assert report["entries"][0]["status"] == "Needs Review"
     assert report["entries"][0]["needed_quantity"] == ""
+    assert report["purchase_items"] == []
 
     csv_rows = list(csv.reader(io.StringIO(build_csv(count))))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:12] == [
+    assert csv_rows[1][:11] == [
         "1",
         "1",
         "Storage",
         "Supplies",
         "Takeout containers",
         "takeout containers",
-        "",
         "",
         "",
         "Needs Review",
@@ -161,10 +162,11 @@ def test_csv_exports_qualitative_container_quantity_label() -> None:
     assert report["entries"][0]["quantity_label"] == "Decently filled"
     assert report["entries"][0]["unit"] == "bucket"
     assert report["entries"][0]["needed_quantity"] == ""
+    assert report["purchase_items"] == []
 
     csv_rows = list(csv.reader(io.StringIO(build_csv(count))))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:12] == [
+    assert csv_rows[1][:11] == [
         "1",
         "1",
         "Dry Storage",
@@ -173,7 +175,6 @@ def test_csv_exports_qualitative_container_quantity_label() -> None:
         "peanut butter",
         "Decently filled",
         "bucket",
-        "",
         "Needs Review",
         "a bucket of peanut butter and it's pretty full",
         "tester@example.com",
@@ -216,5 +217,6 @@ def test_report_prefers_saved_count_entry_category() -> None:
 
     assert report["entries"][0]["category"] == "Dairy & Eggs"
     assert report["entries"][0]["needed_quantity"] == ""
+    assert report["purchase_items"] == []
     assert report["entries"][0]["par_status"] == "sufficient"
     assert report["entries"][0]["estimated_par_quantity"] == 4

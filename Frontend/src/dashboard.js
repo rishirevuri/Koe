@@ -352,6 +352,16 @@ function renderChevronIcon() {
   `;
 }
 
+function renderCartIcon() {
+  return `
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="9" cy="20" r="1.7"></circle>
+      <circle cx="18" cy="20" r="1.7"></circle>
+      <path d="M3 4h2l2.4 11.5a2 2 0 0 0 2 1.5h8.8a2 2 0 0 0 1.9-1.4L22 8H7"></path>
+    </svg>
+  `;
+}
+
 function setDashboardTab(tab, countId = null) {
   state.activeTab = tab;
   if (countId) {
@@ -390,9 +400,28 @@ function formatQty(value) {
   return Number.isInteger(value) ? String(value) : String(value);
 }
 
-function formatNeededQuantity(value) {
+function hasPurchaseQuantity(value) {
   const neededQuantity = String(value ?? "").trim();
-  return !neededQuantity || neededQuantity.toLowerCase() === "tbd" ? "—" : neededQuantity;
+  return Boolean(neededQuantity && neededQuantity.toLowerCase() !== "tbd" && neededQuantity !== "—");
+}
+
+function getReportPurchaseItems(report) {
+  const directItems = Array.isArray(report?.purchase_items) ? report.purchase_items : [];
+  if (directItems.length) {
+    return directItems
+      .map((item) => ({
+        name: String(item.item_name || item.name || "").trim(),
+        quantity: String(item.quantity_to_purchase || item.needed_quantity || "").trim(),
+      }))
+      .filter((item) => item.name && hasPurchaseQuantity(item.quantity));
+  }
+
+  return (report?.entries || [])
+    .map((entry) => ({
+      name: String(entry.item_name_clean || entry.item_name_raw || "").trim(),
+      quantity: String(entry.needed_quantity || "").trim(),
+    }))
+    .filter((item) => item.name && hasPurchaseQuantity(item.quantity));
 }
 
 function getLatestCount(data = state.data) {
@@ -1929,7 +1958,40 @@ function renderSelectedCountDetail(session) {
       <div><dt>Area</dt><dd>${escapeHtml(session.area || "Not set")}</dd></div>
       <div><dt>Completed</dt><dd>${escapeHtml(formatCountTime(getCountTimestamp(session)))}</dd></div>
     </dl>
+    ${renderQuantityToPurchaseSection(report)}
     ${renderPastCountSpreadsheet(entries)}
+  `;
+}
+
+function renderQuantityToPurchaseSection(report) {
+  if (!report || state.reportLoading || state.reportError) return "";
+  const purchaseItems = getReportPurchaseItems(report);
+  return `
+    <section class="quantity-purchase-card quantity-purchase-card--past" aria-label="Quantity to Purchase">
+      <div class="quantity-purchase-heading">
+        <span>${renderCartIcon()}</span>
+        <div>
+          <h3>Quantity to Purchase</h3>
+          <p>Explicit order or restock amounts mentioned during this count.</p>
+        </div>
+      </div>
+      ${
+        purchaseItems.length
+          ? `<div class="quantity-purchase-list">
+              ${purchaseItems
+                .map(
+                  (item) => `
+                    <div class="quantity-purchase-row">
+                      <span>${escapeHtml(item.name)}</span>
+                      <strong>${escapeHtml(item.quantity)}</strong>
+                    </div>
+                  `,
+                )
+                .join("")}
+            </div>`
+          : `<div class="quantity-purchase-empty">No purchase quantities mentioned.</div>`
+      }
+    </section>
   `;
 }
 
@@ -1970,7 +2032,6 @@ function renderPastCountSpreadsheet(entries) {
             <th>Category</th>
             <th>Qty</th>
             <th>Unit</th>
-            <th>Quantity to Purchase</th>
             <th>Status</th>
             <th>Original phrase</th>
             <th>Counted by</th>
@@ -1988,7 +2049,6 @@ function renderPastCountSpreadsheet(entries) {
                   <td>${escapeHtml(getCategory(entry))}</td>
                   <td>${escapeHtml(formatQty(entry.quantity ?? ""))}</td>
                   <td>${escapeHtml(entry.unit || "")}</td>
-                  <td>${escapeHtml(formatNeededQuantity(entry.needed_quantity))}</td>
                   <td><span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status || "Clean")}</span></td>
                   <td>${escapeHtml(entry.original_phrase || "")}</td>
                   <td>${escapeHtml(entry.counted_by || "—")}</td>

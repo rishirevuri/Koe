@@ -52,9 +52,27 @@ def _entry_display_quantity(entry: CountEntry, status: str) -> float | str | Non
 
 def _entry_needed_quantity(entry: CountEntry) -> str:
     needed_quantity = str(getattr(entry, "needed_quantity", None) or "").strip()
-    if not needed_quantity or needed_quantity.lower() == "tbd":
+    if not needed_quantity or needed_quantity.lower() == "tbd" or needed_quantity == "—":
         return ""
     return needed_quantity
+
+
+def _purchase_items(entries: list[dict]) -> list[dict[str, str]]:
+    items: list[dict[str, str]] = []
+    for entry in entries:
+        needed_quantity = str(entry.get("needed_quantity") or "").strip()
+        if not needed_quantity:
+            continue
+        item_name = str(entry.get("item_name_clean") or entry.get("item_name_raw") or "").strip()
+        if not item_name:
+            continue
+        items.append(
+            {
+                "item_name": item_name,
+                "quantity_to_purchase": needed_quantity,
+            }
+        )
+    return items
 
 
 def _entry_row(entry: CountEntry) -> dict:
@@ -103,6 +121,7 @@ def build_report(count: CountSession) -> dict:
         "count_id": count.id,
         "status": count.status,
         "entries": entries,
+        "purchase_items": _purchase_items(entries),
         "summary": {
             "total_items": len(entries),
             "items_needing_review": sum(1 for entry in entries if entry["status"] in REVIEW_STATUSES),
@@ -123,7 +142,6 @@ def build_csv(count: CountSession) -> str:
             "Raw Item Name",
             "Quantity",
             "Unit",
-            "Quantity to Purchase",
             "Status",
             "Original Phrase",
             "Counted By",
@@ -141,7 +159,6 @@ def build_csv(count: CountSession) -> str:
                 entry["item_name_raw"] or "",
                 "" if entry["quantity"] is None else entry["quantity"],
                 entry["unit"] or "",
-                entry["needed_quantity"] or "",
                 entry["status"],
                 entry["original_phrase"] or "",
                 entry["counted_by"] or "",

@@ -225,8 +225,14 @@ class ReportEntry(BaseModel):
     is_demo_estimate: bool = True
 
 
+class PurchaseItem(BaseModel):
+    item_name: str
+    quantity_to_purchase: str
+
+
 class ReportResponse(BaseModel):
     count_id: int
     status: str
     entries: list[ReportEntry]
+    purchase_items: list[PurchaseItem] = Field(default_factory=list)
     summary: dict[str, int]

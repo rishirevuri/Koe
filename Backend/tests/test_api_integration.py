@@ -29,7 +29,6 @@ CSV_HEADER = [
     "Raw Item Name",
     "Quantity",
     "Unit",
-    "Quantity to Purchase",
     "Status",
     "Original Phrase",
     "Counted By",
@@ -267,7 +266,7 @@ def test_voice_parse_save_report_and_csv() -> None:
     csv_text = csv_response.text
     csv_rows = list(csv.reader(io.StringIO(csv_text)))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:12] == [
+    assert csv_rows[1][:11] == [
         str(count_id),
         "2",
         "Dry Storage",
@@ -276,14 +275,13 @@ def test_voice_parse_save_report_and_csv() -> None:
         "olive oil",
         "2.5",
         "bottles",
-        "",
         "Partial Quantity",
         "3 bottles of olive oil, one of which is half empty",
         TEST_USER.email,
     ]
-    assert ["Lettuce", "lettuce", "3.0", "heads", "", "Clean"] in [row[4:10] for row in csv_rows[1:]]
-    assert ["Tomatoes", "tomatoes", "5.0", "boxes", "", "Clean"] in [row[4:10] for row in csv_rows[1:]]
-    assert ["Cheese", "cheese", "2.0", "boxes", "", "Clean"] in [row[4:10] for row in csv_rows[1:]]
+    assert ["Lettuce", "lettuce", "3.0", "heads", "Clean"] in [row[4:9] for row in csv_rows[1:]]
+    assert ["Tomatoes", "tomatoes", "5.0", "boxes", "Clean"] in [row[4:9] for row in csv_rows[1:]]
+    assert ["Cheese", "cheese", "2.0", "boxes", "Clean"] in [row[4:9] for row in csv_rows[1:]]
     assert "Needs Review" not in csv_text
     assert "Manager Note" not in csv_text
 
@@ -311,12 +309,13 @@ def test_voice_parse_needed_quantity_saves_report_and_csv() -> None:
     report = client.get(f"/reports/{count_id}").json()
     assert report["entries"][0]["quantity"] == 2
     assert report["entries"][0]["needed_quantity"] == "6 boxes"
+    assert report["purchase_items"] == [{"item_name": "Tomatoes", "quantity_to_purchase": "6 boxes"}]
 
     csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
     assert list(csv_rows[0].keys()) == CSV_HEADER
     assert csv_rows[0]["Quantity"] == "2.0"
     assert csv_rows[0]["Unit"] == "boxes"
-    assert csv_rows[0]["Quantity to Purchase"] == "6 boxes"
+    assert "Quantity to Purchase" not in csv_rows[0]
 
 
 def test_voice_parse_container_fullness_saves_report_and_csv() -> None:
@@ -354,12 +353,13 @@ def test_voice_parse_container_fullness_saves_report_and_csv() -> None:
     assert report["entries"][0]["quantity_label"] == "Decently filled"
     assert report["entries"][0]["unit"] == "bucket"
     assert report["entries"][0]["needed_quantity"] == "1 bucket"
+    assert report["purchase_items"] == [{"item_name": "peanut butter", "quantity_to_purchase": "1 bucket"}]
 
     csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
     assert list(csv_rows[0].keys()) == CSV_HEADER
     assert csv_rows[0]["Quantity"] == "Decently filled"
     assert csv_rows[0]["Unit"] == "bucket"
-    assert csv_rows[0]["Quantity to Purchase"] == "1 bucket"
+    assert "Quantity to Purchase" not in csv_rows[0]
 
 
 def test_voice_parse_repairs_legacy_count_entry_category_column() -> None:
@@ -503,11 +503,12 @@ def test_voice_parse_saves_claude_category(monkeypatch) -> None:
 
     report = client.get(f"/reports/{count_id}").json()
     assert report["entries"][0]["needed_quantity"] == "6 boxes"
+    assert report["purchase_items"] == [{"item_name": "Tomatoes", "quantity_to_purchase": "6 boxes"}]
 
     csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
     assert csv_rows[0]["Quantity"] == "16.0"
     assert csv_rows[0]["Unit"] == "individual"
-    assert csv_rows[0]["Quantity to Purchase"] == "6 boxes"
+    assert "Quantity to Purchase" not in csv_rows[0]
 
 
 def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
@@ -551,17 +552,17 @@ def test_voice_parse_vague_claude_quantity_exports_blank(monkeypatch) -> None:
 
     report = client.get(f"/reports/{count_id}").json()
     assert report["entries"][0]["quantity"] is None
+    assert report["purchase_items"] == []
 
     csv_rows = list(csv.reader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
     assert csv_rows[0] == CSV_HEADER
-    assert csv_rows[1][:12] == [
+    assert csv_rows[1][:11] == [
         str(count_id),
         "2",
         "Storage",
         "Supplies",
         "Takeout containers",
         "Takeout containers",
-        "",
         "",
         "",
         "Needs Review",
