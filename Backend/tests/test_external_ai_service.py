@@ -15,6 +15,8 @@ def test_claude_prompt_requires_manager_ready_json_shape() -> None:
     assert '"category"' in SYSTEM_PROMPT
     assert '"needed_quantity"' in SYSTEM_PROMPT
     assert "Do not infer needed_quantity from par levels" in SYSTEM_PROMPT
+    assert "Handle container fullness descriptions" in SYSTEM_PROMPT
+    assert '"quantity": number | string | null' in SYSTEM_PROMPT
     assert '"items"' in SYSTEM_PROMPT
     assert '"summary"' in SYSTEM_PROMPT
     assert "No text outside JSON" in SYSTEM_PROMPT
@@ -141,6 +143,43 @@ def test_coerce_candidate_preserves_needed_quantity_without_overwriting_quantity
     assert candidate.quantity == 2
     assert candidate.unit == "boxes"
     assert candidate.needed_quantity == "6 boxes"
+
+
+def test_coerce_candidate_preserves_qualitative_fullness_quantity() -> None:
+    candidate = _coerce_candidate(
+        {
+            "item_name_clean": "Peanut butter",
+            "quantity": "Decently filled",
+            "unit": "bucket",
+            "needed_quantity": "TBD",
+            "original_phrase": "a bucket of peanut butter and it's pretty full",
+        }
+    )
+
+    assert candidate is not None
+    assert candidate.item_name == "Peanut butter"
+    assert candidate.quantity is None
+    assert candidate.quantity_label == "Decently filled"
+    assert candidate.unit == "bucket"
+    assert candidate.status == "Needs Review"
+    assert candidate.needs_review is True
+
+
+def test_coerce_candidate_maps_fullness_fraction_to_numeric_quantity() -> None:
+    candidate = _coerce_candidate(
+        {
+            "item_name_clean": "Ranch",
+            "quantity": "half full",
+            "unit": "tub",
+            "status": "Partial Quantity",
+            "original_phrase": "one tub of ranch half full",
+        }
+    )
+
+    assert candidate is not None
+    assert candidate.quantity == 0.5
+    assert candidate.quantity_label is None
+    assert candidate.unit == "tub"
 
 
 class EnabledClaudeSettings:

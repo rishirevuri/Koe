@@ -43,6 +43,13 @@ def _entry_quantity(entry: CountEntry, status: str) -> float | None:
     return entry.quantity
 
 
+def _entry_display_quantity(entry: CountEntry, status: str) -> float | str | None:
+    quantity_label = str(getattr(entry, "quantity_label", None) or "").strip()
+    if quantity_label:
+        return quantity_label
+    return _entry_quantity(entry, status)
+
+
 def _entry_needed_quantity(entry: CountEntry) -> str:
     needed_quantity = str(getattr(entry, "needed_quantity", None) or "").strip()
     return needed_quantity or "TBD"
@@ -55,7 +62,8 @@ def _entry_row(entry: CountEntry) -> dict:
         item_name_clean,
         entry.category or (entry.inventory_item.category if entry.inventory_item else None),
     )
-    quantity = _entry_quantity(entry, status)
+    numeric_quantity = _entry_quantity(entry, status)
+    display_quantity = _entry_display_quantity(entry, status)
     return {
         "count_id": entry.count_session_id,
         "restaurant_id": entry.count_session.restaurant_id,
@@ -63,7 +71,8 @@ def _entry_row(entry: CountEntry) -> dict:
         "item_name_raw": entry.item_name_raw or entry.item_name,
         "item_name_clean": item_name_clean,
         "category": category,
-        "quantity": quantity,
+        "quantity": display_quantity,
+        "quantity_label": str(getattr(entry, "quantity_label", None) or "").strip() or None,
         "unit": entry.unit,
         "needed_quantity": _entry_needed_quantity(entry),
         "status": status,
@@ -73,7 +82,7 @@ def _entry_row(entry: CountEntry) -> dict:
         **estimate_par_status(
             item_name=item_name_clean,
             category=category,
-            quantity=quantity,
+            quantity=numeric_quantity,
             unit=entry.unit,
             status=status,
         ),

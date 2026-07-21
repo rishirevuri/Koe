@@ -93,7 +93,8 @@ class CountEntryRead(BaseModel):
     area: str | None
     item_name_raw: str | None
     item_name_clean: str
-    quantity: float | None
+    quantity: float | str | None
+    quantity_label: str | None = None
     unit: str
     needed_quantity: str = "TBD"
     status: str
@@ -117,7 +118,8 @@ class ParseUploadRequest(ParseVoiceRequest):
 class ParsedEntry(BaseModel):
     count_id: int
     restaurant_id: int
-    quantity: float | None
+    quantity: float | str | None
+    quantity_label: str | None = None
     unit: str | None
     needed_quantity: str = "TBD"
     area: str | None = None
@@ -207,7 +209,8 @@ class ReportEntry(BaseModel):
     item_name_raw: str | None
     item_name_clean: str
     category: str | None = None
-    quantity: float | None
+    quantity: float | str | None
+    quantity_label: str | None = None
     unit: str
     needed_quantity: str = "TBD"
     status: str

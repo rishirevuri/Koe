@@ -117,3 +117,59 @@ def test_voice_parse_simple_needed_quantity_stays_separate() -> None:
         ("tomatoes", 2, "boxes", "6 boxes"),
         ("lemons", 10, "individual", "30 individual"),
     ]
+
+
+def test_voice_parse_container_fullness_keeps_qualitative_quantity() -> None:
+    parsed = parse_voice_text("We have a bucket of peanut butter and it's pretty full.")
+
+    assert len(parsed) == 1
+    row = parsed[0]
+    assert row.item_name == "peanut butter"
+    assert row.quantity is None
+    assert row.quantity_label == "Decently filled"
+    assert row.unit == "bucket"
+    assert row.needed_quantity == "TBD"
+    assert row.status == "Needs Review"
+    assert row.needs_review is True
+
+
+def test_voice_parse_container_fullness_common_fractions() -> None:
+    parsed = parse_voice_text("one tub of ranch half full. a bottle of olive oil, about a quarter full.")
+
+    assert [(item.item_name, item.quantity, item.quantity_label, item.unit, item.status) for item in parsed] == [
+        ("ranch", 0.5, None, "tub", "Partial Quantity"),
+        ("olive oil", 0.25, None, "bottle", "Partial Quantity"),
+    ]
+
+
+def test_voice_parse_container_fullness_needed_quantity_stays_separate() -> None:
+    parsed = parse_voice_text("a container of pesto mostly full and we need 2 more containers")
+
+    assert len(parsed) == 1
+    row = parsed[0]
+    assert row.item_name == "pesto"
+    assert row.quantity is None
+    assert row.quantity_label == "Mostly full"
+    assert row.unit == "container"
+    assert row.needed_quantity == "2 containers"
+    assert row.status == "Needs Review"
+
+
+def test_voice_parse_container_fullness_almost_empty() -> None:
+    parsed = parse_voice_text("a bin of lettuce almost empty")
+
+    assert len(parsed) == 1
+    row = parsed[0]
+    assert row.item_name == "lettuce"
+    assert row.quantity is None
+    assert row.quantity_label == "Almost empty"
+    assert row.unit == "bin"
+    assert row.status == "Needs Review"
+
+
+def test_voice_parse_exact_bucket_count_stays_numeric() -> None:
+    parsed = parse_voice_text("2 buckets of peanut butter")
+
+    assert [(item.item_name, item.quantity, item.quantity_label, item.unit, item.status) for item in parsed] == [
+        ("peanut butter", 2, None, "buckets", "Clean"),
+    ]

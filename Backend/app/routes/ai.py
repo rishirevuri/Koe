@@ -40,12 +40,16 @@ def _candidate_log_summary(
 ) -> dict:
     return {
         "item_name_clean": item_name_clean or candidate.item_name,
-        "quantity": candidate.quantity,
+        "quantity": candidate.quantity_label or candidate.quantity,
         "unit": candidate.unit,
         "category": candidate.category,
         "status": status or candidate.status,
         "par_status": par_status,
     }
+
+
+def _candidate_display_quantity(candidate: ParsedCandidate) -> float | str | None:
+    return candidate.quantity_label or candidate.quantity
 
 
 def _has_anthropic_key(settings) -> bool:
@@ -237,6 +241,7 @@ def _handle_candidates(
                     normalized_item_name=match.normalized_name,
                     category=category,
                     quantity=candidate.quantity,
+                    quantity_label=candidate.quantity_label,
                     unit=candidate.unit or "",
                     needed_quantity=candidate.needed_quantity or "TBD",
                     status=status,
@@ -289,7 +294,8 @@ def _handle_candidates(
                 ParsedEntry(
                     count_id=resolved_count_session_id,
                     restaurant_id=restaurant_id,
-                    quantity=candidate.quantity,
+                    quantity=_candidate_display_quantity(candidate),
+                    quantity_label=candidate.quantity_label,
                     unit=candidate.unit,
                     needed_quantity=candidate.needed_quantity or "TBD",
                     area=resolved_area,

@@ -17,6 +17,7 @@ class ParsedCandidate:
     status: str | None = None
     category: str | None = None
     needed_quantity: str = "TBD"
+    quantity_label: str | None = None
 
 
 NUMBER_WORDS = {
@@ -79,8 +80,42 @@ NEEDED_VERB_PATTERN = (
 NEEDED_START_PREFIX = re.compile(rf"\b{NEEDED_VERB_PATTERN}\s*$", re.IGNORECASE)
 NEEDED_QUANTITY_PATTERN = re.compile(
     rf"\b{NEEDED_VERB_PATTERN}\s+"
-    rf"(?P<qty>\d+(?:\.\d+)?)"
+    rf"(?P<qty>\d+(?:\.\d+)?|{NUMBER_WORDS_PATTERN})"
     rf"(?:\s+(?:more\b(?:\s+(?P<unit_after_more>{UNITS_PATTERN}))?|(?P<unit>{UNITS_PATTERN})))?",
+    re.IGNORECASE,
+)
+CONTAINER_UNITS = {
+    "bag": "bag",
+    "bags": "bag",
+    "bin": "bin",
+    "bins": "bin",
+    "bottle": "bottle",
+    "bottles": "bottle",
+    "box": "box",
+    "boxes": "box",
+    "bucket": "bucket",
+    "buckets": "bucket",
+    "case": "case",
+    "cases": "case",
+    "container": "container",
+    "containers": "container",
+    "jar": "jar",
+    "jars": "jar",
+    "tub": "tub",
+    "tubs": "tub",
+}
+CONTAINER_PATTERN = "|".join(sorted(CONTAINER_UNITS.keys(), key=len, reverse=True))
+CONTAINER_START_PATTERN = re.compile(
+    rf"\b(?P<amount>a|an|one|1)\s+(?P<container>{CONTAINER_PATTERN})\s+of\s+",
+    re.IGNORECASE,
+)
+FULLNESS_PATTERN = re.compile(
+    r"\b(?:(?:it(?:'|’)?s|it\s+is|they(?:'|’)?re|they\s+are|is|are)\s+)?"
+    r"(?P<fullness>"
+    r"three\s+(?:quarters|fourths)\s+full|75\s*%\s*full|"
+    r"(?:about\s+)?(?:a\s+)?quarter\s+full|(?:about\s+)?one\s+fourth\s+full|"
+    r"half\s+(?:full|empty)|pretty\s+full|mostly\s+full|almost\s+empty|nearly\s+empty|running\s+low|low|full"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -130,13 +165,27 @@ def _format_needed_number(value: float) -> str:
     return str(int(value)) if float(value).is_integer() else f"{value:g}"
 
 
+def _quantity_text_to_float(value: str) -> float:
+    normalized = value.lower().strip()
+    if normalized in NUMBER_WORDS:
+        return float(NUMBER_WORDS[normalized])
+    return float(normalized)
+
+
+def _container_unit(value: str) -> str:
+    normalized = value.lower().strip()
+    return CONTAINER_UNITS.get(normalized, normalized)
+
+
 def _extract_needed_quantity(value: str, fallback_unit: str | None = None) -> str:
     match = NEEDED_QUANTITY_PATTERN.search(value)
     if not match:
         return "TBD"
-    quantity = float(match.group("qty"))
+    quantity = _quantity_text_to_float(match.group("qty"))
     unit = match.group("unit_after_more") or match.group("unit")
     normalized_unit = normalize_unit(unit) if unit else fallback_unit
+    if normalized_unit and quantity == 1 and (unit or fallback_unit or "").lower() in CONTAINER_UNITS:
+        normalized_unit = _container_unit(unit or fallback_unit or "")
     if normalized_unit:
         return f"{_format_needed_number(quantity)} {normalized_unit}"
     return _format_needed_number(quantity)
@@ -144,6 +193,55 @@ def _extract_needed_quantity(value: str, fallback_unit: str | None = None) -> st
 
 def _remove_needed_quantity_clause(value: str) -> str:
     return NEEDED_QUANTITY_PATTERN.sub("", value).strip(" ,.")
+
+
+def _normalize_fullness(value: str) -> tuple[float | None, str | None]:
+    normalized = re.sub(r"\s+", " ", value.lower().replace("’", "'")).strip()
+    if normalized in {"half full", "half empty"}:
+        return 0.5, None
+    if normalized in {"quarter full", "a quarter full", "about quarter full", "about a quarter full", "one fourth full", "about one fourth full"}:
+        return 0.25, None
+    if normalized in {"three quarters full", "three fourths full", "75% full", "75 % full"}:
+        return 0.75, None
+    if normalized in {"pretty full", "decently filled"}:
+        return None, "Decently filled"
+    if normalized == "mostly full":
+        return None, "Mostly full"
+    if normalized == "full":
+        return None, "Full"
+    if normalized in {"almost empty", "nearly empty"}:
+        return None, "Almost empty"
+    if normalized in {"low", "running low"}:
+        return None, "Low"
+    return None, None
+
+
+def _qualitative_review_reason() -> str:
+    return "Qualitative fullness quantity; confirm the exact count before export."
+
+
+def _candidate_from_fullness(
+    *,
+    raw_phrase: str,
+    item_name: str,
+    unit: str,
+    fullness: str,
+    needed_quantity: str,
+) -> ParsedCandidate:
+    quantity, quantity_label = _normalize_fullness(fullness)
+    is_qualitative = quantity_label is not None
+    return ParsedCandidate(
+        raw_phrase=raw_phrase,
+        quantity=quantity,
+        unit=unit,
+        item_name=item_name,
+        partial_detail=fullness if quantity is not None else None,
+        needs_review=is_qualitative,
+        review_reason=_qualitative_review_reason() if is_qualitative else None,
+        status="Needs Review" if is_qualitative else "Partial Quantity",
+        needed_quantity=needed_quantity,
+        quantity_label=quantity_label,
+    )
 
 
 def normalize_obvious_item_unit(item_name: str, unit: str | None) -> str | None:
@@ -196,6 +294,43 @@ def _parse_vague_quantity_phrases(text: str) -> list[ParsedCandidate]:
     return candidates
 
 
+def _parse_container_fullness_phrases(text: str) -> list[ParsedCandidate]:
+    source = re.sub(r"\s+", " ", text.replace("\n", " ")).strip()
+    matches = list(CONTAINER_START_PATTERN.finditer(source))
+    candidates: list[ParsedCandidate] = []
+    for index, match in enumerate(matches):
+        if match.group("amount").lower() in {"one", "1"}:
+            # The normal numeric path handles "one tub of ranch half full".
+            continue
+        next_start = matches[index + 1].start() if index + 1 < len(matches) else len(source)
+        sentence_end = re.search(r"[.;]", source[match.end() : next_start])
+        end = match.end() + sentence_end.start() if sentence_end else next_start
+        raw_phrase = source[match.start() : end].strip(" ,.")
+        remainder = source[match.end() : end].strip(" ,.")
+        if not remainder:
+            continue
+
+        needed_quantity = _extract_needed_quantity(raw_phrase, _container_unit(match.group("container")))
+        remainder_without_needed = _remove_needed_quantity_clause(remainder)
+        fullness_match = FULLNESS_PATTERN.search(remainder_without_needed)
+        if not fullness_match:
+            continue
+
+        item_name = _clean_item_name(remainder_without_needed[: fullness_match.start()])
+        if not item_name or UNUSABLE_ITEM_PATTERN.search(item_name):
+            continue
+        candidates.append(
+            _candidate_from_fullness(
+                raw_phrase=raw_phrase,
+                item_name=item_name,
+                unit=_container_unit(match.group("container")),
+                fullness=fullness_match.group("fullness"),
+                needed_quantity=needed_quantity,
+            )
+        )
+    return candidates
+
+
 def _parse_quantity_unit_item(phrase: str) -> tuple[re.Match[str], float, str, str] | None:
     match = QUANTITY_START_PATTERN.search(phrase)
     if not match:
@@ -223,6 +358,27 @@ def parse_voice_text(text: str) -> list[ParsedCandidate]:
         match, qty, unit, item_part = parsed
         needed_quantity = _extract_needed_quantity(phrase, unit)
         item_part = _remove_needed_quantity_clause(item_part)
+        fullness_match = FULLNESS_PATTERN.search(item_part)
+        multi_container_partial = bool(
+            fullness_match
+            and re.search(r"\bone\s+(?:of\s+)?(?:which|them|the\s+\w+)\b", item_part[: fullness_match.end()], re.IGNORECASE)
+        )
+        if fullness_match and not multi_container_partial:
+            item_name = _clean_item_name(item_part[: fullness_match.start()])
+            if not item_name:
+                continue
+            first_word = match.group("first")
+            fullness_unit = _container_unit(first_word) if first_word.lower() in CONTAINER_UNITS else unit
+            candidates.append(
+                _candidate_from_fullness(
+                    raw_phrase=phrase,
+                    item_name=item_name,
+                    unit=fullness_unit,
+                    fullness=fullness_match.group("fullness"),
+                    needed_quantity=needed_quantity,
+                )
+            )
+            continue
         partial_match = PARTIAL_TAIL.search(item_part)
         if partial_match:
             item_name = _clean_item_name(item_part[: partial_match.start()])
@@ -246,5 +402,6 @@ def parse_voice_text(text: str) -> list[ParsedCandidate]:
                 needed_quantity=needed_quantity,
             )
         )
+    candidates.extend(_parse_container_fullness_phrases(text))
     candidates.extend(_parse_vague_quantity_phrases(text))
     return candidates

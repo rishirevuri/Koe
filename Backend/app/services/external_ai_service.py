@@ -6,7 +6,7 @@ import httpx
 
 from app.config import get_settings
 from app.services.category_service import normalize_inventory_category
-from app.services.voice_parse_service import ParsedCandidate, normalize_obvious_item_unit
+from app.services.voice_parse_service import ParsedCandidate, _container_unit, _normalize_fullness, normalize_obvious_item_unit
 from app.utils.units import normalize_unit
 
 
@@ -148,7 +148,26 @@ Examples:
 - "We have 10 lemons and need 30 more" -> Lemons, quantity 10, unit individual, needed_quantity "30 individual"
 - "We have 3 bottles of olive oil" -> Olive oil, needed_quantity "TBD"
 
-10. Differentiate similar items.
+10. Handle container fullness descriptions.
+When the user gives a container and a qualitative fullness level, preserve it as a useful quantity instead of dropping the row.
+Normalize common fullness phrases:
+- "full" -> quantity "Full"
+- "pretty full" -> quantity "Decently filled"
+- "mostly full" -> quantity "Mostly full"
+- "half full" or "half empty" -> quantity 0.5
+- "quarter full" or "one fourth full" -> quantity 0.25
+- "three quarters full" or "75% full" -> quantity 0.75
+- "almost empty" or "nearly empty" -> quantity "Almost empty"
+- "low" or "running low" -> quantity "Low"
+Do not invent numeric quantities unless the phrase clearly maps to a common fraction like half, quarter, or three quarters.
+Preserve the container as the unit.
+Mark vague fullness rows as Needs Review unless the quantity is clearly numeric.
+
+Examples:
+- "a bucket of peanut butter and it's pretty full" -> Peanut butter, quantity "Decently filled", unit bucket, status Needs Review
+- "one tub of ranch half full" -> Ranch, quantity 0.5, unit tub, status Partial Quantity
+
+11. Differentiate similar items.
 Keep distinct items separate when the transcript clearly separates them.
 
 Examples:
@@ -159,7 +178,7 @@ Examples:
 - Olive oil and canola oil are separate.
 - Chicken breasts and chicken wings are separate.
 
-11. Merge duplicates only when clearly same item and compatible units.
+12. Merge duplicates only when clearly same item and compatible units.
 If same item appears multiple times with same or convertible units, merge them.
 
 Example:
@@ -167,7 +186,7 @@ Example:
 
 If units are incompatible and no conversion is given, keep separate or mark Possible Duplicate.
 
-12. Status values.
+13. Status values.
 Use exactly one:
 - Clean
 - Partial Quantity
@@ -181,7 +200,7 @@ Needs Review > Possible Duplicate > Missing Unit > Partial Quantity > Converted 
 
 But do not mark every row Needs Review. Clean rows should be Clean. Converted rows should be Converted Unit. Partial rows should be Partial Quantity.
 
-13. Category inference.
+14. Category inference.
 Infer category yourself from the item, but do not force weird categories.
 
 Allowed categories:
@@ -204,7 +223,7 @@ Examples:
 - Tonic water, sparkling water, lemons/limes if bar context -> Bar
 - Frozen fries, mozzarella sticks, veggie patties, ice cream -> Frozen
 
-14. Output JSON only.
+15. Output JSON only.
 Return this exact shape:
 
 {
@@ -213,7 +232,7 @@ Return this exact shape:
       "item_name_raw": "string",
       "item_name_clean": "string",
       "category": "Produce | Dairy & Eggs | Meats | Liquids | Dry Goods | Bar | Frozen | Supplies | Other",
-      "quantity": number | null,
+      "quantity": number | string | null,
       "unit": "string" | null,
       "needed_quantity": "string",
       "status": "Clean | Partial Quantity | Missing Unit | Needs Review | Possible Duplicate | Converted Unit",
@@ -235,7 +254,7 @@ No markdown.
 No explanation.
 No text outside JSON.
 
-15. Required behavior on this hard transcript:
+16. Required behavior on this hard transcript:
 For this input:
 
 "Okay I'm doing the inventory count now. I see 10 tomatoes, actually make that 12 tomatoes because there are 2 more on the bottom shelf. There are also 10 Roma tomatoes in the corner, those are separate from the regular tomatoes. I have 5 heads of lettuce and 2 boxes of cucumbers. There is cilantro too, looks like 3 bunches, wait no scratch that, it is 4 bunches of cilantro. I have 10 gallons of whole milk and 3 gallons of two percent milk. There is half a gallon of heavy cream. I see 12 dozen eggs, but 6 eggs are cracked so do not count those as usable. There are also 2 trays of 30 eggs. I have 10 ounces of ground beef and 3 chicken breasts. There are boxes of bacon on the side, I am not sure how many, actually I just checked, it is 2 boxes of bacon. I have 4 boxes of pizza dough, 2 cases of 24 water bottles, and 3 packs of 6 Coke cans. There is half a case of napkins. I have 5 bags of flour, but one bag is half empty. There are 2 ten-pound bags of rice and a quarter bag of sugar. I see 3 bottles of olive oil and one of the bottles is half empty. There are 5 gallons of canola oil and 2 jars of marinara sauce. I also have 6 cans of tomato sauce, actually change that to 8 cans of tomato sauce. Behind the bar there are 7 bottles of sparkling water, 2 cases of 12 tonic waters, and 1 dozen lemons. There are a few limes but I do not know the exact count, so that should probably be reviewed. In the freezer there are 2 boxes of frozen fries, 1 open box of mozzarella sticks, and half a box of veggie patties. There are 3 tubs of ice cream, but one tub is only a quarter full. That should be everything."
@@ -306,6 +325,26 @@ ALLOWED_CATEGORIES = {
     "Liquids",
     "Bar",
     "Other",
+}
+QUALITATIVE_CONTAINER_UNITS = {
+    "bag",
+    "bags",
+    "bin",
+    "bins",
+    "bottle",
+    "bottles",
+    "box",
+    "boxes",
+    "bucket",
+    "buckets",
+    "case",
+    "cases",
+    "container",
+    "containers",
+    "jar",
+    "jars",
+    "tub",
+    "tubs",
 }
 
 
@@ -413,17 +452,34 @@ def _normalize_claude_item(entry: dict) -> dict | None:
     if not item_name_clean:
         return None
 
-    quantity = _safe_float(entry.get("quantity"))
+    raw_quantity = entry.get("quantity")
+    quantity = _safe_float(raw_quantity)
+    quantity_label = None
+    fullness_numeric = False
+    if quantity is None and isinstance(raw_quantity, str) and _safe_string(raw_quantity):
+        fullness_quantity, fullness_label = _normalize_fullness(raw_quantity)
+        if fullness_quantity is not None:
+            quantity = fullness_quantity
+            fullness_numeric = True
+        elif fullness_label:
+            quantity_label = fullness_label
     raw_unit = entry.get("unit")
+    raw_unit_text = _safe_string(raw_unit).lower()
     unit = normalize_unit(_safe_string(raw_unit)) if raw_unit is not None and _safe_string(raw_unit) else None
+    if unit and (quantity_label or fullness_numeric) and raw_unit_text in QUALITATIVE_CONTAINER_UNITS:
+        unit = _container_unit(raw_unit_text)
     status = _normalize_status(entry.get("status"), quantity=quantity, unit=unit)
+    if not entry.get("status") and fullness_numeric:
+        status = "Partial Quantity"
+    if not entry.get("status") and quantity_label:
+        status = "Needs Review"
     if not entry.get("status") and entry.get("partial_detail"):
         status = "Partial Quantity"
     if not entry.get("status") and entry.get("needs_review"):
         status = "Needs Review"
     original_phrase = _safe_string(entry.get("original_phrase") or entry.get("raw_phrase") or item_name_raw or item_name_clean)
 
-    return {
+    item = {
         "item_name_raw": item_name_raw,
         "item_name_clean": item_name_clean,
         "category": _normalize_category(entry.get("category"), item_name=item_name_clean),
@@ -433,6 +489,9 @@ def _normalize_claude_item(entry: dict) -> dict | None:
         "status": status,
         "original_phrase": original_phrase,
     }
+    if quantity_label:
+        item["quantity_label"] = quantity_label
+    return item
 
 
 def _summary_from_items(items: list[dict], summary: dict | None = None) -> dict:
@@ -486,10 +545,27 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
     if not item_name:
         return None
 
-    quantity = _safe_float(entry.get("quantity"))
+    raw_quantity = entry.get("quantity")
+    quantity = _safe_float(raw_quantity)
+    quantity_label = _safe_string(entry.get("quantity_label")) or None
+    fullness_numeric = False
+    if quantity is None and not quantity_label and isinstance(raw_quantity, str) and _safe_string(raw_quantity):
+        fullness_quantity, fullness_label = _normalize_fullness(raw_quantity)
+        if fullness_quantity is not None:
+            quantity = fullness_quantity
+            fullness_numeric = True
+        else:
+            quantity_label = fullness_label
 
     status = _safe_string(entry.get("status"))
+    if not status and quantity_label:
+        status = "Needs Review"
+    if not status and fullness_numeric:
+        status = "Partial Quantity"
+    raw_unit_text = _safe_string(entry.get("unit")).lower()
     unit = normalize_unit(str(entry.get("unit"))) if entry.get("unit") else None
+    if unit and (quantity_label or fullness_numeric) and raw_unit_text in QUALITATIVE_CONTAINER_UNITS:
+        unit = _container_unit(raw_unit_text)
     partial_detail = entry.get("partial_detail") or (entry.get("original_phrase") if status == "Partial Quantity" else None)
     review_reason = entry.get("review_reason") or (entry.get("original_phrase") if status in REVIEW_STATUSES else None)
     if quantity is None and status in REVIEW_STATUSES and unit == "individual":
@@ -507,6 +583,7 @@ def _coerce_candidate(entry: dict) -> ParsedCandidate | None:
         status=status or None,
         category=normalize_inventory_category(item_name, _safe_string(entry.get("category")) or None),
         needed_quantity=_normalize_needed_quantity(entry.get("needed_quantity"), resolved_unit),
+        quantity_label=quantity_label,
     )
 
 

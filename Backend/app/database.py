@@ -148,6 +148,7 @@ def _ensure_count_entry_columns() -> None:
     column_sql = {
         "item_name_raw": "ALTER TABLE count_entries ADD COLUMN item_name_raw VARCHAR(255)",
         "category": "ALTER TABLE count_entries ADD COLUMN category VARCHAR(120)",
+        "quantity_label": "ALTER TABLE count_entries ADD COLUMN quantity_label VARCHAR(120)",
         "status": "ALTER TABLE count_entries ADD COLUMN status VARCHAR(80) NOT NULL DEFAULT 'Clean'",
         "needed_quantity": "ALTER TABLE count_entries ADD COLUMN needed_quantity VARCHAR(120) NOT NULL DEFAULT 'TBD'",
         "original_phrase": "ALTER TABLE count_entries ADD COLUMN original_phrase TEXT",

@@ -319,6 +319,49 @@ def test_voice_parse_needed_quantity_saves_report_and_csv() -> None:
     assert csv_rows[0]["Quantity to Purchase"] == "6 boxes"
 
 
+def test_voice_parse_container_fullness_saves_report_and_csv() -> None:
+    count_id = client.post("/counts", json={"area": "Dry Storage"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "We have a bucket of peanut butter and it's pretty full, need one more bucket.",
+            "area": "Dry Storage",
+            "save": True,
+        },
+    )
+
+    assert response.status_code == 200
+    entry = response.json()["entries"][0]
+    assert entry["item_name_clean"] == "peanut butter"
+    assert entry["quantity"] == "Decently filled"
+    assert entry["quantity_label"] == "Decently filled"
+    assert entry["unit"] == "bucket"
+    assert entry["needed_quantity"] == "1 bucket"
+    assert entry["status"] == "Needs Review"
+    assert "pretty full" in entry["original_phrase"]
+
+    with SessionLocal() as db:
+        saved_entry = db.query(CountEntry).filter(CountEntry.count_session_id == count_id).one()
+        assert saved_entry.quantity is None
+        assert saved_entry.quantity_label == "Decently filled"
+        assert saved_entry.unit == "bucket"
+        assert saved_entry.needed_quantity == "1 bucket"
+
+    report = client.get(f"/reports/{count_id}").json()
+    assert report["entries"][0]["quantity"] == "Decently filled"
+    assert report["entries"][0]["quantity_label"] == "Decently filled"
+    assert report["entries"][0]["unit"] == "bucket"
+    assert report["entries"][0]["needed_quantity"] == "1 bucket"
+
+    csv_rows = list(csv.DictReader(io.StringIO(client.get(f"/reports/{count_id}/csv").text)))
+    assert list(csv_rows[0].keys()) == CSV_HEADER
+    assert csv_rows[0]["Quantity"] == "Decently filled"
+    assert csv_rows[0]["Unit"] == "bucket"
+    assert csv_rows[0]["Quantity to Purchase"] == "1 bucket"
+
+
 def test_voice_parse_repairs_legacy_count_entry_category_column() -> None:
     with engine.begin() as connection:
         if "category" in count_entry_columns():
@@ -372,14 +415,41 @@ def test_voice_parse_repairs_legacy_count_entry_needed_quantity_column() -> None
     assert response.json()["entries"][0]["needed_quantity"] == "TBD"
 
 
+def test_voice_parse_repairs_legacy_count_entry_quantity_label_column() -> None:
+    with engine.begin() as connection:
+        if "quantity_label" in count_entry_columns():
+            connection.execute(text("ALTER TABLE count_entries DROP COLUMN quantity_label"))
+    assert "quantity_label" not in count_entry_columns()
+
+    count_response = client.post("/counts", json={"area": "Dry Storage"})
+    assert count_response.status_code == 200
+    count_id = count_response.json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "a bucket of peanut butter and it's pretty full",
+            "area": "Dry Storage",
+            "save": True,
+        },
+    )
+
+    assert response.status_code == 200
+    assert "quantity_label" in count_entry_columns()
+    assert response.json()["entries"][0]["quantity"] == "Decently filled"
+
+
 def test_count_entry_model_accepts_category_constructor_keyword() -> None:
     assert "category" in inspect(CountEntry).attrs.keys()
     assert "needed_quantity" in inspect(CountEntry).attrs.keys()
+    assert "quantity_label" in inspect(CountEntry).attrs.keys()
 
-    entry = CountEntry(category="Produce", needed_quantity="6 boxes")
+    entry = CountEntry(category="Produce", needed_quantity="6 boxes", quantity_label="Decently filled")
 
     assert entry.category == "Produce"
     assert entry.needed_quantity == "6 boxes"
+    assert entry.quantity_label == "Decently filled"
 
 
 def test_voice_parse_saves_claude_category(monkeypatch) -> None:

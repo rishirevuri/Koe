@@ -131,6 +131,55 @@ def test_csv_blanks_unknown_vague_quantity() -> None:
     ]
 
 
+def test_csv_exports_qualitative_container_quantity_label() -> None:
+    restaurant = Restaurant(id=1, name="Demo Restaurant")
+    count = CountSession(id=1, restaurant_id=1, status="completed", restaurant=restaurant)
+    entry = CountEntry(
+        id=1,
+        count_session_id=1,
+        item_name_raw="peanut butter",
+        item_name="Peanut butter",
+        normalized_item_name="peanut butter",
+        category="Dry Goods",
+        quantity=None,
+        quantity_label="Decently filled",
+        unit="bucket",
+        needed_quantity="TBD",
+        status="Needs Review",
+        area="Dry Storage",
+        source="voice",
+        raw_input="We have a bucket of peanut butter and it's pretty full.",
+        original_phrase="a bucket of peanut butter and it's pretty full",
+        needs_review=True,
+        review_reason="Qualitative fullness quantity; confirm the exact count before export.",
+        counted_by="tester@example.com",
+    )
+    count.entries = [entry]
+
+    report = build_report(count)
+    assert report["entries"][0]["quantity"] == "Decently filled"
+    assert report["entries"][0]["quantity_label"] == "Decently filled"
+    assert report["entries"][0]["unit"] == "bucket"
+    assert report["entries"][0]["needed_quantity"] == "TBD"
+
+    csv_rows = list(csv.reader(io.StringIO(build_csv(count))))
+    assert csv_rows[0] == CSV_HEADER
+    assert csv_rows[1][:12] == [
+        "1",
+        "1",
+        "Dry Storage",
+        "Dry Goods",
+        "Peanut butter",
+        "peanut butter",
+        "Decently filled",
+        "bucket",
+        "TBD",
+        "Needs Review",
+        "a bucket of peanut butter and it's pretty full",
+        "tester@example.com",
+    ]
+
+
 def test_report_prefers_saved_count_entry_category() -> None:
     restaurant = Restaurant(id=1, name="Demo Restaurant")
     item = InventoryItem(
