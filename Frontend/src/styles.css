@@ -7001,6 +7001,42 @@ button:disabled,
   white-space: nowrap;
 }
 
+.past-count-spreadsheet-shell {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.spreadsheet-scroll-marker {
+  --spreadsheet-marker-left: 0px;
+  --spreadsheet-marker-width: 44px;
+  position: relative;
+  width: min(180px, 42%);
+  height: 8px;
+  margin-left: 2px;
+  overflow: hidden;
+  background: rgba(16, 35, 31, 0.08);
+  border-radius: 999px;
+}
+
+.spreadsheet-scroll-marker span {
+  position: absolute;
+  top: 2px;
+  left: var(--spreadsheet-marker-left);
+  display: block;
+  width: var(--spreadsheet-marker-width);
+  height: 4px;
+  background: #050505;
+  border-radius: 999px;
+  transition:
+    left 90ms linear,
+    width 140ms ease;
+}
+
+.past-count-spreadsheet-shell:not(.is-scrollable) .spreadsheet-scroll-marker {
+  opacity: 0.58;
+}
+
 .past-count-spreadsheet {
   overflow: auto;
   border: 1px solid rgba(16, 35, 31, 0.12);
@@ -7578,6 +7614,21 @@ button:disabled,
 
   .past-count-summary {
     grid-template-columns: 1fr 1fr;
+  }
+
+  .past-count-spreadsheet-shell {
+    gap: 7px;
+  }
+
+  .spreadsheet-scroll-marker {
+    width: min(150px, 48%);
+    height: 7px;
+    margin-left: 1px;
+  }
+
+  .spreadsheet-scroll-marker span {
+    top: 2px;
+    height: 3px;
   }
 
   .past-count-spreadsheet table {

@@ -59,6 +59,7 @@ const state = {
   latestReportError: "",
   exportLoading: false,
 };
+let spreadsheetResizeBound = false;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -1132,6 +1133,41 @@ function renderShell() {
   });
   document.querySelector("#delete-count-cancel")?.addEventListener("click", closeDeleteCountDialog);
   document.querySelector("#delete-count-confirm")?.addEventListener("click", confirmDeleteCount);
+  bindSpreadsheetScrollIndicators();
+}
+
+function updateSpreadsheetScrollIndicator(shell) {
+  const scroller = shell.querySelector("[data-spreadsheet-scroll]");
+  const marker = shell.querySelector("[data-spreadsheet-marker]");
+  if (!scroller || !marker) return;
+
+  const maxScroll = Math.max(0, scroller.scrollWidth - scroller.clientWidth);
+  const markerWidth = marker.clientWidth || 1;
+  const visibleRatio = scroller.scrollWidth ? scroller.clientWidth / scroller.scrollWidth : 1;
+  const thumbWidth = maxScroll > 0 ? Math.max(34, Math.min(markerWidth, markerWidth * visibleRatio)) : 44;
+  const left = maxScroll > 0 ? (scroller.scrollLeft / maxScroll) * Math.max(0, markerWidth - thumbWidth) : 0;
+
+  shell.classList.toggle("is-scrollable", maxScroll > 1);
+  marker.style.setProperty("--spreadsheet-marker-width", `${thumbWidth.toFixed(1)}px`);
+  marker.style.setProperty("--spreadsheet-marker-left", `${left.toFixed(1)}px`);
+}
+
+function bindSpreadsheetScrollIndicators() {
+  document.querySelectorAll("[data-spreadsheet-shell]").forEach((shell) => {
+    const scroller = shell.querySelector("[data-spreadsheet-scroll]");
+    if (!scroller) return;
+    const update = () => updateSpreadsheetScrollIndicator(shell);
+    scroller.addEventListener("scroll", update, { passive: true });
+    update();
+    window.requestAnimationFrame(update);
+  });
+
+  if (!spreadsheetResizeBound) {
+    spreadsheetResizeBound = true;
+    window.addEventListener("resize", () => {
+      document.querySelectorAll("[data-spreadsheet-shell]").forEach(updateSpreadsheetScrollIndicator);
+    });
+  }
 }
 
 function renderDeleteCountDialog() {
@@ -2001,40 +2037,43 @@ function renderPastCountSpreadsheet(entries) {
   }
 
   return `
-    <div class="past-count-spreadsheet" role="region" aria-label="Selected count spreadsheet" tabindex="0">
-      <table>
-        <thead>
-          <tr>
-            <th>Item</th>
-            <th>Category</th>
-            <th>Qty</th>
-            <th>Unit</th>
-            <th>Status</th>
-            <th>Original phrase</th>
-            <th>Counted by</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${entries
-            .map(
-              (entry) => `
-                <tr>
-                  <td>
-                    <strong>${escapeHtml(entry.item_name_clean || "Unnamed item")}</strong>
-                    <small>${escapeHtml(entry.item_name_raw || "")}</small>
-                  </td>
-                  <td>${escapeHtml(getCategory(entry))}</td>
-                  <td>${escapeHtml(formatQty(entry.quantity ?? ""))}</td>
-                  <td>${escapeHtml(entry.unit || "")}</td>
-                  <td><span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status || "Clean")}</span></td>
-                  <td>${escapeHtml(entry.original_phrase || "")}</td>
-                  <td>${escapeHtml(entry.counted_by || "—")}</td>
-                </tr>
-              `,
-            )
-            .join("")}
-        </tbody>
-      </table>
+    <div class="past-count-spreadsheet-shell" data-spreadsheet-shell>
+      <div class="spreadsheet-scroll-marker" data-spreadsheet-marker aria-hidden="true"><span></span></div>
+      <div class="past-count-spreadsheet" role="region" aria-label="Selected count spreadsheet" tabindex="0" data-spreadsheet-scroll>
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Category</th>
+              <th>Qty</th>
+              <th>Unit</th>
+              <th>Status</th>
+              <th>Original phrase</th>
+              <th>Counted by</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${entries
+              .map(
+                (entry) => `
+                  <tr>
+                    <td>
+                      <strong>${escapeHtml(entry.item_name_clean || "Unnamed item")}</strong>
+                      <small>${escapeHtml(entry.item_name_raw || "")}</small>
+                    </td>
+                    <td>${escapeHtml(getCategory(entry))}</td>
+                    <td>${escapeHtml(formatQty(entry.quantity ?? ""))}</td>
+                    <td>${escapeHtml(entry.unit || "")}</td>
+                    <td><span class="status-pill ${statusClass(entry.status)}">${escapeHtml(entry.status || "Clean")}</span></td>
+                    <td>${escapeHtml(entry.original_phrase || "")}</td>
+                    <td>${escapeHtml(entry.counted_by || "—")}</td>
+                  </tr>
+                `,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
     </div>
   `;
 }
