@@ -126,12 +126,13 @@ function TransitionStrip() {
   return `
     <section class="koe-transition-section" aria-labelledby="inventory-night-title">
       <div class="koe-section-inner koe-transition-copy">
-        <p class="koe-eyebrow koe-reveal">BUILT FOR INVENTORY NIGHT</p>
-        <h2 class="koe-serif-heading koe-reveal koe-stagger-1" id="inventory-night-title">Say the count. Koe structures the mess.</h2>
-        <p class="koe-short-line koe-reveal koe-stagger-2">Voice counts become clean rows, purchase quantities, and exportable records.</p>
+        <p class="koe-eyebrow koe-reveal">Built for inventory night.</p>
+        <h2 class="koe-serif-heading koe-reveal koe-stagger-1" id="inventory-night-title">Count faster. Review cleaner. Buy smarter.</h2>
+        <p class="koe-short-line koe-reveal koe-stagger-2">Voice, photo review, purchase planning, and CSV export in one clean flow.</p>
         <div class="koe-pill-row koe-reveal koe-stagger-3" aria-label="Koe workflow strengths">
-          <span>Voice-first</span>
-          <span>Purchase-ready</span>
+          <span>Voice count</span>
+          <span>Photo review</span>
+          <span>Purchase plan</span>
           <span>CSV export</span>
         </div>
       </div>
@@ -144,8 +145,8 @@ function ProductFlowSection() {
     <section class="koe-flow-section" aria-labelledby="product-flow-title">
       <div class="koe-section-inner">
         <div class="koe-section-heading koe-reveal">
-          <p class="koe-eyebrow">HOW THE COUNT MOVES</p>
-          <h2 class="koe-serif-heading" id="product-flow-title">From spoken inventory to saved report.</h2>
+          <p class="koe-eyebrow">Voice Count to Purchase List</p>
+          <h2 class="koe-serif-heading" id="product-flow-title">Count it once. Leave with what to buy.</h2>
         </div>
         <div class="koe-flow-track">
           <article class="koe-flow-card koe-reveal koe-stagger-1">
@@ -153,28 +154,32 @@ function ProductFlowSection() {
               <p>We have 2 boxes of tomatoes and need 6 more.</p>
             </div>
             <span>Speak naturally</span>
-            <h3>Messy Count</h3>
+            <h3>Voice Count</h3>
           </article>
           <div class="koe-flow-connector koe-reveal koe-stagger-2" aria-hidden="true"></div>
           <article class="koe-flow-card koe-reveal koe-stagger-3">
             <div class="koe-flow-visual koe-flow-table" aria-hidden="true">
-              <div class="koe-flow-row koe-row-delay-1"><span>Tomatoes</span><b>2 boxes</b><em>6 boxes</em></div>
-              <div class="koe-flow-row koe-row-delay-2"><span>Olive Oil</span><b>3 bottles</b><em>TBD</em></div>
-              <div class="koe-flow-row koe-row-delay-3"><span>Limes</span><b>TBD</b><em>Review</em></div>
+              <div class="koe-flow-row koe-row-delay-1"><span>Tomatoes</span><b>2 boxes</b><em>Buy 6 boxes</em><i>Clean</i></div>
+              <div class="koe-flow-row koe-row-delay-2"><span>Olive Oil</span><b>3 bottles</b><em>Buy 2 bottles</em><i>Clean</i></div>
+              <div class="koe-flow-row koe-row-delay-3"><span>Limes</span><b>18 count</b><em>Buy 24 count</em><i>Review</i></div>
             </div>
             <span>Koe structures it</span>
-            <h3>Clean Rows</h3>
+            <h3>Clean Report</h3>
           </article>
           <div class="koe-flow-connector koe-reveal koe-stagger-4" aria-hidden="true"></div>
           <article class="koe-flow-card koe-reveal koe-stagger-5">
             <div class="koe-flow-visual koe-flow-report" aria-hidden="true">
-              <strong>Past Counts</strong>
-              <small>Walk-in count saved</small>
-              <i>CSV</i>
+              <strong>Purchase List</strong>
+              <small>Next order draft</small>
+              <div class="koe-flow-report-list">
+                <span>Tomatoes <b>6 boxes</b></span>
+                <span>Olive Oil <b>2 bottles</b></span>
+                <span>Limes <b>24 count</b></span>
+              </div>
               <button type="button" tabindex="-1">Export CSV</button>
             </div>
             <span>Review anytime</span>
-            <h3>Saved Report</h3>
+            <h3>Purchase List</h3>
           </article>
         </div>
       </div>
@@ -185,9 +190,9 @@ function ProductFlowSection() {
 function DarkProductPanel() {
   const rows = [
     ["Tomatoes", "2 boxes", "6 boxes", "Clean", "clean"],
-    ["Olive Oil", "3 bottles", "TBD", "Clean", "clean"],
-    ["Limes", "TBD", "TBD", "Needs Review", "review"],
-    ["Napkins", "1 case", "TBD", "Clean", "clean"],
+    ["Olive Oil", "3 bottles", "2 bottles", "Clean", "clean"],
+    ["Limes", "18 count", "24 count", "Review", "review"],
+    ["Napkins", "1 case", "2 cases", "Clean", "clean"],
   ];
   return `
     <section class="koe-dark-section" aria-labelledby="clean-count-title">
@@ -242,10 +247,40 @@ function FeatureGridSection() {
       `,
     },
     {
-      title: "Quantity to Purchase.",
+      title: '<span class="koe-accent-title">Photo counts.</span>',
+      text: "Snap inventory areas and review detected items.",
+      visual: `
+        <div class="koe-mini-photo-frame">
+          <span class="koe-photo-badge">Review before saving</span>
+          <div class="koe-photo-tags">
+            <b>Olive Oil - 3 bottles</b>
+            <b>Lettuce - 5 heads</b>
+            <b>Tomato Boxes - 4 boxes</b>
+          </div>
+        </div>
+      `,
+    },
+    {
+      title: '<span class="koe-accent-title">Quantity to Purchase.</span>',
       text: "Separate what you have from what you need to buy.",
       visual: `
-        <div class="koe-mini-purchase-row"><span>Tomatoes</span><b>6 boxes</b></div>
+        <div class="koe-mini-purchase-row"><span>Tomatoes</span><b>Buy 6 boxes</b></div>
+      `,
+    },
+    {
+      title: '<span class="koe-accent-title">Forecast restocks.</span>',
+      text: "Use sales, recipes, and stock to plan next week.",
+      visual: `
+        <div class="koe-mini-forecast-flow">
+          <div class="koe-mini-forecast-node">Sales</div>
+          <div class="koe-mini-forecast-node">Recipes</div>
+          <div class="koe-mini-forecast-node">Stock</div>
+          <div class="koe-mini-forecast-arrow">→</div>
+          <div class="koe-mini-forecast-list">
+            <span>Tomatoes <b>6 boxes</b></span>
+            <span>Milk <b>4 gallons</b></span>
+          </div>
+        </div>
       `,
     },
     {
@@ -256,7 +291,7 @@ function FeatureGridSection() {
       `,
     },
     {
-      title: "CSV Export.",
+      title: '<span class="koe-accent-title">CSV export.</span>',
       text: "Send clean reports wherever the restaurant already works.",
       visual: `
         <div class="koe-mini-csv"><strong>CSV</strong><span>Export ready</span></div>
@@ -283,6 +318,60 @@ function FeatureGridSection() {
               `,
             )
             .join("")}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function ForecastSection() {
+  const inputs = [
+    ["Last month sales", "Menu item volume"],
+    ["Recipe ingredients", "What each plate uses"],
+    ["Current inventory", "What is on hand now"],
+  ];
+  const purchaseRows = [
+    ["Tomatoes", "6 boxes"],
+    ["Chicken Breast", "20 lb"],
+    ["Whole Milk", "4 gallons"],
+    ["Paper Cups", "500 cups"],
+  ];
+
+  return `
+    <section class="koe-forecast-section" aria-labelledby="forecast-title">
+      <div class="koe-section-inner koe-forecast-grid">
+        <div class="koe-forecast-copy koe-reveal">
+          <p class="koe-eyebrow">Next Week Restock Planning</p>
+          <h2 class="koe-serif-heading" id="forecast-title">Plan next week before you run out.</h2>
+          <p>Sales data, recipes, and current stock become a suggested purchase list.</p>
+        </div>
+        <div class="koe-forecast-visual" aria-label="Forecast restock planning visual">
+          <div class="koe-forecast-inputs">
+            ${inputs
+              .map(
+                ([title, detail], index) => `
+                  <div class="koe-forecast-input-card koe-reveal koe-stagger-${index + 1}">
+                    <span>${title}</span>
+                    <b>${detail}</b>
+                  </div>
+                `,
+              )
+              .join("")}
+          </div>
+          <div class="koe-forecast-connector koe-reveal koe-stagger-3" aria-hidden="true"></div>
+          <article class="koe-forecast-plan koe-reveal koe-stagger-4">
+            <span>Suggested Purchase List</span>
+            <strong>Next week purchase plan</strong>
+            <div>
+              ${purchaseRows
+                .map(
+                  ([item, quantity]) => `
+                    <p><span>${item}</span><b>${quantity}</b></p>
+                  `,
+                )
+                .join("")}
+            </div>
+          </article>
         </div>
       </div>
     </section>
@@ -327,7 +416,7 @@ function FinalCtaSection() {
         <article class="koe-final-card koe-reveal">
           <p class="koe-eyebrow">READY WHEN THE COUNT STARTS</p>
           <h2 class="koe-serif-heading" id="final-cta-title">Ready to clean up inventory night?</h2>
-          <p>Start with voice. Leave with a clean report.</p>
+          <p>Count by voice, review by photo, and plan what to buy next.</p>
           <div class="koe-final-actions">
             ${CTAButton({ label: "Start Counting", href: "/dashboard.html" })}
             ${CTAButton({ label: "Sign In", href: "/product.html", variant: "secondary" })}
@@ -345,6 +434,7 @@ function LandingStory() {
       ${ProductFlowSection()}
       ${DarkProductPanel()}
       ${FeatureGridSection()}
+      ${ForecastSection()}
       ${HowItWorksSection()}
       ${FinalCtaSection()}
     </div>
