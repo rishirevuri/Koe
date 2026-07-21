@@ -1263,7 +1263,11 @@ function renderPostCountOverview(data, latestCount, rows) {
       ${renderInventoryBreakdown(rows)}
       ${renderReorderPriorityCard(data, rows)}
     </section>
-    ${renderKpiCards(rows, data)}
+    ${renderQuantityToPurchaseSection(state.latestReport, {
+      variant: "overview",
+      description: "Purchase amounts the team explicitly mentioned in the latest count. Par estimates stay separate.",
+      emptyText: "No purchase quantities mentioned in the latest count.",
+    })}
     ${renderMobilePastCountsPreview()}
     ${renderMainSummaryGrid(data, latestCount, rows)}
     ${renderEstimatedReorderWatchlist(data, rows)}
@@ -1332,40 +1336,6 @@ function renderMobilePastCountsPreview() {
           )
           .join("")}
       </div>
-    </section>
-  `;
-}
-
-function renderKpiCards(rows, data = state.data || {}) {
-  const counts = getStatusCounts(rows);
-  const quality = getDataQualityScore(rows);
-  const parCounts = getParCounts(rows, data);
-  const cards = [
-    { icon: "R", label: "Reorder watchlist", value: parCounts.watchlist, text: "Low + critical demo par" },
-    { icon: "!", label: "Critical items", value: parCounts.critical, text: "Review before ordering" },
-    { icon: "!", label: "Needs review", value: counts.review, text: "Review before export" },
-    { icon: "Σ", label: "Total items counted", value: counts.total, text: "Rows saved from latest count" },
-    { icon: "✓", label: "Clean items", value: counts.clean, text: "No cleanup flags" },
-    { icon: "½", label: "Partial quantities", value: counts.partial, text: "Fractions or partial containers" },
-    { icon: "↔", label: "Converted units", value: counts.converted, text: "Package conversions handled" },
-    { icon: "%", label: "Data quality score", value: quality.value === null ? "—" : `${quality.value}%`, text: quality.label },
-  ];
-  return `
-    <section class="post-count-kpis" aria-label="Latest count KPIs">
-      ${cards
-        .map(
-          (card) => `
-            <article class="post-count-kpi">
-              <span class="kpi-icon">${escapeHtml(card.icon)}</span>
-              <div>
-                <p>${escapeHtml(card.label)}</p>
-                <strong>${escapeHtml(card.value)}</strong>
-                <small>${escapeHtml(card.text)}</small>
-              </div>
-            </article>
-          `,
-        )
-        .join("")}
     </section>
   `;
 }
@@ -1940,7 +1910,7 @@ function renderSelectedCountDetail(session) {
     <div class="past-count-detail-header">
       <div>
         <span>${escapeHtml(formatDateTime(getCountTimestamp(session)))}</span>
-        <h2>${escapeHtml(session.area || "Inventory Count")}</h2>
+        <h2>${escapeHtml(session.area || "Latest Inventory Count")}</h2>
         <p>Saved count #${escapeHtml(session.id)}${session.status ? ` • ${escapeHtml(session.status)}` : ""}</p>
       </div>
       <div class="past-count-detail-actions">
@@ -1958,21 +1928,28 @@ function renderSelectedCountDetail(session) {
       <div><dt>Area</dt><dd>${escapeHtml(session.area || "Not set")}</dd></div>
       <div><dt>Completed</dt><dd>${escapeHtml(formatCountTime(getCountTimestamp(session)))}</dd></div>
     </dl>
-    ${renderQuantityToPurchaseSection(report)}
+    ${renderQuantityToPurchaseSection(report, {
+      variant: "past",
+      description: "Only explicit buy, order, or restock amounts from this saved count.",
+      emptyText: "No purchase quantities mentioned in this count.",
+    })}
     ${renderPastCountSpreadsheet(entries)}
   `;
 }
 
-function renderQuantityToPurchaseSection(report) {
-  if (!report || state.reportLoading || state.reportError) return "";
+function renderQuantityToPurchaseSection(report, options = {}) {
+  if (!report) return "";
   const purchaseItems = getReportPurchaseItems(report);
+  const variant = options.variant ? ` quantity-purchase-card--${options.variant}` : "";
+  const description = options.description || "Only explicit order or restock amounts mentioned during the count.";
+  const emptyText = options.emptyText || "No purchase quantities mentioned.";
   return `
-    <section class="quantity-purchase-card quantity-purchase-card--past" aria-label="Quantity to Purchase">
+    <section class="quantity-purchase-card${variant}" aria-label="Quantity to Purchase">
       <div class="quantity-purchase-heading">
         <span>${renderCartIcon()}</span>
         <div>
           <h3>Quantity to Purchase</h3>
-          <p>Explicit order or restock amounts mentioned during this count.</p>
+          <p>${escapeHtml(description)}</p>
         </div>
       </div>
       ${
@@ -1989,7 +1966,7 @@ function renderQuantityToPurchaseSection(report) {
                 )
                 .join("")}
             </div>`
-          : `<div class="quantity-purchase-empty">No purchase quantities mentioned.</div>`
+          : `<div class="quantity-purchase-empty">${escapeHtml(emptyText)}</div>`
       }
     </section>
   `;

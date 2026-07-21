@@ -3675,29 +3675,44 @@ button:disabled,
 
 .quantity-purchase-card {
   display: grid;
-  gap: 14px;
+  gap: 12px;
   margin: 16px 0 18px;
-  padding: 16px;
-  background: rgba(255, 250, 242, 0.76);
-  border: 1px solid rgba(200, 107, 50, 0.18);
-  border-radius: 14px;
+  padding: 17px 18px;
+  color: #142f29;
+  font-family: "Avenir Next", "Helvetica Neue", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background:
+    linear-gradient(90deg, rgba(200, 107, 50, 0.08), transparent 38%),
+    rgba(255, 253, 248, 0.9);
+  border: 1px solid rgba(16, 35, 31, 0.1);
+  border-left: 3px solid rgba(200, 107, 50, 0.54);
+  border-radius: 16px;
+  box-shadow: 0 16px 34px rgba(8, 26, 53, 0.045);
+}
+
+.quantity-purchase-card--overview {
+  margin-top: -2px;
+  margin-bottom: 18px;
+}
+
+.quantity-purchase-card--past {
+  margin-bottom: 18px;
 }
 
 .quantity-purchase-heading {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 11px;
 }
 
 .quantity-purchase-heading > span {
   display: grid;
   flex: 0 0 auto;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   place-items: center;
-  color: #a95725;
-  background: rgba(255, 240, 230, 0.92);
-  border: 1px solid rgba(200, 107, 50, 0.2);
+  color: #9d5528;
+  background: rgba(255, 240, 230, 0.72);
+  border: 1px solid rgba(200, 107, 50, 0.16);
   border-radius: 999px;
 }
 
@@ -3714,14 +3729,16 @@ button:disabled,
 .quantity-purchase-heading h3 {
   margin: 0;
   color: var(--ink);
-  font-size: 1.08rem;
-  font-weight: 700;
+  font-size: 1.06rem;
+  font-weight: 520;
+  letter-spacing: 0;
 }
 
 .quantity-purchase-heading p {
   margin: 3px 0 0;
-  color: rgba(38, 48, 64, 0.66);
+  color: rgba(38, 48, 64, 0.62);
   font-size: 13px;
+  font-weight: 400;
 }
 
 .quantity-purchase-list {
@@ -3730,15 +3747,18 @@ button:disabled,
 }
 
 .quantity-purchase-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  min-height: 42px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.78);
-  border: 1px solid rgba(16, 35, 31, 0.08);
-  border-radius: 10px;
+  gap: 16px;
+  min-height: 38px;
+  padding: 9px 2px;
+  background: transparent;
+  border-top: 1px solid rgba(16, 35, 31, 0.08);
+}
+
+.quantity-purchase-row:first-child {
+  border-top: 0;
 }
 
 .quantity-purchase-row span {
@@ -3746,29 +3766,30 @@ button:disabled,
   overflow: hidden;
   color: var(--ink);
   font-size: 14px;
-  font-weight: 650;
+  font-weight: 480;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .quantity-purchase-row strong {
   flex: 0 0 auto;
-  color: #7e411d;
+  color: #8c4c24;
   font-size: 14px;
-  font-weight: 800;
+  font-weight: 620;
   text-align: right;
 }
 
 .quantity-purchase-empty {
   display: grid;
-  min-height: 46px;
+  min-height: 42px;
   place-items: center;
-  padding: 10px 12px;
-  color: rgba(38, 48, 64, 0.64);
+  padding: 9px 12px;
+  color: rgba(38, 48, 64, 0.58);
   font-size: 13px;
-  background: rgba(255, 255, 255, 0.58);
-  border: 1px dashed rgba(170, 132, 80, 0.26);
-  border-radius: 10px;
+  font-weight: 400;
+  background: rgba(255, 255, 255, 0.44);
+  border: 1px dashed rgba(16, 35, 31, 0.12);
+  border-radius: 12px;
 }
 
 .report-table th:first-child,
@@ -5133,6 +5154,7 @@ button:disabled,
 
 .dashboard-priority-grid,
 .post-count-kpis,
+.quantity-purchase-card--overview,
 .dashboard-summary-grid,
 .estimated-reorder-section,
 .dashboard-analytics-grid,

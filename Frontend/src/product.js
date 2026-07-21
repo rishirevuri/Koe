@@ -551,7 +551,7 @@ function renderQuantityToPurchaseSection(reportOrEntries, options = {}) {
         <span>${ProductIcon("cart")}</span>
         <div>
           <h3>Quantity to Purchase</h3>
-          <p>Explicit order or restock amounts mentioned during the count.</p>
+          <p>Only explicit buy, order, or restock amounts from this count.</p>
         </div>
       </div>
       ${
