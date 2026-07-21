@@ -23,6 +23,20 @@ const googleDashboardRedirectKey = "koe:googleDashboardRedirect";
 const REVIEW_STATUSES = new Set(["Needs Review", "Missing Unit", "Possible Duplicate"]);
 const VALID_STATUSES = new Set(["Clean", "Partial Quantity", "Missing Unit", "Needs Review", "Possible Duplicate", "Converted Unit"]);
 const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Proteins", "Bakery", "Sauces & Condiments", "Oils & Liquids", "Beverages", "Frozen", "Supplies", "Dry Goods", "Uncategorized"];
+const CATEGORY_COLORS = {
+  Produce: "#9fbf9f",
+  "Dairy & Eggs": "#f0d980",
+  Proteins: "#b98272",
+  Bakery: "#d4a66a",
+  "Sauces & Condiments": "#c97f5f",
+  "Oils & Liquids": "#7da4b8",
+  Beverages: "#8aa0c4",
+  "Dry Goods": "#c79a4b",
+  Frozen: "#a8d1df",
+  Supplies: "#a9ada8",
+  Uncategorized: "#d8d6cf",
+};
+const CATEGORY_FALLBACK_COLORS = ["#9fbf9f", "#f0d980", "#b98272", "#d4a66a", "#c97f5f", "#7da4b8", "#8aa0c4", "#c79a4b", "#a8d1df", "#a9ada8"];
 const INVALID_FALLBACK_ITEM_NAMES = new Set([
   "of",
   "and",
@@ -92,6 +106,9 @@ const state = {
   dashboardData: null,
   dashboardError: "",
   dashboardLoading: false,
+  mobileLatestReport: null,
+  mobileLatestReportLoading: false,
+  mobileLatestReportError: "",
   mobileCountSessions: [],
   mobileCountsLoading: false,
   mobileCountsError: "",
@@ -409,6 +426,9 @@ function resetWorkspaceState() {
   state.dashboardData = null;
   state.dashboardError = "";
   state.dashboardLoading = false;
+  state.mobileLatestReport = null;
+  state.mobileLatestReportLoading = false;
+  state.mobileLatestReportError = "";
   state.mobileCountSessions = [];
   state.mobileCountsLoading = false;
   state.mobileCountsError = "";
@@ -542,16 +562,22 @@ function getReportPurchaseItems(reportOrEntries) {
 
 function renderQuantityToPurchaseSection(reportOrEntries, options = {}) {
   const purchaseItems = getReportPurchaseItems(reportOrEntries);
-  const className = ["quantity-purchase-card", options.mobile ? "quantity-purchase-card--mobile" : ""]
+  const className = [
+    "quantity-purchase-card",
+    options.mobile ? "quantity-purchase-card--mobile" : "",
+    options.variant ? `quantity-purchase-card--${options.variant}` : "",
+  ]
     .filter(Boolean)
     .join(" ");
+  const description = options.description || "Only explicit buy, order, or restock amounts from this count.";
+  const emptyText = options.emptyText || "No purchase quantities mentioned.";
   return `
     <section class="${className}" aria-label="Quantity to Purchase">
       <div class="quantity-purchase-heading">
         <span>${ProductIcon("cart")}</span>
         <div>
           <h3>Quantity to Purchase</h3>
-          <p>Only explicit buy, order, or restock amounts from this count.</p>
+          <p>${escapeHtml(description)}</p>
         </div>
       </div>
       ${
@@ -568,7 +594,7 @@ function renderQuantityToPurchaseSection(reportOrEntries, options = {}) {
                 )
                 .join("")}
             </div>`
-          : `<div class="quantity-purchase-empty">No purchase quantities mentioned.</div>`
+          : `<div class="quantity-purchase-empty">${escapeHtml(emptyText)}</div>`
       }
     </section>
   `;
@@ -682,6 +708,55 @@ function groupEntriesByCategory(entries) {
     .filter((group) => group.entries.length);
 }
 
+function getDashboardLatestCountId(data = state.dashboardData) {
+  return data?.last_count_summary?.count_id || data?.export_status?.count_id || null;
+}
+
+function getCategoryColor(category, index = 0) {
+  return CATEGORY_COLORS[category] || CATEGORY_FALLBACK_COLORS[index % CATEGORY_FALLBACK_COLORS.length] || CATEGORY_COLORS.Uncategorized;
+}
+
+function getCategoryCounts(entries) {
+  const counts = new Map();
+  entries.forEach((entry) => {
+    const category = inferCategory(entry);
+    counts.set(category, (counts.get(category) || 0) + 1);
+  });
+  return [...counts.entries()]
+    .map(([category, count]) => ({ category, count }))
+    .sort((a, b) => {
+      const aIndex = CATEGORY_ORDER.indexOf(a.category);
+      const bIndex = CATEGORY_ORDER.indexOf(b.category);
+      return (aIndex === -1 ? 99 : aIndex) - (bIndex === -1 ? 99 : bIndex) || a.category.localeCompare(b.category);
+    });
+}
+
+function getMobileDashboardRows() {
+  return state.mobileLatestReport?.entries || [];
+}
+
+function getMobileParCounts(entries, data = state.dashboardData || {}) {
+  if (!entries.length) {
+    const summary = data?.estimated_par_summary || {};
+    return {
+      critical: Number(summary.critical_items || 0),
+      low: Number(summary.low_items || 0),
+      unknown: Number(summary.unknown_items || 0),
+      watchlist: Number(summary.watchlist_items || 0),
+    };
+  }
+  return entries.reduce(
+    (counts, entry) => {
+      if (entry.par_status === "critical") counts.critical += 1;
+      if (entry.par_status === "low") counts.low += 1;
+      if (entry.par_status === "unknown") counts.unknown += 1;
+      counts.watchlist = counts.critical + counts.low;
+      return counts;
+    },
+    { critical: 0, low: 0, unknown: 0, watchlist: 0 },
+  );
+}
+
 function getCountTimestamp(count) {
   return count?.completed_at || count?.started_at || count?.created_at || null;
 }
@@ -714,14 +789,6 @@ function getCountItemCount(session) {
 
 function getCountReviewCount(session) {
   return getCountSummaryValue(session, "entries_needing_review", 0);
-}
-
-function getRecentCountCount(sessions) {
-  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  return sessions.filter((session) => {
-    const time = new Date(getCountTimestamp(session) || 0).getTime();
-    return Number.isFinite(time) && time >= weekAgo;
-  }).length;
 }
 
 function getCountArea(session) {
@@ -934,17 +1001,32 @@ async function loadMobileDashboardSummary() {
   state.mobileCountsLoading = true;
   state.dashboardError = "";
   state.mobileCountsError = "";
+  state.mobileLatestReportError = "";
   try {
     const [summary, sessions] = await Promise.all([getDashboardSummary(), getCountSessions()]);
     state.dashboardData = summary;
     applyMobileCountSessions(sessions);
+    state.mobileLatestReport = null;
+    const latestCountId = getDashboardLatestCountId(summary);
+    if (latestCountId) {
+      state.mobileLatestReportLoading = true;
+      try {
+        state.mobileLatestReport = await getReport(latestCountId);
+      } catch (reportError) {
+        state.mobileLatestReportError = reportError.message || "Could not load latest count rows.";
+      } finally {
+        state.mobileLatestReportLoading = false;
+      }
+    }
     if (state.mobileActiveTab === "reports" && state.mobileSelectedCountId) {
       await loadMobileSelectedReport(state.mobileSelectedCountId, { renderBefore: false });
     }
   } catch (error) {
     state.dashboardError = error.message || "Dashboard summary unavailable.";
     state.mobileCountsError = error.message || "Could not load saved counts.";
+    state.mobileLatestReport = null;
   } finally {
+    state.mobileLatestReportLoading = false;
     state.dashboardLoading = false;
     state.mobileCountsLoading = false;
     if (state.view === "ready") render();
@@ -1816,19 +1898,26 @@ function renderMobilePageTitle(title, subtitle) {
 function renderMobileDashboardScreen({ totalItems, needsReview }) {
   const summary = state.dashboardData?.last_count_summary || {};
   const latestSession = state.mobileCountSessions[0] || null;
+  const rows = getMobileDashboardRows();
   const itemsCounted = summary.total_items_counted ?? getCountItemCount(latestSession) ?? totalItems;
-  const flagged = summary.needs_review_count ?? getCountReviewCount(latestSession) ?? needsReview;
-  const countsThisWeek = getRecentCountCount(state.mobileCountSessions);
-  const qualityValue = state.dashboardLoading && !state.dashboardData ? "Loading" : itemsCounted ? (flagged ? "Review" : "Clean") : "No data";
-  const qualityDetail = itemsCounted ? `${itemsCounted} latest item${itemsCounted === 1 ? "" : "s"}` : "Start a saved count";
   return `
     <main class="mobile-tab-panel mobile-dashboard-screen" id="dashboard">
-      ${renderMobilePageTitle("Dashboard", "Today's inventory snapshot and recent activity.")}
+      ${renderMobilePageTitle("Dashboard", "Latest count overview and purchase action items.")}
       ${state.dashboardError ? `<div class="mobile-dashboard-status">${escapeHtml(state.dashboardError)}</div>` : ""}
-      <section class="mobile-stats-grid" aria-label="Dashboard stats">
-        ${renderMobileStatCard("chart", "Counts this week", String(countsThisWeek), countsThisWeek ? "saved in last 7 days" : "No saved counts", "green")}
-        ${renderMobileStatCard("flag", "Items flagged", String(flagged || 0), latestSession ? "latest saved count" : "No saved count", "gold")}
-        ${renderMobileStatCard("shield", "Data status", qualityValue, qualityDetail, flagged ? "gold" : "green", true)}
+      ${
+        state.mobileLatestReportError
+          ? `<div class="mobile-dashboard-status">${escapeHtml(state.mobileLatestReportError)}</div>`
+          : ""
+      }
+      <section class="mobile-overview-stack" aria-label="Latest inventory overview">
+        ${renderMobileCategoryMixCard(rows, itemsCounted)}
+        ${renderMobileLowCriticalCard(rows)}
+        ${renderQuantityToPurchaseSection(state.mobileLatestReport, {
+          mobile: true,
+          variant: "mobile-dashboard",
+          description: "Explicit buy, order, or restock amounts from the latest count.",
+          emptyText: "No purchase quantities mentioned in the latest count.",
+        })}
       </section>
       <section class="mobile-recent-card">
         <div class="mobile-card-heading">
@@ -1845,6 +1934,85 @@ function renderMobileDashboardScreen({ totalItems, needsReview }) {
         </div>
       </section>
     </main>
+  `;
+}
+
+function renderMobileCategoryMixCard(rows, fallbackTotal = 0) {
+  const categories = getCategoryCounts(rows);
+  const total = rows.length || Number(fallbackTotal || 0);
+  const gradient = rows.length
+    ? `conic-gradient(${categories
+        .reduce(
+          (segments, item, index) => {
+            const start = segments.cursor;
+            const end = start + (item.count / rows.length) * 100;
+            segments.parts.push(`${getCategoryColor(item.category, index)} ${start.toFixed(2)}% ${end.toFixed(2)}%`);
+            segments.cursor = end;
+            return segments;
+          },
+          { cursor: 0, parts: [] },
+        )
+        .parts.join(", ")})`
+    : `conic-gradient(${CATEGORY_COLORS.Uncategorized} 0 100%)`;
+  return `
+    <section class="mobile-overview-card mobile-category-card">
+      <div class="mobile-overview-heading">
+        <span>Inventory Breakdown</span>
+        <h2>Category mix</h2>
+      </div>
+      <div class="mobile-category-layout">
+        <div class="mobile-category-donut" style="--mobile-donut-gradient: ${escapeHtml(gradient)}">
+          <div><strong>${escapeHtml(total || "—")}</strong><span>Total items</span></div>
+        </div>
+        <div class="mobile-category-list">
+          ${
+            rows.length
+              ? categories
+                  .slice(0, 5)
+                  .map(
+                    (item, index) => `
+                      <div class="mobile-category-row">
+                        <i style="background: ${escapeHtml(getCategoryColor(item.category, index))}"></i>
+                        <span>${escapeHtml(item.category)}</span>
+                        <strong>${escapeHtml(item.count)}</strong>
+                      </div>
+                    `,
+                  )
+                  .join("")
+              : `<div class="mobile-empty-line">No category data yet.</div>`
+          }
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderMobileLowCriticalCard(rows) {
+  const parCounts = getMobileParCounts(rows);
+  const watchlist = parCounts.critical + parCounts.low || parCounts.watchlist;
+  const criticalPercent = watchlist ? Math.round((parCounts.critical / watchlist) * 100) : 0;
+  const lowPercent = watchlist ? Math.max(0, 100 - criticalPercent) : 0;
+  return `
+    <section class="mobile-overview-card mobile-reorder-card">
+      <div class="mobile-overview-heading">
+        <span>Demo Estimate</span>
+        <h2>Low and critical</h2>
+        <p>Based on common restaurant usage patterns. Review before ordering.</p>
+      </div>
+      <div class="mobile-reorder-total ${watchlist ? "has-watchlist" : "is-clear"}">
+        <span>Reorder watchlist</span>
+        <strong>${escapeHtml(watchlist)}</strong>
+        <small>${watchlist ? "Low + critical items" : "No low or critical rows"}</small>
+      </div>
+      <div class="mobile-reorder-split">
+        <div><span>Critical</span><strong>${escapeHtml(parCounts.critical)}</strong></div>
+        <div><span>Low</span><strong>${escapeHtml(parCounts.low)}</strong></div>
+      </div>
+      <div class="mobile-reorder-meter" aria-hidden="true">
+        <i class="mobile-reorder-meter-critical" style="width: ${escapeHtml(criticalPercent)}%"></i>
+        <i class="mobile-reorder-meter-low" style="width: ${escapeHtml(lowPercent)}%"></i>
+      </div>
+    </section>
   `;
 }
 
@@ -1881,17 +2049,6 @@ function renderMobilePastCountRow(session, options = {}) {
       <em class="${isReview ? "is-review" : ""}">${ProductIcon(isReview ? "calendar" : "check")} ${escapeHtml(status)}</em>
       <i aria-hidden="true">${ProductIcon("chevron")}</i>
     </button>
-  `;
-}
-
-function renderMobileStatCard(iconName, label, value, detail, tone, isTextValue = false) {
-  return `
-    <article class="mobile-stat-card">
-      <span class="mobile-stat-icon mobile-stat-icon--${tone}">${ProductIcon(iconName)}</span>
-      <p>${escapeHtml(label)}</p>
-      <strong class="${isTextValue ? "is-text-value" : ""}">${escapeHtml(value)}</strong>
-      <small>${escapeHtml(detail)}</small>
-    </article>
   `;
 }
 
@@ -1971,6 +2128,8 @@ function renderMobileReportsScreen() {
   const reportSummary = state.mobileSelectedReport?.summary || {};
   const total = reportSummary.total_items ?? getCountItemCount(selectedSession) ?? entries.length;
   const review = reportSummary.items_needing_review ?? getCountReviewCount(selectedSession) ?? entries.filter((entry) => entry.status !== "Confirmed").length;
+  const selectedArea = selectedSession ? getCountArea(selectedSession) : "";
+  const reportTitle = selectedArea && selectedArea !== "Not set" ? `${selectedArea} Count` : "Latest Inventory Count";
 
   if (state.mobileCountsLoading && !sessions.length) {
     return `
@@ -2028,7 +2187,7 @@ function renderMobileReportsScreen() {
         <div class="mobile-report-title-row">
           <span>${ProductIcon("file")}</span>
           <div>
-            <h2>${escapeHtml(selectedSession ? `${getCountArea(selectedSession)} Count` : "Saved Count")}</h2>
+            <h2>${escapeHtml(selectedSession ? reportTitle : "Latest Inventory Count")}</h2>
             <p>${escapeHtml(formatReportDate(getCountTimestamp(selectedSession)))} <b>•</b> ${escapeHtml(getCountStatusLabel(selectedSession))}</p>
           </div>
         </div>
