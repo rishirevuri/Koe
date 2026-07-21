@@ -247,14 +247,21 @@ function FeatureGridSection() {
     },
     {
       title: '<span class="koe-accent-title">Photo counts.</span>',
-      text: "Snap inventory areas and review detected items.",
+      text: "Snapped inventories turned into clean data.",
       visual: `
-        <div class="koe-mini-photo-frame">
-          <span class="koe-photo-badge">Clean row preview</span>
-          <div class="koe-photo-tags">
-            <b>Olive Oil - 3 bottles</b>
-            <b>Lettuce - 5 heads</b>
-            <b>Tomato Boxes - 4 boxes</b>
+        <div class="koe-mini-camera-frame">
+          <div class="koe-camera-topbar">
+            <span></span>
+            <b>PHOTO</b>
+            <em></em>
+          </div>
+          <div class="koe-camera-viewfinder">
+            <i></i>
+          </div>
+          <div class="koe-camera-controls">
+            <span></span>
+            <b></b>
+            <em></em>
           </div>
         </div>
       `,
