@@ -286,6 +286,139 @@ def test_voice_parse_save_report_and_csv() -> None:
     assert "Manager Note" not in csv_text
 
 
+def test_restock_plan_endpoint_generates_purchase_plan() -> None:
+    db = SessionLocal()
+    try:
+        restaurant = db.query(Restaurant).filter(Restaurant.name == "Smoking Pig BBQ").one()
+        count = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            restaurant=restaurant,
+        )
+        db.add(count)
+        db.flush()
+        db.add_all(
+            [
+                CountEntry(
+                    count_session_id=count.id,
+                    item_name_raw="chicken breast",
+                    item_name="Chicken Breast",
+                    normalized_item_name="chicken breast",
+                    category="Proteins",
+                    quantity=10,
+                    unit="pounds",
+                    status="Clean",
+                ),
+                CountEntry(
+                    count_session_id=count.id,
+                    item_name_raw="burger buns",
+                    item_name="Burger Buns",
+                    normalized_item_name="burger buns",
+                    category="Bakery",
+                    quantity=48,
+                    unit="buns",
+                    status="Clean",
+                ),
+            ]
+        )
+        db.commit()
+        count_id = count.id
+    finally:
+        db.close()
+
+    sales_csv = b"item_name,quantity_sold,date\nChicken Sandwich,400,2026-07-01\nBurger,300,2026-07-01\n"
+    recipe_csv = (
+        b"menu_item,ingredient_name,quantity_per_item,unit\n"
+        b"Chicken Sandwich,Chicken Breast,0.25,pounds\n"
+        b"Chicken Sandwich,Burger Buns,1,buns\n"
+        b"Burger,Ground Beef,0.33,pounds\n"
+        b"Burger,Burger Buns,1,buns\n"
+    )
+
+    response = client.post(
+        "/restock/plan",
+        data={"count_id": str(count_id)},
+        files={
+            "sales_file": ("sales.csv", sales_csv, "text/csv"),
+            "recipe_file": ("recipes.csv", recipe_csv, "text/csv"),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"] == {
+        "items_forecasted": 3,
+        "suggested_purchases": 3,
+        "needs_review": 1,
+        "safety_buffer_percent": 10,
+    }
+    rows = {row["ingredient"]: row for row in payload["purchase_plan"]}
+    assert rows["Chicken Breast"]["projected_need"] == 27.5
+    assert rows["Chicken Breast"]["current_stock"] == 10
+    assert rows["Chicken Breast"]["suggested_purchase"] == 17.5
+    assert rows["Chicken Breast"]["status"] == "Ready"
+    assert rows["Burger Buns"]["projected_need"] == 192.5
+    assert rows["Burger Buns"]["current_stock"] == 48
+    assert rows["Burger Buns"]["suggested_purchase"] == 144.5
+    assert rows["Ground Beef"]["status"] == "Stock Unknown"
+    assert rows["Ground Beef"]["current_stock"] is None
+
+
+def test_restock_plan_endpoint_rejects_missing_sales_columns() -> None:
+    count_response = client.post("/counts", json={"area": "Walk-in"})
+    assert count_response.status_code == 200
+    count_id = count_response.json()["id"]
+
+    response = client.post(
+        "/restock/plan",
+        data={"count_id": str(count_id)},
+        files={
+            "sales_file": ("sales.csv", b"item_name\nChicken Sandwich\n", "text/csv"),
+            "recipe_file": (
+                "recipes.csv",
+                b"menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds\n",
+                "text/csv",
+            ),
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Missing required sales columns: quantity_sold"
+
+
+def test_restock_plan_endpoint_rejects_another_restaurants_count() -> None:
+    db = SessionLocal()
+    try:
+        other_restaurant = db.query(Restaurant).filter(Restaurant.name == "Massimo’s").one()
+        count = CountSession(
+            restaurant_id=other_restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            restaurant=other_restaurant,
+        )
+        db.add(count)
+        db.commit()
+        count_id = count.id
+    finally:
+        db.close()
+
+    response = client.post(
+        "/restock/plan",
+        data={"count_id": str(count_id)},
+        files={
+            "sales_file": ("sales.csv", b"item_name,quantity_sold\nChicken Sandwich,400\n", "text/csv"),
+            "recipe_file": (
+                "recipes.csv",
+                b"menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds\n",
+                "text/csv",
+            ),
+        },
+    )
+
+    assert response.status_code == 404
+
+
 def test_voice_parse_needed_quantity_saves_report_and_csv() -> None:
     count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
 

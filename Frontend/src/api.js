@@ -125,6 +125,63 @@ export async function getCountSessions() {
   return request("/counts");
 }
 
+export async function generateRestockPlan({ salesFile, recipeFile, countId }) {
+  const authHeaders = await getAuthHeaders();
+  const formData = new FormData();
+  formData.append("sales_file", salesFile);
+  formData.append("recipe_file", recipeFile);
+  formData.append("count_id", String(countId));
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 60000);
+  let response;
+  try {
+    response = await fetch(`${API_BASE_URL}/restock/plan`, {
+      method: "POST",
+      headers: authHeaders,
+      body: formData,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      const timeoutError = new Error(`Request timed out while generating the purchase plan at ${API_BASE_URL}.`);
+      timeoutError.status = 0;
+      throw timeoutError;
+    }
+    const networkError = new Error(`Backend unreachable at ${API_BASE_URL}. Browser error: ${error.message}`);
+    networkError.status = 0;
+    throw networkError;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    let detail = `Request failed with status ${response.status}`;
+    try {
+      const errorBody = await response.json();
+      detail = errorBody.detail || detail;
+    } catch {
+      detail = response.statusText || detail;
+    }
+    if (response.status === 401) {
+      detail = `Auth expired or invalid. Sign in again. (${detail})`;
+    } else if (response.status >= 500) {
+      detail = `Backend server error. ${detail}`;
+    }
+    const error = new Error(detail);
+    error.status = response.status;
+    throw error;
+  }
+
+  try {
+    return await response.json();
+  } catch (error) {
+    const invalidResponseError = new Error("Backend returned an invalid JSON response from /restock/plan.");
+    invalidResponseError.status = response.status;
+    throw invalidResponseError;
+  }
+}
+
 export async function deleteCountSession(countId) {
   return request(`/counts/${encodeURIComponent(countId)}`, {
     method: "DELETE",

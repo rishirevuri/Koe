@@ -2,6 +2,7 @@ import {
   createRestaurant,
   deleteCountSession,
   downloadCsv,
+  generateRestockPlan,
   getAuthMe,
   getCountSessions,
   getDashboardSummary,
@@ -33,6 +34,10 @@ const CATEGORY_COLORS = {
 };
 const CATEGORY_FALLBACK_COLORS = ["#9fbf9f", "#f0d980", "#b98272", "#d4a66a", "#c97f5f", "#7da4b8", "#8aa0c4", "#c79a4b", "#a8d1df", "#a9ada8"];
 const CATEGORY_ORDER = ["Produce", "Dairy & Eggs", "Proteins", "Bakery", "Sauces & Condiments", "Oils & Liquids", "Beverages", "Frozen", "Supplies", "Dry Goods", "Uncategorized"];
+const RESTOCK_REQUIRED_COLUMNS = {
+  sales: ["item_name", "quantity_sold"],
+  recipe: ["menu_item", "ingredient_name", "quantity_per_item", "unit"],
+};
 
 const state = {
   restaurantName: "Your Restaurant",
@@ -58,6 +63,16 @@ const state = {
   latestReportLoading: false,
   latestReportError: "",
   exportLoading: false,
+  restockSalesFile: null,
+  restockSalesMeta: null,
+  restockSalesError: "",
+  restockRecipeFile: null,
+  restockRecipeMeta: null,
+  restockRecipeError: "",
+  restockSelectedCountId: null,
+  restockLoading: false,
+  restockError: "",
+  restockPlan: null,
 };
 let spreadsheetResizeBound = false;
 
@@ -142,7 +157,10 @@ function formatCountTime(value) {
 }
 
 function getDashboardTabFromHash() {
-  return window.location.hash.replace("#", "").trim().toLowerCase() === "past-counts" ? "past-counts" : "overview";
+  const tab = window.location.hash.replace("#", "").trim().toLowerCase();
+  if (tab === "past-counts") return "past-counts";
+  if (tab === "restock-planner") return "restock-planner";
+  return "overview";
 }
 
 function getRestaurantNameFromSession(session) {
@@ -322,6 +340,10 @@ function applyCountSessions(sessions, selectCountId = null) {
   const preferredId = selectCountId || state.selectedCountId || state.countSessions[0]?.id || null;
   const selectedExists = state.countSessions.some((session) => Number(session.id) === Number(preferredId));
   state.selectedCountId = selectedExists && preferredId ? Number(preferredId) : state.countSessions[0]?.id ? Number(state.countSessions[0].id) : null;
+  const plannerPreferredId = state.restockSelectedCountId || state.selectedCountId || state.countSessions[0]?.id || null;
+  const plannerSelectedExists = state.countSessions.some((session) => Number(session.id) === Number(plannerPreferredId));
+  state.restockSelectedCountId =
+    plannerSelectedExists && plannerPreferredId ? Number(plannerPreferredId) : state.countSessions[0]?.id ? Number(state.countSessions[0].id) : null;
   if (!state.selectedCountId) {
     state.selectedReport = null;
   }
@@ -381,6 +403,17 @@ function setDashboardTab(tab, countId = null) {
     }
     return;
   }
+  if (tab === "restock-planner") {
+    if (window.location.hash !== "#restock-planner") {
+      window.location.hash = "restock-planner";
+    } else {
+      renderShell();
+    }
+    if (!state.countSessions.length && !state.countsLoading) {
+      loadPlannerCounts();
+    }
+    return;
+  }
   if (window.location.hash) {
     window.location.hash = "";
   } else {
@@ -399,6 +432,126 @@ function formatDuration(seconds) {
 function formatQty(value) {
   if (value === null || value === undefined || value === "") return "—";
   return Number.isInteger(value) ? String(value) : String(value);
+}
+
+function normalizeRestockHeader(value) {
+  return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+function splitCsvRow(line) {
+  const values = [];
+  let current = "";
+  let quoted = false;
+  for (let index = 0; index < line.length; index += 1) {
+    const char = line[index];
+    const next = line[index + 1];
+    if (char === '"' && quoted && next === '"') {
+      current += '"';
+      index += 1;
+    } else if (char === '"') {
+      quoted = !quoted;
+    } else if (char === "," && !quoted) {
+      values.push(current.trim());
+      current = "";
+    } else {
+      current += char;
+    }
+  }
+  values.push(current.trim());
+  return values;
+}
+
+async function inspectRestockCsvFile(file, type) {
+  if (!file) throw new Error("Choose a CSV file.");
+  if (!file.name.toLowerCase().endsWith(".csv")) {
+    throw new Error("Upload a .csv file.");
+  }
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).filter((line) => line.trim());
+  if (!lines.length) throw new Error("This CSV is empty.");
+  const headers = splitCsvRow(lines[0]).map(normalizeRestockHeader);
+  const missing = RESTOCK_REQUIRED_COLUMNS[type].filter((column) => !headers.includes(normalizeRestockHeader(column)));
+  if (missing.length) {
+    throw new Error(`Missing required columns: ${missing.join(", ")}`);
+  }
+  return {
+    name: file.name,
+    rowCount: Math.max(0, lines.length - 1),
+  };
+}
+
+function resetRestockPlan() {
+  state.restockPlan = null;
+  state.restockError = "";
+}
+
+async function handleRestockFile(type, file) {
+  const fileKey = type === "sales" ? "restockSalesFile" : "restockRecipeFile";
+  const metaKey = type === "sales" ? "restockSalesMeta" : "restockRecipeMeta";
+  const errorKey = type === "sales" ? "restockSalesError" : "restockRecipeError";
+  state[fileKey] = null;
+  state[metaKey] = null;
+  state[errorKey] = "";
+  resetRestockPlan();
+  renderShell();
+  try {
+    const meta = await inspectRestockCsvFile(file, type);
+    state[fileKey] = file;
+    state[metaKey] = meta;
+  } catch (error) {
+    state[errorKey] = error.message || "Could not read this CSV.";
+  }
+  renderShell();
+}
+
+function removeRestockFile(type) {
+  if (type === "sales") {
+    state.restockSalesFile = null;
+    state.restockSalesMeta = null;
+    state.restockSalesError = "";
+  } else {
+    state.restockRecipeFile = null;
+    state.restockRecipeMeta = null;
+    state.restockRecipeError = "";
+  }
+  resetRestockPlan();
+  renderShell();
+}
+
+function getRestockAvailableCounts() {
+  const completed = state.countSessions.filter((session) => session.completed_at || ["completed", "approved"].includes(String(session.status || "").toLowerCase()));
+  return completed.length ? completed : state.countSessions;
+}
+
+function getRestockSelectedCount() {
+  const counts = getRestockAvailableCounts();
+  return counts.find((session) => Number(session.id) === Number(state.restockSelectedCountId)) || counts[0] || null;
+}
+
+function canGenerateRestockPlan() {
+  return Boolean(
+    state.restockSalesFile &&
+      state.restockRecipeFile &&
+      getRestockSelectedCount() &&
+      !state.restockSalesError &&
+      !state.restockRecipeError &&
+      !state.restockLoading,
+  );
+}
+
+function formatPlanQuantity(value) {
+  if (value === null || value === undefined || value === "") return "Unknown";
+  const number = Number(value);
+  if (Number.isNaN(number)) return String(value);
+  return Number.isInteger(number) ? String(number) : String(number);
+}
+
+function restockStatusClass(status) {
+  const normalized = String(status || "").toLowerCase();
+  if (normalized.includes("mismatch")) return "restock-status--mismatch";
+  if (normalized.includes("unknown")) return "restock-status--unknown";
+  if (normalized.includes("review")) return "restock-status--review";
+  return "restock-status--ready";
 }
 
 function hasPurchaseQuantity(value) {
@@ -835,6 +988,10 @@ window.addEventListener("hashchange", () => {
     } else if (state.selectedCountId) {
       loadSelectedReport(state.selectedCountId);
     }
+  } else if (state.activeTab === "restock-planner") {
+    if (!state.countSessions.length && !state.countsLoading) {
+      loadPlannerCounts();
+    }
   } else if (!state.data && state.phase !== "loading") {
     loadSummary();
   }
@@ -848,6 +1005,9 @@ async function selectRestaurant(restaurantId) {
   state.countSessions = [];
   state.selectedCountId = null;
   state.selectedReport = null;
+  state.restockSelectedCountId = null;
+  state.restockPlan = null;
+  state.restockError = "";
   state.phase = "loading";
   renderShell();
   loadSummary();
@@ -869,6 +1029,42 @@ async function loadPastCounts({ selectCountId = null } = {}) {
     state.countsError = error.message || "Could not load past counts.";
   } finally {
     state.countsLoading = false;
+    renderShell();
+  }
+}
+
+async function loadPlannerCounts() {
+  state.countsLoading = true;
+  state.countsError = "";
+  renderShell();
+  try {
+    const sessions = await getCountSessions();
+    applyCountSessions(sessions, state.restockSelectedCountId || state.selectedCountId);
+  } catch (error) {
+    state.countsError = error.message || "Could not load saved counts.";
+  } finally {
+    state.countsLoading = false;
+    renderShell();
+  }
+}
+
+async function submitRestockPlan() {
+  if (!canGenerateRestockPlan()) return;
+  const selectedCount = getRestockSelectedCount();
+  state.restockLoading = true;
+  state.restockError = "";
+  state.restockPlan = null;
+  renderShell();
+  try {
+    state.restockPlan = await generateRestockPlan({
+      salesFile: state.restockSalesFile,
+      recipeFile: state.restockRecipeFile,
+      countId: selectedCount.id,
+    });
+  } catch (error) {
+    state.restockError = error.message || "Could not generate the purchase plan.";
+  } finally {
+    state.restockLoading = false;
     renderShell();
   }
 }
@@ -1073,13 +1269,23 @@ async function loadSummary() {
   }
 }
 
+function getSidebarActiveSection() {
+  return state.activeTab === "restock-planner" ? "restock" : "dashboard";
+}
+
+function getMobileActiveSection() {
+  if (state.activeTab === "past-counts") return "reports";
+  if (state.activeTab === "restock-planner") return "restock";
+  return "dashboard";
+}
+
 function renderShell() {
   app.innerHTML = `
     <div class="app-shell">
       ${renderSidebar({
         restaurantName: state.restaurantName,
-        active: "dashboard",
-        mobileActive: state.activeTab === "past-counts" ? "reports" : "dashboard",
+        active: getSidebarActiveSection(),
+        mobileActive: getMobileActiveSection(),
       })}
       <main class="app-main dashboard-main">
         ${renderContent()}
@@ -1134,6 +1340,7 @@ function renderShell() {
   document.querySelector("#delete-count-cancel")?.addEventListener("click", closeDeleteCountDialog);
   document.querySelector("#delete-count-confirm")?.addEventListener("click", confirmDeleteCount);
   bindSpreadsheetScrollIndicators();
+  bindRestockPlanner();
 }
 
 function updateSpreadsheetScrollIndicator(shell) {
@@ -1168,6 +1375,47 @@ function bindSpreadsheetScrollIndicators() {
       document.querySelectorAll("[data-spreadsheet-shell]").forEach(updateSpreadsheetScrollIndicator);
     });
   }
+}
+
+function bindRestockPlanner() {
+  document.querySelectorAll("[data-restock-browse]").forEach((button) => {
+    button.addEventListener("click", () => {
+      document.querySelector(`#restock-${button.dataset.restockBrowse}-input`)?.click();
+    });
+    button.addEventListener("dragover", (event) => {
+      event.preventDefault();
+      button.classList.add("is-dragging");
+    });
+    button.addEventListener("dragleave", () => {
+      button.classList.remove("is-dragging");
+    });
+    button.addEventListener("drop", (event) => {
+      event.preventDefault();
+      button.classList.remove("is-dragging");
+      const file = event.dataTransfer?.files?.[0];
+      if (file) handleRestockFile(button.dataset.restockBrowse, file);
+    });
+  });
+
+  document.querySelectorAll("[data-restock-input]").forEach((input) => {
+    input.addEventListener("change", () => {
+      const file = input.files?.[0];
+      if (file) handleRestockFile(input.dataset.restockInput, file);
+      input.value = "";
+    });
+  });
+
+  document.querySelectorAll("[data-restock-remove]").forEach((button) => {
+    button.addEventListener("click", () => removeRestockFile(button.dataset.restockRemove));
+  });
+
+  document.querySelector("#restock-count-select")?.addEventListener("change", (event) => {
+    state.restockSelectedCountId = Number(event.target.value) || null;
+    resetRestockPlan();
+    renderShell();
+  });
+
+  document.querySelector("#restock-generate")?.addEventListener("click", submitRestockPlan);
 }
 
 function renderDeleteCountDialog() {
@@ -1221,18 +1469,29 @@ function renderContent() {
   return `
     ${renderPostCountHeader(data)}
     ${renderDashboardTabs()}
-    ${state.activeTab === "past-counts" ? renderPastCounts() : renderOverviewContent(data)}
+    ${
+      state.activeTab === "past-counts"
+        ? renderPastCounts()
+        : state.activeTab === "restock-planner"
+          ? renderRestockPlanner()
+          : renderOverviewContent(data)
+    }
   `;
 }
 
 function renderPostCountHeader(data) {
   const latestCountId = getLatestCountId(data);
+  const isPlanner = state.activeTab === "restock-planner";
   return `
     <header class="dashboard-header dashboard-header--post-count">
       <div>
         <span>${escapeHtml(state.restaurantName)}</span>
-        <h1>Dashboard</h1>
-        <p>Insights and data quality from your latest inventory count.</p>
+        <h1>${isPlanner ? "Restock Planner" : "Dashboard"}</h1>
+        <p>${
+          isPlanner
+            ? "Use sales data, recipes, and current inventory to estimate what to purchase next week."
+            : "Insights and data quality from your latest inventory count."
+        }</p>
       </div>
       <div class="dashboard-header-actions">
         <a class="new-count-button" href="./product.html#count">New count</a>
@@ -1253,6 +1512,9 @@ function renderDashboardTabs() {
       </button>
       <button class="dashboard-tab ${state.activeTab === "past-counts" ? "is-active" : ""}" data-tab="past-counts" type="button">
         Past Counts
+      </button>
+      <button class="dashboard-tab ${state.activeTab === "restock-planner" ? "is-active" : ""}" data-tab="restock-planner" type="button">
+        Restock Planner
       </button>
     </nav>
   `;
@@ -1817,6 +2079,256 @@ function renderBottomActionStrip(rows) {
         </button>
       </div>
     </section>
+  `;
+}
+
+function renderRestockPlanner() {
+  return `
+    <section class="restock-planner-shell" aria-label="Restock Planner">
+      <div class="restock-planner-intro">
+        <span>Manager-reviewed forecast</span>
+        <h2>Sales Data + Recipe Ingredients + Current Stock</h2>
+        <p>Generate a reviewable next-week purchase plan. Koe estimates what to buy; managers approve before ordering.</p>
+      </div>
+      <div class="restock-planner-grid">
+        <div class="restock-setup-column">
+          ${renderRestockUploadCard({
+            type: "sales",
+            number: "1",
+            title: "Sales Data",
+            helper: "Upload last month’s item sales.",
+            dropText: "Drop sales CSV here",
+            columns: RESTOCK_REQUIRED_COLUMNS.sales,
+            example: "",
+          })}
+          ${renderRestockUploadCard({
+            type: "recipe",
+            number: "2",
+            title: "Recipe Ingredients",
+            helper: "Upload ingredient usage per menu item.",
+            dropText: "Drop recipe CSV here",
+            columns: RESTOCK_REQUIRED_COLUMNS.recipe,
+            example: "Chicken Sandwich → Chicken Breast → 0.25 lb",
+          })}
+          ${renderRestockInventorySelector()}
+          <article class="restock-generate-card">
+            <div>
+              <strong>10% safety buffer</strong>
+              <span>Applied to projected next-week ingredient need.</span>
+            </div>
+            <button class="new-count-button restock-generate-button" id="restock-generate" type="button" ${canGenerateRestockPlan() ? "" : "disabled"}>
+              ${state.restockLoading ? "Generating plan..." : "Generate Purchase Plan"}
+            </button>
+          </article>
+        </div>
+        ${renderRestockOutputPanel()}
+      </div>
+    </section>
+  `;
+}
+
+function renderRestockUploadCard({ type, number, title, helper, dropText, columns, example }) {
+  const meta = type === "sales" ? state.restockSalesMeta : state.restockRecipeMeta;
+  const error = type === "sales" ? state.restockSalesError : state.restockRecipeError;
+  return `
+    <article class="restock-card restock-upload-card">
+      <div class="restock-card-heading">
+        <span>${escapeHtml(number)}</span>
+        <div>
+          <h3>${escapeHtml(title)}</h3>
+          <p>${escapeHtml(helper)}</p>
+        </div>
+      </div>
+      <input class="restock-file-input" id="restock-${escapeHtml(type)}-input" data-restock-input="${escapeHtml(type)}" type="file" accept=".csv,text/csv" />
+      <button class="restock-dropzone ${meta ? "has-file" : ""}" data-restock-browse="${escapeHtml(type)}" type="button">
+        <i aria-hidden="true">
+          <svg viewBox="0 0 24 24">
+            <path d="M12 16V5"></path>
+            <path d="M8 9l4-4 4 4"></path>
+            <path d="M5 17v1.5A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V17"></path>
+          </svg>
+        </i>
+        <strong>${meta ? escapeHtml(meta.name) : escapeHtml(dropText)}</strong>
+        <small>${meta ? `${escapeHtml(meta.rowCount)} rows • Ready` : "or click to browse"}</small>
+      </button>
+      <div class="restock-chip-row">
+        ${columns.map((column) => `<span>${escapeHtml(column)}</span>`).join("")}
+      </div>
+      ${example ? `<div class="restock-example-row">${escapeHtml(example)}</div>` : ""}
+      ${
+        meta
+          ? `<div class="restock-file-state">
+              <span><strong>${escapeHtml(meta.name)}</strong><small>${escapeHtml(meta.rowCount)} data rows ready</small></span>
+              <button data-restock-remove="${escapeHtml(type)}" type="button">Remove</button>
+            </div>`
+          : ""
+      }
+      ${error ? `<div class="restock-upload-error">${escapeHtml(error)}</div>` : ""}
+    </article>
+  `;
+}
+
+function renderRestockInventorySelector() {
+  const counts = getRestockAvailableCounts();
+  const selected = getRestockSelectedCount();
+  if (state.countsLoading && !counts.length) {
+    return `
+      <article class="restock-card restock-stock-card">
+        <div class="restock-card-heading">
+          <span>3</span>
+          <div><h3>Current Stock</h3><p>Loading saved inventory counts...</p></div>
+        </div>
+        <div class="dashboard-calm">Fetching Past Counts from the backend.</div>
+      </article>
+    `;
+  }
+  if (state.countsError && !counts.length) {
+    return `
+      <article class="restock-card restock-stock-card">
+        <div class="restock-card-heading">
+          <span>3</span>
+          <div><h3>Current Stock</h3><p>Choose a saved inventory count to compare against.</p></div>
+        </div>
+        <div class="restock-upload-error">${escapeHtml(state.countsError)}</div>
+      </article>
+    `;
+  }
+  if (!counts.length) {
+    return `
+      <article class="restock-card restock-stock-card">
+        <div class="restock-card-heading">
+          <span>3</span>
+          <div><h3>Current Stock</h3><p>Choose a saved inventory count to compare against.</p></div>
+        </div>
+        <div class="restock-empty-state">No saved counts yet. Complete an inventory count first.</div>
+      </article>
+    `;
+  }
+  return `
+    <article class="restock-card restock-stock-card">
+      <div class="restock-card-heading">
+        <span>3</span>
+        <div>
+          <h3>Current Stock</h3>
+          <p>Choose a saved inventory count to compare against.</p>
+        </div>
+      </div>
+      <label class="restock-count-select-label" for="restock-count-select">Saved inventory count</label>
+      <select class="restock-count-select" id="restock-count-select">
+        ${counts
+          .map(
+            (session) => `
+              <option value="${escapeHtml(session.id)}" ${Number(selected?.id) === Number(session.id) ? "selected" : ""}>
+                ${escapeHtml(session.area || "Latest Inventory Count")} • ${escapeHtml(formatDateTime(getCountTimestamp(session)))} • ${escapeHtml(session.summary?.total_entries ?? 0)} rows
+              </option>
+            `,
+          )
+          .join("")}
+      </select>
+      ${
+        selected
+          ? `<div class="restock-selected-count">
+              <strong>${escapeHtml(selected.area || "Latest Inventory Count")}</strong>
+              <span>${escapeHtml(formatDateTime(getCountTimestamp(selected)))}</span>
+              <small>${escapeHtml(selected.summary?.total_entries ?? 0)} items • ${escapeHtml(state.restaurantName)}</small>
+            </div>`
+          : ""
+      }
+    </article>
+  `;
+}
+
+function renderRestockOutputPanel() {
+  if (state.restockLoading) {
+    return `
+      <section class="restock-output-card restock-output-card--loading">
+        <div class="dashboard-spinner" aria-hidden="true"></div>
+        <h3>Generating purchase plan...</h3>
+        <p>Comparing sales, recipe usage, and the selected count.</p>
+      </section>
+    `;
+  }
+  if (state.restockError) {
+    return `
+      <section class="restock-output-card">
+        <span class="restock-output-kicker">Review needed</span>
+        <h3>Could not generate the plan</h3>
+        <p>${escapeHtml(state.restockError)}</p>
+      </section>
+    `;
+  }
+  if (state.restockPlan) {
+    return renderRestockPlanResults(state.restockPlan);
+  }
+  return `
+    <section class="restock-output-card restock-output-card--preview">
+      <span class="restock-output-kicker">Forecast Preview</span>
+      <h3>Your purchase plan will appear here.</h3>
+      <p>Upload sales data, recipe ingredients, and choose a current inventory count.</p>
+      <div class="restock-flow-visual" aria-hidden="true">
+        <span>Sales</span>
+        <i>+</i>
+        <span>Recipes</span>
+        <i>+</i>
+        <span>Stock</span>
+        <b>→</b>
+        <strong>Purchase Plan</strong>
+      </div>
+    </section>
+  `;
+}
+
+function renderRestockPlanResults(plan) {
+  const summary = plan.summary || {};
+  const rows = plan.purchase_plan || [];
+  return `
+    <section class="restock-output-card restock-output-card--results">
+      <div class="restock-results-header">
+        <div>
+          <span class="restock-output-kicker">Suggested Purchase List</span>
+          <h3>Review before ordering.</h3>
+        </div>
+        <small>${escapeHtml(summary.safety_buffer_percent ?? 10)}% safety buffer</small>
+      </div>
+      <div class="restock-summary-cards">
+        <div><span>Items Forecasted</span><strong>${escapeHtml(summary.items_forecasted ?? rows.length)}</strong></div>
+        <div><span>Suggested Purchases</span><strong>${escapeHtml(summary.suggested_purchases ?? 0)}</strong></div>
+        <div><span>Needs Review</span><strong>${escapeHtml(summary.needs_review ?? 0)}</strong></div>
+        <div><span>Safety Buffer</span><strong>${escapeHtml(summary.safety_buffer_percent ?? 10)}%</strong></div>
+      </div>
+      ${
+        rows.length
+          ? `<div class="restock-plan-table" role="table" aria-label="Suggested purchase list">
+              <div class="restock-plan-row restock-plan-row--head" role="row">
+                <span>Ingredient</span>
+                <span>Projected Need</span>
+                <span>Current Stock</span>
+                <span>Suggested Purchase</span>
+                <span>Status</span>
+                <span>Reason</span>
+              </div>
+              ${rows.map((row) => renderRestockPlanRow(row)).join("")}
+            </div>`
+          : `<div class="restock-empty-state">No purchase suggestions were generated from the uploaded files.</div>`
+      }
+    </section>
+  `;
+}
+
+function renderRestockPlanRow(row) {
+  const currentStock =
+    row.current_stock === null || row.current_stock === undefined
+      ? "Unknown"
+      : `${formatPlanQuantity(row.current_stock)} ${row.current_stock_unit || row.unit || ""}`.trim();
+  return `
+    <div class="restock-plan-row" role="row">
+      <span><strong>${escapeHtml(row.ingredient || "Unnamed ingredient")}</strong><small>${escapeHtml(row.unit || "")}</small></span>
+      <span>${escapeHtml(formatPlanQuantity(row.projected_need))} ${escapeHtml(row.unit || "")}</span>
+      <span>${escapeHtml(currentStock)}</span>
+      <span>${escapeHtml(formatPlanQuantity(row.suggested_purchase))} ${escapeHtml(row.unit || "")}</span>
+      <span><i class="restock-status ${restockStatusClass(row.status)}">${escapeHtml(row.status || "Needs Review")}</i></span>
+      <span>${escapeHtml(row.reason || "Review this suggestion before ordering.")}</span>
+    </div>
   `;
 }
 

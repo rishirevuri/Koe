@@ -15,6 +15,7 @@ function icon(name) {
     grid: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"></rect><rect x="14" y="3" width="7" height="7" rx="1.5"></rect><rect x="3" y="14" width="7" height="7" rx="1.5"></rect><rect x="14" y="14" width="7" height="7" rx="1.5"></rect></svg>`,
     mic: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z"></path><path d="M5 11a7 7 0 0 0 14 0"></path><path d="M12 18v3"></path></svg>`,
     report: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h7l5 5v13H7z"></path><path d="M14 3v6h5"></path><path d="M9 14h6M9 17h4"></path></svg>`,
+    planner: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5"></path><path d="M4 19h16"></path><path d="M8 15l3-4 3 2 4-6"></path><path d="M15 7h3v3"></path></svg>`,
     account: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.5"></circle><path d="M5 20c1.4-3.4 3.7-5 7-5s5.6 1.6 7 5"></path></svg>`,
     logout: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 12H4"></path><path d="M8 8l-4 4 4 4"></path><path d="M13 4h6v16h-6"></path></svg>`,
     collapse: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"></path></svg>`,
@@ -23,7 +24,7 @@ function icon(name) {
 }
 
 /**
- * @param {{ restaurantName: string, active: "dashboard" | "count", mobileActive?: "dashboard" | "count" | "reports" | "account" }} options
+ * @param {{ restaurantName: string, active: "dashboard" | "count" | "restock", mobileActive?: "dashboard" | "count" | "reports" | "restock" | "account" }} options
  */
 export function renderSidebar({ restaurantName, active, mobileActive = active }) {
   return `
@@ -46,6 +47,9 @@ export function renderSidebar({ restaurantName, active, mobileActive = active })
         <a class="sidebar-link ${active === "count" ? "is-active" : ""}" href="./product.html" title="Count" ${active === "count" ? 'aria-current="page"' : ""}>
           ${icon("mic")}<span>Count</span>
         </a>
+        <a class="sidebar-link ${active === "restock" ? "is-active" : ""}" href="./dashboard.html#restock-planner" title="Restock Planner" ${active === "restock" ? 'aria-current="page"' : ""}>
+          ${icon("planner")}<span>Restock Planner</span>
+        </a>
       </nav>
       <button class="sidebar-logout" id="sidebar-logout" type="button" title="Exit">
         ${icon("logout")}<span>Exit</span>
@@ -60,6 +64,9 @@ export function renderSidebar({ restaurantName, active, mobileActive = active })
       </a>
       <a class="mobile-bottom-link ${mobileActive === "reports" ? "is-active" : ""}" href="./dashboard.html#past-counts" ${mobileActive === "reports" ? 'aria-current="page"' : ""}>
         ${icon("report")}<span>Reports</span>
+      </a>
+      <a class="mobile-bottom-link ${mobileActive === "restock" ? "is-active" : ""}" href="./dashboard.html#restock-planner" ${mobileActive === "restock" ? 'aria-current="page"' : ""}>
+        ${icon("planner")}<span>Planner</span>
       </a>
       <a class="mobile-bottom-link ${mobileActive === "account" ? "is-active" : ""}" href="./product.html#account" ${mobileActive === "account" ? 'aria-current="page"' : ""}>
         ${icon("account")}<span>Account</span>

@@ -6552,6 +6552,497 @@ button:disabled,
   text-underline-offset: 3px;
 }
 
+.restock-planner-shell {
+  display: grid;
+  gap: 18px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.restock-planner-intro {
+  display: grid;
+  gap: 8px;
+  padding: 22px 24px;
+  background:
+    linear-gradient(135deg, rgba(248, 229, 190, 0.32), rgba(255, 253, 249, 0.86)),
+    var(--product-panel);
+  border: 1px solid rgba(16, 35, 31, 0.1);
+  border-radius: 22px;
+  box-shadow: var(--product-shadow);
+}
+
+.restock-planner-intro span,
+.restock-output-kicker,
+.restock-count-select-label {
+  color: var(--product-accent);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.restock-planner-intro h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(1.75rem, 2.5vw, 2.45rem);
+  font-weight: 560;
+  letter-spacing: -0.025em;
+  line-height: 1.02;
+}
+
+.restock-planner-intro p {
+  max-width: 680px;
+  margin: 0;
+  color: var(--product-muted);
+  font-size: 15px;
+}
+
+.restock-planner-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(0, 1.35fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.restock-setup-column {
+  display: grid;
+  gap: 14px;
+}
+
+.restock-card,
+.restock-output-card {
+  min-width: 0;
+  background: rgba(255, 253, 249, 0.9);
+  border: 1px solid rgba(16, 35, 31, 0.1);
+  border-radius: 22px;
+  box-shadow: var(--product-shadow);
+}
+
+.restock-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.restock-card-heading {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.restock-card-heading > span {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  color: var(--ivory);
+  font-size: 13px;
+  font-weight: 750;
+  background: var(--product-accent-strong);
+  border-radius: 999px;
+}
+
+.restock-card-heading h3,
+.restock-output-card h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 1.25rem;
+  font-weight: 560;
+  letter-spacing: -0.02em;
+}
+
+.restock-card-heading p,
+.restock-output-card p {
+  margin: 4px 0 0;
+  color: var(--product-muted);
+  font-size: 14px;
+}
+
+.restock-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.restock-dropzone {
+  display: grid;
+  min-height: 142px;
+  place-items: center;
+  gap: 7px;
+  padding: 18px;
+  color: var(--ink);
+  font: inherit;
+  text-align: center;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 242, 0.82), rgba(255, 253, 249, 0.92)),
+    #fff;
+  border: 1.5px dashed rgba(170, 132, 80, 0.36);
+  border-radius: 20px;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    background-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.restock-dropzone:hover,
+.restock-dropzone.is-dragging {
+  transform: translateY(-1px);
+  border-color: rgba(200, 107, 50, 0.66);
+  box-shadow: 0 18px 32px rgba(31, 27, 22, 0.08);
+}
+
+.restock-dropzone.has-file {
+  border-style: solid;
+  border-color: rgba(47, 125, 90, 0.28);
+  background: rgba(239, 248, 242, 0.72);
+}
+
+.restock-dropzone i {
+  display: inline-grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  color: var(--product-accent);
+  background: rgba(200, 107, 50, 0.1);
+  border-radius: 999px;
+}
+
+.restock-dropzone svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.9;
+}
+
+.restock-dropzone strong,
+.restock-file-state strong,
+.restock-selected-count strong {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.restock-dropzone small,
+.restock-file-state small,
+.restock-selected-count small,
+.restock-selected-count span,
+.restock-generate-card span {
+  color: var(--product-muted);
+  font-size: 13px;
+}
+
+.restock-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.restock-chip-row span {
+  padding: 6px 9px;
+  color: rgba(16, 35, 31, 0.76);
+  font-size: 11px;
+  font-weight: 650;
+  background: rgba(255, 240, 230, 0.82);
+  border: 1px solid rgba(200, 107, 50, 0.16);
+  border-radius: 999px;
+}
+
+.restock-example-row,
+.restock-empty-state {
+  padding: 12px 13px;
+  color: var(--product-muted);
+  font-size: 13px;
+  background: rgba(16, 35, 31, 0.04);
+  border: 1px solid rgba(16, 35, 31, 0.08);
+  border-radius: 14px;
+}
+
+.restock-file-state,
+.restock-selected-count {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 13px;
+  background: rgba(255, 255, 252, 0.68);
+  border: 1px solid rgba(16, 35, 31, 0.08);
+  border-radius: 14px;
+}
+
+.restock-file-state span,
+.restock-selected-count {
+  min-width: 0;
+}
+
+.restock-file-state strong,
+.restock-file-state small,
+.restock-selected-count strong,
+.restock-selected-count span,
+.restock-selected-count small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restock-file-state button {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
+  color: var(--product-accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  background: rgba(200, 107, 50, 0.08);
+  border: 1px solid rgba(200, 107, 50, 0.18);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.restock-upload-error {
+  padding: 12px 13px;
+  color: #8b362c;
+  font-size: 13px;
+  font-weight: 620;
+  background: rgba(181, 68, 55, 0.09);
+  border: 1px solid rgba(181, 68, 55, 0.18);
+  border-radius: 14px;
+}
+
+.restock-count-select-label {
+  display: block;
+}
+
+.restock-count-select {
+  width: 100%;
+  min-height: 48px;
+  padding: 0 14px;
+  color: var(--ink);
+  font: inherit;
+  font-size: 14px;
+  background: #fffdf9;
+  border: 1px solid rgba(16, 35, 31, 0.12);
+  border-radius: 14px;
+}
+
+.restock-generate-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 14px;
+  padding: 18px;
+  background: var(--ink);
+  border: 1px solid rgba(16, 35, 31, 0.16);
+  border-radius: 22px;
+  box-shadow: var(--product-shadow);
+}
+
+.restock-generate-card strong {
+  display: block;
+  color: var(--ivory);
+  font-size: 15px;
+  font-weight: 640;
+}
+
+.restock-generate-card span {
+  color: rgba(255, 250, 242, 0.72);
+}
+
+.restock-generate-button {
+  width: 100%;
+}
+
+.restock-output-card {
+  display: grid;
+  gap: 18px;
+  min-height: 520px;
+  padding: 22px;
+}
+
+.restock-output-card--preview,
+.restock-output-card--loading {
+  align-content: center;
+  justify-items: center;
+  text-align: center;
+}
+
+.restock-output-card--preview p,
+.restock-output-card--loading p {
+  max-width: 360px;
+}
+
+.restock-flow-visual {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  max-width: 430px;
+  margin-top: 4px;
+}
+
+.restock-flow-visual span,
+.restock-flow-visual strong {
+  padding: 10px 12px;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 650;
+  background: rgba(255, 250, 242, 0.9);
+  border: 1px solid rgba(16, 35, 31, 0.09);
+  border-radius: 999px;
+}
+
+.restock-flow-visual strong {
+  color: var(--ivory);
+  background: var(--product-accent-strong);
+}
+
+.restock-flow-visual i,
+.restock-flow-visual b {
+  color: var(--product-accent);
+  font-style: normal;
+}
+
+.restock-results-header {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.restock-results-header small {
+  flex: 0 0 auto;
+  padding: 8px 10px;
+  color: var(--product-accent);
+  font-size: 12px;
+  font-weight: 720;
+  background: rgba(255, 240, 230, 0.9);
+  border: 1px solid rgba(200, 107, 50, 0.16);
+  border-radius: 999px;
+}
+
+.restock-summary-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.restock-summary-cards div {
+  padding: 13px;
+  background: rgba(255, 250, 242, 0.74);
+  border: 1px solid rgba(16, 35, 31, 0.09);
+  border-radius: 14px;
+}
+
+.restock-summary-cards span {
+  display: block;
+  color: var(--product-muted);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.restock-summary-cards strong {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink);
+  font-size: 1.45rem;
+  font-weight: 580;
+}
+
+.restock-plan-table {
+  overflow-x: auto;
+  border: 1px solid rgba(16, 35, 31, 0.1);
+  border-radius: 16px;
+}
+
+.restock-plan-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.05fr) minmax(120px, 0.78fr) minmax(120px, 0.78fr) minmax(140px, 0.9fr) minmax(112px, 0.72fr) minmax(240px, 1.55fr);
+  gap: 12px;
+  min-width: 980px;
+  padding: 13px 14px;
+  align-items: start;
+  border-bottom: 1px solid rgba(16, 35, 31, 0.08);
+}
+
+.restock-plan-row:last-child {
+  border-bottom: 0;
+}
+
+.restock-plan-row--head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  color: rgba(16, 35, 31, 0.66);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: #fffaf2;
+}
+
+.restock-plan-row span {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.restock-plan-row strong,
+.restock-plan-row small {
+  display: block;
+}
+
+.restock-plan-row strong {
+  font-weight: 620;
+}
+
+.restock-plan-row small {
+  margin-top: 3px;
+  color: var(--product-muted);
+}
+
+.restock-status {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 9px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 760;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.restock-status--ready {
+  color: #2f6f50;
+  background: rgba(47, 125, 90, 0.11);
+  border-color: rgba(47, 125, 90, 0.18);
+}
+
+.restock-status--review,
+.restock-status--unknown {
+  color: #7a4d10;
+  background: rgba(248, 229, 190, 0.7);
+  border-color: rgba(122, 77, 16, 0.15);
+}
+
+.restock-status--mismatch {
+  color: #8b362c;
+  background: rgba(181, 68, 55, 0.09);
+  border-color: rgba(181, 68, 55, 0.18);
+}
+
 .past-counts-shell {
   display: grid;
   grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
@@ -7335,7 +7826,7 @@ button:disabled,
     left: 0;
     z-index: 90;
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 4px;
     padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
     background: rgba(255, 250, 242, 0.96);
@@ -7353,7 +7844,7 @@ button:disabled,
     gap: 3px;
     padding: 5px 2px;
     color: rgba(16, 35, 31, 0.66);
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 500;
     line-height: 1;
     text-align: center;
@@ -7362,8 +7853,8 @@ button:disabled,
   }
 
   .mobile-bottom-link svg {
-    width: 20px;
-    height: 20px;
+    width: 19px;
+    height: 19px;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.75;
@@ -7442,6 +7933,7 @@ button:disabled,
   }
 
   .dashboard-priority-grid,
+  .restock-planner-grid,
   .quantity-purchase-card--overview,
   .dashboard-summary-grid,
   .estimated-reorder-section,
@@ -7451,6 +7943,109 @@ button:disabled,
     gap: 12px;
     width: 100%;
     margin-bottom: 12px;
+  }
+
+  .restock-planner-shell {
+    gap: 12px;
+    width: 100%;
+  }
+
+  .restock-planner-intro {
+    padding: 18px;
+    border-radius: 16px;
+  }
+
+  .restock-planner-intro h2 {
+    font-size: 1.72rem;
+  }
+
+  .restock-card,
+  .restock-output-card {
+    border-radius: 16px;
+  }
+
+  .restock-card,
+  .restock-output-card {
+    padding: 16px;
+  }
+
+  .restock-dropzone {
+    min-height: 126px;
+    border-radius: 16px;
+  }
+
+  .restock-file-state,
+  .restock-selected-count,
+  .restock-results-header {
+    display: grid;
+  }
+
+  .restock-file-state button {
+    justify-self: start;
+  }
+
+  .restock-output-card {
+    min-height: auto;
+  }
+
+  .restock-flow-visual {
+    justify-content: flex-start;
+  }
+
+  .restock-summary-cards {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .restock-plan-table {
+    display: grid;
+    gap: 10px;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .restock-plan-row--head {
+    display: none;
+  }
+
+  .restock-plan-row {
+    grid-template-columns: 1fr;
+    gap: 9px;
+    min-width: 0;
+    padding: 14px;
+    background: rgba(255, 250, 242, 0.72);
+    border: 1px solid rgba(16, 35, 31, 0.09);
+    border-radius: 14px;
+  }
+
+  .restock-plan-row span:nth-child(n + 2)::before {
+    display: block;
+    margin-bottom: 2px;
+    color: var(--product-muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .restock-plan-row span:nth-child(2)::before {
+    content: "Projected Need";
+  }
+
+  .restock-plan-row span:nth-child(3)::before {
+    content: "Current Stock";
+  }
+
+  .restock-plan-row span:nth-child(4)::before {
+    content: "Suggested Purchase";
+  }
+
+  .restock-plan-row span:nth-child(5)::before {
+    content: "Status";
+  }
+
+  .restock-plan-row span:nth-child(6)::before {
+    content: "Reason";
   }
 
   .estimated-reorder-header {
@@ -9919,12 +10514,12 @@ button:disabled,
     border: 0;
     border-radius: 0;
     box-shadow: none;
-    font-size: 12px;
+    font-size: 10px;
   }
 
   .mobile-bottom-link svg {
-    width: 24px;
-    height: 24px;
+    width: 22px;
+    height: 22px;
     stroke-width: 1.7;
   }
 

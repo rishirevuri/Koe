@@ -236,3 +236,26 @@ class ReportResponse(BaseModel):
     entries: list[ReportEntry]
     purchase_items: list[PurchaseItem] = Field(default_factory=list)
     summary: dict[str, int]
+
+
+class RestockPlanSummary(BaseModel):
+    items_forecasted: int
+    suggested_purchases: int
+    needs_review: int
+    safety_buffer_percent: int
+
+
+class RestockPlanRow(BaseModel):
+    ingredient: str
+    projected_need: float
+    current_stock: float | None = None
+    current_stock_unit: str | None = None
+    suggested_purchase: float
+    unit: str
+    status: Literal["Ready", "Needs Review", "Unit Mismatch", "Stock Unknown"]
+    reason: str
+
+
+class RestockPlanResponse(BaseModel):
+    summary: RestockPlanSummary
+    purchase_plan: list[RestockPlanRow]
