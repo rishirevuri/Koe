@@ -7043,6 +7043,391 @@ button:disabled,
   border-color: rgba(181, 68, 55, 0.18);
 }
 
+.restock-planner-shell {
+  gap: 24px;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.restock-planner-shell--start {
+  max-width: 1040px;
+  padding-top: clamp(12px, 2.4vh, 34px);
+}
+
+.restock-start-stage {
+  display: grid;
+  gap: 24px;
+}
+
+.restock-start-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  align-items: stretch;
+  animation: restock-fade-up 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.restock-planner-intro {
+  padding: 20px 22px;
+  background: rgba(255, 253, 249, 0.82);
+  border-color: rgba(17, 17, 17, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 16px 42px rgba(31, 27, 22, 0.055);
+  animation: restock-fade-up 560ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.restock-planner-intro span,
+.restock-output-kicker,
+.restock-count-select-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+}
+
+.restock-planner-intro h2 {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(1.7rem, 2.2vw, 2.35rem);
+  font-weight: 620;
+  letter-spacing: -0.045em;
+}
+
+.restock-planner-intro p {
+  color: #6e6a63;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.restock-planner-grid {
+  grid-template-columns: minmax(390px, 460px) minmax(0, 1fr);
+  gap: 24px;
+  animation: restock-config-settle 680ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.restock-setup-column {
+  gap: 16px;
+}
+
+.restock-card,
+.restock-output-card {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(255, 253, 249, 0.92)),
+    #fffdf9;
+  border-color: rgba(17, 17, 17, 0.08);
+  border-radius: 24px;
+  box-shadow: 0 18px 46px rgba(31, 27, 22, 0.06);
+}
+
+.restock-upload-card--large {
+  min-height: 430px;
+  padding: 34px;
+}
+
+.restock-upload-card--compact {
+  padding: 18px;
+  animation: restock-card-compact-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.restock-upload-card--compact:nth-child(2) {
+  animation-delay: 60ms;
+}
+
+.restock-card-heading {
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 14px;
+}
+
+.restock-card-heading > span {
+  width: 38px;
+  height: 38px;
+  color: #14120f;
+  font-size: 0.78rem;
+  font-weight: 700;
+  background: rgba(200, 107, 50, 0.11);
+  border: 1px solid rgba(200, 107, 50, 0.16);
+}
+
+.restock-card-heading h3,
+.restock-output-card h3 {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 1.28rem;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+
+.restock-upload-card--large .restock-card-heading h3 {
+  font-size: 1.52rem;
+}
+
+.restock-card-heading p,
+.restock-output-card p {
+  color: #6e6a63;
+  font-weight: 400;
+  line-height: 1.5;
+}
+
+.restock-upload-card--large .restock-dropzone {
+  min-height: 220px;
+  margin-top: 6px;
+}
+
+.restock-upload-card--compact .restock-dropzone {
+  min-height: 118px;
+}
+
+.restock-dropzone {
+  position: relative;
+  border-color: rgba(17, 17, 17, 0.13);
+  border-radius: 20px;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 242, 0.52), rgba(255, 255, 255, 0.82)),
+    #fffdf9;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.52);
+}
+
+.restock-dropzone:hover,
+.restock-dropzone.is-dragging {
+  transform: translateY(-2px) scale(1.004);
+  border-color: rgba(200, 107, 50, 0.58);
+  background:
+    linear-gradient(180deg, rgba(255, 240, 230, 0.68), rgba(255, 255, 255, 0.9)),
+    #fffdf9;
+  box-shadow:
+    inset 0 0 0 1px rgba(200, 107, 50, 0.08),
+    0 18px 38px rgba(31, 27, 22, 0.07);
+}
+
+.restock-dropzone.has-file {
+  border-color: rgba(47, 125, 90, 0.22);
+  background:
+    linear-gradient(180deg, rgba(243, 249, 245, 0.78), rgba(255, 255, 255, 0.9)),
+    #fbfefc;
+}
+
+.restock-dropzone i {
+  color: #111;
+  background: rgba(17, 17, 17, 0.045);
+  border: 1px solid rgba(17, 17, 17, 0.07);
+}
+
+.restock-upload-card--large .restock-dropzone i {
+  width: 52px;
+  height: 52px;
+}
+
+.restock-dropzone strong,
+.restock-file-state strong,
+.restock-selected-count strong {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+}
+
+.restock-upload-card--large .restock-dropzone strong {
+  font-size: 1.08rem;
+}
+
+.restock-dropzone small,
+.restock-file-state small,
+.restock-selected-count small,
+.restock-selected-count span,
+.restock-generate-card span {
+  color: #6e6a63;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.restock-ready-pill {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 10px;
+  color: #2f6f50;
+  font-style: normal;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: rgba(47, 125, 90, 0.09);
+  border: 1px solid rgba(47, 125, 90, 0.16);
+  border-radius: 999px;
+}
+
+.restock-chip-row {
+  gap: 8px;
+}
+
+.restock-chip-row span {
+  color: rgba(17, 17, 17, 0.7);
+  font-weight: 600;
+  background: rgba(17, 17, 17, 0.035);
+  border-color: rgba(17, 17, 17, 0.07);
+}
+
+.restock-chip-row span.is-optional {
+  color: #8a6a52;
+  background: rgba(255, 240, 230, 0.72);
+  border-color: rgba(200, 107, 50, 0.14);
+}
+
+.restock-file-state,
+.restock-selected-count {
+  background: rgba(255, 255, 255, 0.62);
+  border-color: rgba(17, 17, 17, 0.08);
+  border-radius: 16px;
+}
+
+.restock-file-state button {
+  color: #4d4137;
+  font-weight: 600;
+  background: rgba(17, 17, 17, 0.035);
+  border-color: rgba(17, 17, 17, 0.08);
+}
+
+.restock-upload-error {
+  color: #8b362c;
+  font-weight: 550;
+  background: rgba(181, 68, 55, 0.07);
+  border-color: rgba(181, 68, 55, 0.16);
+}
+
+.restock-continue-row {
+  display: grid;
+  justify-items: center;
+  min-height: 54px;
+  animation: restock-fade-up 420ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.restock-continue-button {
+  min-width: 180px;
+  min-height: 52px;
+  border-radius: 999px;
+}
+
+.restock-stock-card,
+.restock-generate-card,
+.restock-output-card {
+  animation: restock-reveal-up 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.restock-stock-card {
+  animation-delay: 120ms;
+}
+
+.restock-generate-card {
+  gap: 16px;
+  background:
+    linear-gradient(180deg, rgba(255, 250, 242, 0.78), rgba(255, 255, 255, 0.86)),
+    #fffdf9;
+  border-color: rgba(17, 17, 17, 0.08);
+  animation-delay: 190ms;
+}
+
+.restock-generate-card strong {
+  color: #111;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.restock-output-card {
+  min-height: 520px;
+  animation-delay: 260ms;
+}
+
+.restock-output-card--preview {
+  background:
+    radial-gradient(circle at top left, rgba(255, 240, 230, 0.72), transparent 34%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 253, 249, 0.92)),
+    #fffdf9;
+}
+
+.restock-flow-visual span,
+.restock-flow-visual strong {
+  font-weight: 600;
+  border-color: rgba(17, 17, 17, 0.08);
+}
+
+.restock-flow-visual strong {
+  background: #111;
+}
+
+.restock-summary-cards div,
+.restock-plan-table {
+  border-color: rgba(17, 17, 17, 0.08);
+}
+
+.restock-summary-cards strong {
+  font-weight: 600;
+  letter-spacing: -0.035em;
+}
+
+.restock-plan-row--head {
+  background: #fffaf2;
+}
+
+@keyframes restock-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes restock-config-settle {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes restock-card-compact-in {
+  from {
+    opacity: 0;
+    transform: translateY(-14px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes restock-reveal-up {
+  from {
+    opacity: 0;
+    transform: translateY(22px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .restock-start-grid,
+  .restock-planner-intro,
+  .restock-planner-grid,
+  .restock-upload-card--compact,
+  .restock-stock-card,
+  .restock-generate-card,
+  .restock-output-card,
+  .restock-continue-row {
+    animation: none;
+  }
+
+  .restock-dropzone {
+    transition: none;
+  }
+}
+
 .past-counts-shell {
   display: grid;
   grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
@@ -7990,6 +8375,45 @@ button:disabled,
 
   .restock-flow-visual {
     justify-content: flex-start;
+  }
+
+  .restock-start-stage {
+    gap: 16px;
+  }
+
+  .restock-start-grid {
+    grid-template-columns: 1fr;
+    gap: 14px;
+  }
+
+  .restock-upload-card--large {
+    min-height: auto;
+    padding: 20px;
+  }
+
+  .restock-upload-card--large .restock-dropzone {
+    min-height: 154px;
+  }
+
+  .restock-upload-card--large .restock-card-heading h3 {
+    font-size: 1.32rem;
+  }
+
+  .restock-upload-card--compact {
+    padding: 16px;
+  }
+
+  .restock-upload-card--compact .restock-dropzone {
+    min-height: 112px;
+  }
+
+  .restock-continue-row {
+    justify-items: stretch;
+  }
+
+  .restock-continue-button {
+    width: 100%;
+    min-width: 0;
   }
 
   .restock-summary-cards {

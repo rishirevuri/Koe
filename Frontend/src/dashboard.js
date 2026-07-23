@@ -70,6 +70,7 @@ const state = {
   restockRecipeMeta: null,
   restockRecipeError: "",
   restockSelectedCountId: null,
+  restockStep: "start",
   restockLoading: false,
   restockError: "",
   restockPlan: null,
@@ -485,6 +486,11 @@ function resetRestockPlan() {
   state.restockError = "";
 }
 
+function resetRestockWorkflow() {
+  state.restockStep = "start";
+  resetRestockPlan();
+}
+
 async function handleRestockFile(type, file) {
   const fileKey = type === "sales" ? "restockSalesFile" : "restockRecipeFile";
   const metaKey = type === "sales" ? "restockSalesMeta" : "restockRecipeMeta";
@@ -514,7 +520,7 @@ function removeRestockFile(type) {
     state.restockRecipeMeta = null;
     state.restockRecipeError = "";
   }
-  resetRestockPlan();
+  resetRestockWorkflow();
   renderShell();
 }
 
@@ -530,13 +536,32 @@ function getRestockSelectedCount() {
 
 function canGenerateRestockPlan() {
   return Boolean(
-    state.restockSalesFile &&
+    state.restockStep !== "start" &&
+      state.restockSalesFile &&
       state.restockRecipeFile &&
       getRestockSelectedCount() &&
       !state.restockSalesError &&
       !state.restockRecipeError &&
       !state.restockLoading,
   );
+}
+
+function canContinueRestockPlanner() {
+  return Boolean(state.restockSalesFile && state.restockRecipeFile && !state.restockSalesError && !state.restockRecipeError);
+}
+
+function shouldShowRestockContinue() {
+  return Boolean(state.restockSalesMeta || state.restockRecipeMeta || state.restockSalesError || state.restockRecipeError);
+}
+
+function continueRestockPlanner() {
+  if (!canContinueRestockPlanner()) return;
+  state.restockStep = "config";
+  resetRestockPlan();
+  renderShell();
+  if (!state.countSessions.length && !state.countsLoading) {
+    loadPlannerCounts();
+  }
 }
 
 function formatPlanQuantity(value) {
@@ -1006,8 +1031,7 @@ async function selectRestaurant(restaurantId) {
   state.selectedCountId = null;
   state.selectedReport = null;
   state.restockSelectedCountId = null;
-  state.restockPlan = null;
-  state.restockError = "";
+  resetRestockWorkflow();
   state.phase = "loading";
   renderShell();
   loadSummary();
@@ -1415,6 +1439,7 @@ function bindRestockPlanner() {
     renderShell();
   });
 
+  document.querySelector("#restock-continue")?.addEventListener("click", continueRestockPlanner);
   document.querySelector("#restock-generate")?.addEventListener("click", submitRestockPlan);
 }
 
@@ -1489,17 +1514,21 @@ function renderPostCountHeader(data) {
         <h1>${isPlanner ? "Restock Planner" : "Dashboard"}</h1>
         <p>${
           isPlanner
-            ? "Use sales data, recipes, and current inventory to estimate what to purchase next week."
+            ? "Upload sales and menu data to generate a manager-reviewed purchase plan."
             : "Insights and data quality from your latest inventory count."
         }</p>
       </div>
-      <div class="dashboard-header-actions">
-        <a class="new-count-button" href="./product.html#count">New count</a>
-        <button class="dashboard-secondary-button" id="dashboard-export-latest" type="button" ${!latestCountId || state.exportLoading ? "disabled" : ""}>
-          ${state.exportLoading ? "Exporting..." : "Export CSV"}
-        </button>
-        <button class="dashboard-more-button" type="button" aria-label="More dashboard actions">•••</button>
-      </div>
+      ${
+        isPlanner
+          ? ""
+          : `<div class="dashboard-header-actions">
+              <a class="new-count-button" href="./product.html#count">New count</a>
+              <button class="dashboard-secondary-button" id="dashboard-export-latest" type="button" ${!latestCountId || state.exportLoading ? "disabled" : ""}>
+                ${state.exportLoading ? "Exporting..." : "Export CSV"}
+              </button>
+              <button class="dashboard-more-button" type="button" aria-label="More dashboard actions">•••</button>
+            </div>`
+      }
     </header>
   `;
 }
@@ -2083,55 +2112,96 @@ function renderBottomActionStrip(rows) {
 }
 
 function renderRestockPlanner() {
+  const isStart = state.restockStep === "start";
   return `
-    <section class="restock-planner-shell" aria-label="Restock Planner">
-      <div class="restock-planner-intro">
-        <span>Manager-reviewed forecast</span>
-        <h2>Sales Data + Recipe Ingredients + Current Stock</h2>
-        <p>Generate a reviewable next-week purchase plan. Koe estimates what to buy; managers approve before ordering.</p>
-      </div>
-      <div class="restock-planner-grid">
-        <div class="restock-setup-column">
-          ${renderRestockUploadCard({
-            type: "sales",
-            number: "1",
-            title: "Sales Data",
-            helper: "Upload last month’s item sales.",
-            dropText: "Drop sales CSV here",
-            columns: RESTOCK_REQUIRED_COLUMNS.sales,
-            example: "",
-          })}
-          ${renderRestockUploadCard({
-            type: "recipe",
-            number: "2",
-            title: "Recipe Ingredients",
-            helper: "Upload ingredient usage per menu item.",
-            dropText: "Drop recipe CSV here",
-            columns: RESTOCK_REQUIRED_COLUMNS.recipe,
-            example: "Chicken Sandwich → Chicken Breast → 0.25 lb",
-          })}
-          ${renderRestockInventorySelector()}
-          <article class="restock-generate-card">
-            <div>
-              <strong>10% safety buffer</strong>
-              <span>Applied to projected next-week ingredient need.</span>
+    <section class="restock-planner-shell restock-planner-shell--${isStart ? "start" : "config"} ${state.restockPlan ? "restock-planner-shell--results" : ""}" aria-label="Restock Planner">
+      ${
+        isStart
+          ? renderRestockStartState()
+          : `
+            <div class="restock-planner-intro">
+              <span>Manager-reviewed forecast</span>
+              <h2>Choose current stock, then generate a purchase plan.</h2>
+              <p>Sales + Menu + Stock becomes a reviewable purchase forecast with a 10% safety buffer.</p>
             </div>
-            <button class="new-count-button restock-generate-button" id="restock-generate" type="button" ${canGenerateRestockPlan() ? "" : "disabled"}>
-              ${state.restockLoading ? "Generating plan..." : "Generate Purchase Plan"}
-            </button>
-          </article>
-        </div>
-        ${renderRestockOutputPanel()}
-      </div>
+            <div class="restock-planner-grid">
+              <div class="restock-setup-column">
+                ${renderRestockUploadCards("compact")}
+                ${renderRestockInventorySelector()}
+                ${renderRestockGenerateCard()}
+              </div>
+              ${renderRestockOutputPanel()}
+            </div>
+          `
+      }
     </section>
   `;
 }
 
-function renderRestockUploadCard({ type, number, title, helper, dropText, columns, example }) {
+function renderRestockUploadCards(variant = "large") {
+  return `
+    ${renderRestockUploadCard({
+      type: "sales",
+      number: "1",
+      title: "Sales Data",
+      helper: "Upload last month’s item sales.",
+      dropText: "Drop sales CSV here",
+      columns: RESTOCK_REQUIRED_COLUMNS.sales,
+      optionalColumns: ["date optional"],
+      variant,
+    })}
+    ${renderRestockUploadCard({
+      type: "recipe",
+      number: "2",
+      title: "Menu Ingredients",
+      helper: "Upload ingredient usage for each menu item.",
+      dropText: "Drop menu CSV here",
+      columns: RESTOCK_REQUIRED_COLUMNS.recipe,
+      optionalColumns: [],
+      example: variant === "large" ? "Chicken Sandwich → Chicken Breast → 0.25 lb" : "",
+      variant,
+    })}
+  `;
+}
+
+function renderRestockStartState() {
+  return `
+    <div class="restock-start-stage">
+      <div class="restock-start-grid">
+        ${renderRestockUploadCards("large")}
+      </div>
+      ${
+        shouldShowRestockContinue()
+          ? `<div class="restock-continue-row">
+              <button class="new-count-button restock-continue-button" id="restock-continue" type="button" ${canContinueRestockPlanner() ? "" : "disabled"}>
+                Continue
+              </button>
+            </div>`
+          : ""
+      }
+    </div>
+  `;
+}
+
+function renderRestockGenerateCard() {
+  return `
+    <article class="restock-generate-card restock-reveal-panel">
+      <div>
+        <strong>10% safety buffer</strong>
+        <span>Applied to projected next-week ingredient need.</span>
+      </div>
+      <button class="new-count-button restock-generate-button" id="restock-generate" type="button" ${canGenerateRestockPlan() ? "" : "disabled"}>
+        ${state.restockLoading ? "Generating plan..." : "Generate Purchase Plan"}
+      </button>
+    </article>
+  `;
+}
+
+function renderRestockUploadCard({ type, number, title, helper, dropText, columns, optionalColumns = [], example = "", variant = "large" }) {
   const meta = type === "sales" ? state.restockSalesMeta : state.restockRecipeMeta;
   const error = type === "sales" ? state.restockSalesError : state.restockRecipeError;
   return `
-    <article class="restock-card restock-upload-card">
+    <article class="restock-card restock-upload-card restock-upload-card--${escapeHtml(variant)}">
       <div class="restock-card-heading">
         <span>${escapeHtml(number)}</span>
         <div>
@@ -2148,17 +2218,19 @@ function renderRestockUploadCard({ type, number, title, helper, dropText, column
             <path d="M5 17v1.5A2.5 2.5 0 0 0 7.5 21h9a2.5 2.5 0 0 0 2.5-2.5V17"></path>
           </svg>
         </i>
+        ${meta ? `<em class="restock-ready-pill">Ready</em>` : ""}
         <strong>${meta ? escapeHtml(meta.name) : escapeHtml(dropText)}</strong>
-        <small>${meta ? `${escapeHtml(meta.rowCount)} rows • Ready` : "or click to browse"}</small>
+        <small>${meta ? `${escapeHtml(meta.rowCount)} rows detected` : "or click to browse"}</small>
       </button>
       <div class="restock-chip-row">
         ${columns.map((column) => `<span>${escapeHtml(column)}</span>`).join("")}
+        ${optionalColumns.map((column) => `<span class="is-optional">${escapeHtml(column)}</span>`).join("")}
       </div>
       ${example ? `<div class="restock-example-row">${escapeHtml(example)}</div>` : ""}
       ${
         meta
           ? `<div class="restock-file-state">
-              <span><strong>${escapeHtml(meta.name)}</strong><small>${escapeHtml(meta.rowCount)} data rows ready</small></span>
+              <span><strong>Ready for forecast</strong><small>${escapeHtml(meta.name)} • ${escapeHtml(meta.rowCount)} rows</small></span>
               <button data-restock-remove="${escapeHtml(type)}" type="button">Remove</button>
             </div>`
           : ""
@@ -2264,11 +2336,11 @@ function renderRestockOutputPanel() {
     <section class="restock-output-card restock-output-card--preview">
       <span class="restock-output-kicker">Forecast Preview</span>
       <h3>Your purchase plan will appear here.</h3>
-      <p>Upload sales data, recipe ingredients, and choose a current inventory count.</p>
+      <p>Sales + Menu + Stock → Purchase Plan</p>
       <div class="restock-flow-visual" aria-hidden="true">
         <span>Sales</span>
         <i>+</i>
-        <span>Recipes</span>
+        <span>Menu</span>
         <i>+</i>
         <span>Stock</span>
         <b>→</b>
