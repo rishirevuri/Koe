@@ -76,6 +76,7 @@ const state = {
   restockPlan: null,
 };
 let spreadsheetResizeBound = false;
+let restockTransitionTimer = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -486,7 +487,19 @@ function resetRestockPlan() {
   state.restockError = "";
 }
 
+function clearRestockTransitionTimer() {
+  if (restockTransitionTimer) {
+    window.clearTimeout(restockTransitionTimer);
+    restockTransitionTimer = null;
+  }
+}
+
+function prefersReducedRestockMotion() {
+  return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+}
+
 function resetRestockWorkflow() {
+  clearRestockTransitionTimer();
   state.restockStep = "start";
   resetRestockPlan();
 }
@@ -536,7 +549,7 @@ function getRestockSelectedCount() {
 
 function canGenerateRestockPlan() {
   return Boolean(
-    state.restockStep !== "start" &&
+    state.restockStep === "config" &&
       state.restockSalesFile &&
       state.restockRecipeFile &&
       getRestockSelectedCount() &&
@@ -556,9 +569,26 @@ function shouldShowRestockContinue() {
 
 function continueRestockPlanner() {
   if (!canContinueRestockPlanner()) return;
-  state.restockStep = "config";
-  resetRestockPlan();
-  renderShell();
+  const reduceMotion = prefersReducedRestockMotion();
+  const nextStep = reduceMotion ? "config" : "transitioning";
+  const renderNextStep = () => {
+    state.restockStep = nextStep;
+    resetRestockPlan();
+    renderShell();
+  };
+  clearRestockTransitionTimer();
+  if (!reduceMotion && document.startViewTransition) {
+    document.startViewTransition(renderNextStep);
+  } else {
+    renderNextStep();
+  }
+  if (!reduceMotion) {
+    restockTransitionTimer = window.setTimeout(() => {
+      state.restockStep = "config";
+      restockTransitionTimer = null;
+      renderShell();
+    }, 920);
+  }
   if (!state.countSessions.length && !state.countsLoading) {
     loadPlannerCounts();
   }
@@ -1508,7 +1538,7 @@ function renderPostCountHeader(data) {
   const latestCountId = getLatestCountId(data);
   const isPlanner = state.activeTab === "restock-planner";
   return `
-    <header class="dashboard-header dashboard-header--post-count">
+    <header class="dashboard-header dashboard-header--post-count ${isPlanner ? "dashboard-header--restock" : ""}">
       <div>
         <span>${escapeHtml(state.restaurantName)}</span>
         <h1>${isPlanner ? "Restock Planner" : "Dashboard"}</h1>
@@ -2112,9 +2142,10 @@ function renderBottomActionStrip(rows) {
 }
 
 function renderRestockPlanner() {
-  const isStart = state.restockStep === "start";
+  const restockStep = state.restockStep === "transitioning" ? "transitioning" : state.restockStep === "start" ? "start" : "config";
+  const isStart = restockStep === "start";
   return `
-    <section class="restock-planner-shell restock-planner-shell--${isStart ? "start" : "config"} ${state.restockPlan ? "restock-planner-shell--results" : ""}" aria-label="Restock Planner">
+    <section class="restock-planner-shell restock-planner-shell--${restockStep} ${state.restockPlan ? "restock-planner-shell--results" : ""}" aria-label="Restock Planner">
       ${
         isStart
           ? renderRestockStartState()
@@ -2201,7 +2232,7 @@ function renderRestockUploadCard({ type, number, title, helper, dropText, column
   const meta = type === "sales" ? state.restockSalesMeta : state.restockRecipeMeta;
   const error = type === "sales" ? state.restockSalesError : state.restockRecipeError;
   return `
-    <article class="restock-card restock-upload-card restock-upload-card--${escapeHtml(variant)}">
+    <article class="restock-card restock-upload-card restock-upload-card--${escapeHtml(variant)}" data-restock-card="${escapeHtml(type)}">
       <div class="restock-card-heading">
         <span>${escapeHtml(number)}</span>
         <div>

@@ -7048,9 +7048,25 @@ button:disabled,
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+.dashboard-header--restock h1 {
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.045em;
+}
+
+.dashboard-header--restock p {
+  color: #6e6a63;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
 .restock-planner-shell--start {
   max-width: 1040px;
   padding-top: clamp(12px, 2.4vh, 34px);
+}
+
+.restock-planner-shell--transitioning {
+  max-width: 1180px;
 }
 
 .restock-start-stage {
@@ -7102,6 +7118,10 @@ button:disabled,
   animation: restock-config-settle 680ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
+.restock-planner-shell--transitioning .restock-planner-grid {
+  animation-duration: 920ms;
+}
+
 .restock-setup-column {
   gap: 16px;
 }
@@ -7122,12 +7142,21 @@ button:disabled,
 }
 
 .restock-upload-card--compact {
-  padding: 18px;
-  animation: restock-card-compact-in 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  gap: 11px;
+  padding: 18px 20px;
+  animation: restock-card-compact-in 760ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .restock-upload-card--compact:nth-child(2) {
   animation-delay: 60ms;
+}
+
+.restock-upload-card[data-restock-card="sales"] {
+  view-transition-name: restock-sales-card;
+}
+
+.restock-upload-card[data-restock-card="recipe"] {
+  view-transition-name: restock-menu-card;
 }
 
 .restock-card-heading {
@@ -7145,6 +7174,17 @@ button:disabled,
   border: 1px solid rgba(200, 107, 50, 0.16);
 }
 
+.restock-upload-card--compact .restock-card-heading {
+  grid-template-columns: 32px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.restock-upload-card--compact .restock-card-heading > span {
+  width: 32px;
+  height: 32px;
+  font-size: 0.72rem;
+}
+
 .restock-card-heading h3,
 .restock-output-card h3 {
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -7155,6 +7195,16 @@ button:disabled,
 
 .restock-upload-card--large .restock-card-heading h3 {
   font-size: 1.52rem;
+}
+
+.restock-upload-card--compact .restock-card-heading h3 {
+  font-size: 1.08rem;
+}
+
+.restock-upload-card--compact .restock-card-heading p {
+  margin-top: 2px;
+  font-size: 13px;
+  line-height: 1.38;
 }
 
 .restock-card-heading p,
@@ -7170,7 +7220,9 @@ button:disabled,
 }
 
 .restock-upload-card--compact .restock-dropzone {
-  min-height: 118px;
+  min-height: 114px;
+  gap: 5px;
+  padding: 14px;
 }
 
 .restock-dropzone {
@@ -7213,12 +7265,24 @@ button:disabled,
   height: 52px;
 }
 
+.restock-upload-card--compact .restock-dropzone i {
+  width: 34px;
+  height: 34px;
+}
+
 .restock-dropzone strong,
 .restock-file-state strong,
 .restock-selected-count strong {
   font-size: 15px;
   font-weight: 600;
   letter-spacing: -0.015em;
+}
+
+.restock-dropzone strong {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .restock-upload-card--large .restock-dropzone strong {
@@ -7255,11 +7319,21 @@ button:disabled,
   gap: 8px;
 }
 
+.restock-upload-card--compact .restock-chip-row {
+  gap: 6px;
+  margin-top: -1px;
+}
+
 .restock-chip-row span {
   color: rgba(17, 17, 17, 0.7);
   font-weight: 600;
   background: rgba(17, 17, 17, 0.035);
   border-color: rgba(17, 17, 17, 0.07);
+}
+
+.restock-upload-card--compact .restock-chip-row span {
+  padding: 5px 8px;
+  font-size: 10px;
 }
 
 .restock-chip-row span.is-optional {
@@ -7273,6 +7347,11 @@ button:disabled,
   background: rgba(255, 255, 255, 0.62);
   border-color: rgba(17, 17, 17, 0.08);
   border-radius: 16px;
+}
+
+.restock-upload-card--compact .restock-file-state {
+  gap: 8px;
+  padding: 10px 11px;
 }
 
 .restock-file-state button {
@@ -7309,16 +7388,18 @@ button:disabled,
 }
 
 .restock-stock-card {
-  animation-delay: 120ms;
+  padding: 18px 20px;
+  animation-delay: 280ms;
 }
 
 .restock-generate-card {
   gap: 16px;
+  padding: 18px 20px;
   background:
     linear-gradient(180deg, rgba(255, 250, 242, 0.78), rgba(255, 255, 255, 0.86)),
     #fffdf9;
   border-color: rgba(17, 17, 17, 0.08);
-  animation-delay: 190ms;
+  animation-delay: 360ms;
 }
 
 .restock-generate-card strong {
@@ -7328,15 +7409,51 @@ button:disabled,
 }
 
 .restock-output-card {
-  min-height: 520px;
-  animation-delay: 260ms;
+  min-height: 430px;
+  padding: 20px;
+  align-self: start;
+  animation-delay: 430ms;
 }
 
 .restock-output-card--preview {
+  min-height: 430px;
   background:
     radial-gradient(circle at top left, rgba(255, 240, 230, 0.72), transparent 34%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(255, 253, 249, 0.92)),
     #fffdf9;
+}
+
+.restock-planner-shell--results .restock-output-card {
+  min-height: auto;
+}
+
+.restock-planner-shell--transitioning .restock-planner-intro {
+  animation: restock-reveal-up 620ms cubic-bezier(0.22, 1, 0.36, 1) 180ms both;
+}
+
+.restock-planner-shell--transitioning .restock-upload-card--compact {
+  animation-duration: 920ms;
+}
+
+.restock-planner-shell--transitioning .restock-stock-card {
+  animation-delay: 340ms;
+}
+
+.restock-planner-shell--transitioning .restock-generate-card {
+  animation-delay: 430ms;
+}
+
+.restock-planner-shell--transitioning .restock-output-card {
+  animation-delay: 500ms;
+}
+
+.restock-planner-shell--config .restock-planner-intro,
+.restock-planner-shell--config .restock-planner-grid,
+.restock-planner-shell--config .restock-upload-card--compact,
+.restock-planner-shell--config .restock-stock-card,
+.restock-planner-shell--config .restock-generate-card,
+.restock-planner-shell--config .restock-output-card {
+  animation: none;
 }
 
 .restock-flow-visual span,
@@ -7411,6 +7528,50 @@ button:disabled,
   }
 }
 
+::view-transition-group(restock-sales-card),
+::view-transition-group(restock-menu-card) {
+  animation-duration: 920ms;
+  animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+::view-transition-old(restock-sales-card),
+::view-transition-new(restock-sales-card),
+::view-transition-old(restock-menu-card),
+::view-transition-new(restock-menu-card) {
+  height: 100%;
+  overflow: clip;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(restock-sales-card),
+::view-transition-old(restock-menu-card) {
+  animation: restock-view-old 920ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+::view-transition-new(restock-sales-card),
+::view-transition-new(restock-menu-card) {
+  animation: restock-view-new 920ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes restock-view-old {
+  to {
+    opacity: 0.72;
+    transform: scale(0.985);
+  }
+}
+
+@keyframes restock-view-new {
+  from {
+    opacity: 0.86;
+    transform: scale(1.012);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .restock-start-grid,
   .restock-planner-intro,
@@ -7425,6 +7586,15 @@ button:disabled,
 
   .restock-dropzone {
     transition: none;
+  }
+
+  ::view-transition-group(restock-sales-card),
+  ::view-transition-group(restock-menu-card),
+  ::view-transition-old(restock-sales-card),
+  ::view-transition-new(restock-sales-card),
+  ::view-transition-old(restock-menu-card),
+  ::view-transition-new(restock-menu-card) {
+    animation: none;
   }
 }
 
