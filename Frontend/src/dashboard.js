@@ -38,6 +38,7 @@ const RESTOCK_REQUIRED_COLUMNS = {
   sales: ["item_name", "quantity_sold"],
   recipe: ["menu_item", "ingredient_name", "quantity_per_item", "unit"],
 };
+const RESTOCK_TRANSITION_DURATION_MS = 1450;
 
 const state = {
   restaurantName: "Your Restaurant",
@@ -587,7 +588,7 @@ function continueRestockPlanner() {
       state.restockStep = "config";
       restockTransitionTimer = null;
       renderShell();
-    }, 920);
+    }, RESTOCK_TRANSITION_DURATION_MS);
   }
   if (!state.countSessions.length && !state.countsLoading) {
     loadPlannerCounts();
@@ -2187,8 +2188,6 @@ function renderRestockUploadCards(variant = "large") {
       title: "Sales Data",
       helper: "Upload last month’s item sales.",
       dropText: "Drop sales CSV here",
-      columns: RESTOCK_REQUIRED_COLUMNS.sales,
-      optionalColumns: ["date optional"],
       variant,
     })}
     ${renderRestockUploadCard({
@@ -2197,9 +2196,6 @@ function renderRestockUploadCards(variant = "large") {
       title: "Menu Ingredients",
       helper: "Upload ingredient usage for each menu item.",
       dropText: "Drop menu CSV here",
-      columns: RESTOCK_REQUIRED_COLUMNS.recipe,
-      optionalColumns: [],
-      example: variant === "large" ? "Chicken Sandwich → Chicken Breast → 0.25 lb" : "",
       variant,
     })}
   `;
@@ -2238,7 +2234,7 @@ function renderRestockGenerateCard() {
   `;
 }
 
-function renderRestockUploadCard({ type, number, title, helper, dropText, columns, optionalColumns = [], example = "", variant = "large" }) {
+function renderRestockUploadCard({ type, number, title, helper, dropText, variant = "large" }) {
   const meta = type === "sales" ? state.restockSalesMeta : state.restockRecipeMeta;
   const error = type === "sales" ? state.restockSalesError : state.restockRecipeError;
   return `
@@ -2263,11 +2259,6 @@ function renderRestockUploadCard({ type, number, title, helper, dropText, column
         <strong>${meta ? escapeHtml(meta.name) : escapeHtml(dropText)}</strong>
         <small>${meta ? `${escapeHtml(meta.rowCount)} rows detected` : "or click to browse"}</small>
       </button>
-      <div class="restock-chip-row">
-        ${columns.map((column) => `<span>${escapeHtml(column)}</span>`).join("")}
-        ${optionalColumns.map((column) => `<span class="is-optional">${escapeHtml(column)}</span>`).join("")}
-      </div>
-      ${example ? `<div class="restock-example-row">${escapeHtml(example)}</div>` : ""}
       ${
         meta
           ? `<div class="restock-file-state">
