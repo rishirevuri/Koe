@@ -1498,21 +1498,25 @@ function bindSpreadsheetScrollIndicators() {
 
 function bindRestockPlanner() {
   document.querySelectorAll("[data-restock-browse]").forEach((button) => {
-    button.addEventListener("click", () => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
       document.querySelector(`#restock-${button.dataset.restockBrowse}-input`)?.click();
     });
-    button.addEventListener("dragover", (event) => {
+  });
+
+  document.querySelectorAll("[data-restock-dropzone]").forEach((dropzone) => {
+    dropzone.addEventListener("dragover", (event) => {
       event.preventDefault();
-      button.classList.add("is-dragging");
+      dropzone.classList.add("is-dragging");
     });
-    button.addEventListener("dragleave", () => {
-      button.classList.remove("is-dragging");
+    dropzone.addEventListener("dragleave", () => {
+      dropzone.classList.remove("is-dragging");
     });
-    button.addEventListener("drop", (event) => {
+    dropzone.addEventListener("drop", (event) => {
       event.preventDefault();
-      button.classList.remove("is-dragging");
+      dropzone.classList.remove("is-dragging");
       const file = event.dataTransfer?.files?.[0];
-      if (file) handleRestockFile(button.dataset.restockBrowse, file);
+      if (file) handleRestockFile(dropzone.dataset.restockDropzone, file);
     });
   });
 
@@ -2251,7 +2255,7 @@ function renderRestockUploadCards(variant = "large") {
       number: "1",
       title: "Sales Data",
       helper: "Upload last month’s item sales.",
-      dropText: "Drop sales CSV here",
+      dropText: "Drop CSV here",
       variant,
     })}
     ${renderRestockUploadCard({
@@ -2259,7 +2263,7 @@ function renderRestockUploadCards(variant = "large") {
       number: "2",
       title: "Menu Ingredients",
       helper: "Upload ingredient usage for each menu item.",
-      dropText: "Drop menu CSV here",
+      dropText: "Drop CSV here",
       variant,
     })}
   `;
@@ -2301,6 +2305,7 @@ function renderRestockGenerateCard() {
 function renderRestockUploadCard({ type, number, title, helper, dropText, variant = "large" }) {
   const meta = type === "sales" ? state.restockSalesMeta : state.restockRecipeMeta;
   const error = type === "sales" ? state.restockSalesError : state.restockRecipeError;
+  const pickerLabel = type === "sales" ? "Choose sales CSV" : "Choose menu ingredients CSV";
   return `
     <article class="restock-card restock-upload-card restock-upload-card--${escapeHtml(variant)}" data-restock-card="${escapeHtml(type)}">
       <div class="restock-card-heading">
@@ -2311,7 +2316,7 @@ function renderRestockUploadCard({ type, number, title, helper, dropText, varian
         </div>
       </div>
       <input class="restock-file-input" id="restock-${escapeHtml(type)}-input" data-restock-input="${escapeHtml(type)}" type="file" accept=".csv,text/csv" />
-      <button class="restock-dropzone ${meta ? "has-file" : ""}" data-restock-browse="${escapeHtml(type)}" type="button">
+      <div class="restock-dropzone ${meta ? "has-file" : ""}" data-restock-dropzone="${escapeHtml(type)}">
         <i aria-hidden="true">
           <svg viewBox="0 0 24 24">
             <path d="M12 16V5"></path>
@@ -2321,8 +2326,9 @@ function renderRestockUploadCard({ type, number, title, helper, dropText, varian
         </i>
         ${meta ? `<em class="restock-ready-pill">Ready</em>` : ""}
         <strong>${meta ? escapeHtml(meta.name) : escapeHtml(dropText)}</strong>
-        <small>${meta ? `${escapeHtml(meta.rowCount)} rows detected` : "or click to browse"}</small>
-      </button>
+        <small>${meta ? `${escapeHtml(meta.rowCount)} rows detected` : "or"}</small>
+        ${meta ? "" : `<button class="restock-picker-button" data-restock-browse="${escapeHtml(type)}" aria-label="${escapeHtml(pickerLabel)}" type="button">Choose CSV</button>`}
+      </div>
       ${
         meta
           ? `<div class="restock-file-state">
