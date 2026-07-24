@@ -7152,11 +7152,11 @@ button:disabled,
 .restock-planner-grid {
   grid-template-columns: minmax(390px, 460px) minmax(0, 1fr);
   gap: 24px;
-  animation: restock-config-settle 1450ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: restock-config-settle 1750ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .restock-planner-shell--transitioning .restock-planner-grid {
-  animation-duration: 1450ms;
+  animation-duration: 1750ms;
 }
 
 .restock-setup-column {
@@ -7173,19 +7173,28 @@ button:disabled,
   box-shadow: 0 18px 46px rgba(31, 27, 22, 0.06);
 }
 
+.restock-upload-card {
+  align-content: start;
+  grid-template-rows: auto var(--restock-upload-dropzone-height) auto;
+}
+
 .restock-upload-card--large {
-  min-height: 360px;
-  padding: 32px;
+  --restock-upload-dropzone-height: 200px;
+  --restock-ready-row-height: 58px;
+  min-height: 358px;
+  padding: 26px;
 }
 
 .restock-upload-card--compact {
-  gap: 12px;
-  padding: 18px 20px;
-  animation: restock-card-compact-in 1450ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  --restock-upload-dropzone-height: 126px;
+  --restock-ready-row-height: 52px;
+  gap: 14px;
+  padding: 22px 24px;
+  animation: restock-card-compact-in 1750ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .restock-upload-card--compact:nth-child(2) {
-  animation-delay: 120ms;
+  animation-delay: 90ms;
 }
 
 .restock-upload-card[data-restock-card="sales"] {
@@ -7199,6 +7208,8 @@ button:disabled,
 .restock-card-heading {
   grid-template-columns: 38px minmax(0, 1fr);
   gap: 14px;
+  min-height: 54px;
+  margin-bottom: 4px;
 }
 
 .restock-card-heading > span {
@@ -7214,6 +7225,8 @@ button:disabled,
 .restock-upload-card--compact .restock-card-heading {
   grid-template-columns: 32px minmax(0, 1fr);
   gap: 10px;
+  min-height: 47px;
+  margin-bottom: 4px;
 }
 
 .restock-upload-card--compact .restock-card-heading > span {
@@ -7252,20 +7265,23 @@ button:disabled,
 }
 
 .restock-upload-card--large .restock-dropzone {
-  min-height: 205px;
-  margin-top: 6px;
+  min-height: var(--restock-upload-dropzone-height);
+  height: var(--restock-upload-dropzone-height);
+  margin-top: 0;
 }
 
 .restock-upload-card--compact .restock-dropzone {
-  min-height: 110px;
+  min-height: var(--restock-upload-dropzone-height);
+  height: var(--restock-upload-dropzone-height);
   gap: 5px;
   padding: 14px;
 }
 
 .restock-dropzone {
   position: relative;
+  align-content: center;
   border-color: rgba(17, 17, 17, 0.13);
-  border-radius: 20px;
+  border-radius: 24px;
   background:
     linear-gradient(180deg, rgba(255, 250, 242, 0.52), rgba(255, 255, 255, 0.82)),
     #fffdf9;
@@ -7322,6 +7338,14 @@ button:disabled,
   white-space: nowrap;
 }
 
+.restock-dropzone.has-file strong {
+  font-size: 1.08rem;
+}
+
+.restock-dropzone.has-file small {
+  font-size: 0.95rem;
+}
+
 .restock-upload-card--large .restock-dropzone strong {
   font-size: 1.08rem;
 }
@@ -7340,6 +7364,7 @@ button:disabled,
   display: inline-flex;
   min-height: 24px;
   align-items: center;
+  margin-bottom: 8px;
   padding: 0 10px;
   color: #2f6f50;
   font-style: normal;
@@ -7381,17 +7406,26 @@ button:disabled,
 
 .restock-file-state,
 .restock-selected-count {
+  min-height: var(--restock-ready-row-height, 52px);
   background: rgba(255, 255, 255, 0.62);
   border-color: rgba(17, 17, 17, 0.08);
   border-radius: 16px;
 }
 
+.restock-upload-card--large .restock-file-state,
 .restock-upload-card--compact .restock-file-state {
-  gap: 8px;
-  padding: 10px 11px;
+  margin-top: 4px;
+  padding: 14px 16px;
+}
+
+.restock-upload-card--compact .restock-file-state {
+  gap: 10px;
 }
 
 .restock-file-state button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
   color: #4d4137;
   font-weight: 600;
   background: rgba(17, 17, 17, 0.035);
@@ -7421,12 +7455,12 @@ button:disabled,
 .restock-stock-card,
 .restock-generate-card,
 .restock-output-card {
-  animation: restock-reveal-up 1020ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: restock-reveal-up 1320ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 .restock-stock-card {
   padding: 18px 20px;
-  animation-delay: 620ms;
+  animation-delay: 680ms;
 }
 
 .restock-generate-card {
@@ -7436,7 +7470,7 @@ button:disabled,
     linear-gradient(180deg, rgba(255, 250, 242, 0.78), rgba(255, 255, 255, 0.86)),
     #fffdf9;
   border-color: rgba(17, 17, 17, 0.08);
-  animation-delay: 760ms;
+  animation-delay: 840ms;
 }
 
 .restock-generate-card strong {
@@ -7449,7 +7483,7 @@ button:disabled,
   min-height: 430px;
   padding: 20px;
   align-self: start;
-  animation-delay: 900ms;
+  animation-delay: 1000ms;
 }
 
 .restock-output-card--preview {
@@ -7465,23 +7499,37 @@ button:disabled,
 }
 
 .restock-planner-shell--transitioning .restock-planner-intro {
-  animation: restock-reveal-up 980ms cubic-bezier(0.22, 1, 0.36, 1) 420ms both;
+  animation: restock-reveal-up 1280ms cubic-bezier(0.22, 1, 0.36, 1) 560ms both;
 }
 
 .restock-planner-shell--transitioning .restock-upload-card--compact {
-  animation-duration: 1450ms;
+  animation-duration: 1750ms;
+}
+
+.restock-upload-card.is-flipping {
+  transform: translate(var(--restock-flip-x, 0), var(--restock-flip-y, 0)) scale(var(--restock-flip-scale-x, 1), var(--restock-flip-scale-y, 1));
+  transform-origin: top left;
+  animation: none;
+  transition:
+    transform 1750ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 1750ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.restock-upload-card.is-flipping.is-flip-settled {
+  transform: translate(0, 0) scale(1);
 }
 
 .restock-planner-shell--transitioning .restock-stock-card {
-  animation-delay: 650ms;
+  animation-delay: 680ms;
 }
 
 .restock-planner-shell--transitioning .restock-generate-card {
-  animation-delay: 780ms;
+  animation-delay: 840ms;
 }
 
 .restock-planner-shell--transitioning .restock-output-card {
-  animation-delay: 900ms;
+  animation-delay: 1000ms;
 }
 
 .restock-planner-shell--config .restock-planner-intro,
@@ -7544,7 +7592,7 @@ button:disabled,
 @keyframes restock-card-compact-in {
   from {
     opacity: 0;
-    transform: translateY(-22px) scale(0.96);
+    transform: translateY(-24px) scale(0.95);
   }
 
   to {
@@ -7567,7 +7615,7 @@ button:disabled,
 
 ::view-transition-group(restock-sales-card),
 ::view-transition-group(restock-menu-card) {
-  animation-duration: 1450ms;
+  animation-duration: 1750ms;
   animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -7582,12 +7630,12 @@ button:disabled,
 
 ::view-transition-old(restock-sales-card),
 ::view-transition-old(restock-menu-card) {
-  animation: restock-view-old 1450ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: restock-view-old 1750ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 ::view-transition-new(restock-sales-card),
 ::view-transition-new(restock-menu-card) {
-  animation: restock-view-new 1450ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation: restock-view-new 1750ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
 @keyframes restock-view-old {
@@ -8605,12 +8653,14 @@ button:disabled,
   }
 
   .restock-upload-card--large {
+    --restock-upload-dropzone-height: 154px;
     min-height: auto;
     padding: 20px;
   }
 
   .restock-upload-card--large .restock-dropzone {
-    min-height: 154px;
+    min-height: var(--restock-upload-dropzone-height);
+    height: var(--restock-upload-dropzone-height);
   }
 
   .restock-upload-card--large .restock-card-heading h3 {
@@ -8618,11 +8668,14 @@ button:disabled,
   }
 
   .restock-upload-card--compact {
+    --restock-upload-dropzone-height: 112px;
+    --restock-ready-row-height: auto;
     padding: 16px;
   }
 
   .restock-upload-card--compact .restock-dropzone {
-    min-height: 112px;
+    min-height: var(--restock-upload-dropzone-height);
+    height: var(--restock-upload-dropzone-height);
   }
 
   .restock-continue-row {

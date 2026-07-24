@@ -38,7 +38,7 @@ const RESTOCK_REQUIRED_COLUMNS = {
   sales: ["item_name", "quantity_sold"],
   recipe: ["menu_item", "ingredient_name", "quantity_per_item", "unit"],
 };
-const RESTOCK_TRANSITION_DURATION_MS = 1450;
+const RESTOCK_TRANSITION_DURATION_MS = 1750;
 
 const state = {
   restaurantName: "Your Restaurant",
@@ -78,6 +78,7 @@ const state = {
 };
 let spreadsheetResizeBound = false;
 let restockTransitionTimer = null;
+let restockPendingUploadFlip = null;
 
 function escapeHtml(value) {
   return String(value ?? "")
@@ -488,6 +489,10 @@ function resetRestockPlan() {
   state.restockError = "";
 }
 
+function isRestockTransitioning() {
+  return state.restockStep === "transitioning" && Boolean(restockTransitionTimer);
+}
+
 function clearRestockTransitionTimer() {
   if (restockTransitionTimer) {
     window.clearTimeout(restockTransitionTimer);
@@ -499,8 +504,56 @@ function prefersReducedRestockMotion() {
   return Boolean(window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
 }
 
+function captureRestockUploadRects() {
+  const rects = {};
+  document.querySelectorAll(".restock-upload-card[data-restock-card]").forEach((card) => {
+    rects[card.dataset.restockCard] = card.getBoundingClientRect();
+  });
+  return Object.keys(rects).length ? rects : null;
+}
+
+function applyRestockUploadFlip() {
+  if (!restockPendingUploadFlip || state.restockStep !== "transitioning" || prefersReducedRestockMotion()) {
+    restockPendingUploadFlip = null;
+    return;
+  }
+
+  const rects = restockPendingUploadFlip;
+  restockPendingUploadFlip = null;
+  const cards = Array.from(document.querySelectorAll(".restock-upload-card--compact[data-restock-card]"));
+  cards.forEach((card) => {
+    const first = rects[card.dataset.restockCard];
+    if (!first) return;
+    const last = card.getBoundingClientRect();
+    const deltaX = first.left - last.left;
+    const deltaY = first.top - last.top;
+    const scaleX = first.width / Math.max(last.width, 1);
+    const scaleY = first.height / Math.max(last.height, 1);
+    card.style.setProperty("--restock-flip-x", `${deltaX}px`);
+    card.style.setProperty("--restock-flip-y", `${deltaY}px`);
+    card.style.setProperty("--restock-flip-scale-x", scaleX.toFixed(4));
+    card.style.setProperty("--restock-flip-scale-y", scaleY.toFixed(4));
+    card.classList.add("is-flipping");
+  });
+
+  window.requestAnimationFrame(() => {
+    cards.forEach((card) => card.classList.add("is-flip-settled"));
+  });
+
+  window.setTimeout(() => {
+    cards.forEach((card) => {
+      card.classList.remove("is-flipping", "is-flip-settled");
+      card.style.removeProperty("--restock-flip-x");
+      card.style.removeProperty("--restock-flip-y");
+      card.style.removeProperty("--restock-flip-scale-x");
+      card.style.removeProperty("--restock-flip-scale-y");
+    });
+  }, RESTOCK_TRANSITION_DURATION_MS + 120);
+}
+
 function resetRestockWorkflow() {
   clearRestockTransitionTimer();
+  restockPendingUploadFlip = null;
   state.restockStep = "start";
   resetRestockPlan();
 }
@@ -572,17 +625,21 @@ function continueRestockPlanner() {
   if (!canContinueRestockPlanner()) return;
   const reduceMotion = prefersReducedRestockMotion();
   const nextStep = reduceMotion ? "config" : "transitioning";
+  const shouldLoadCounts = !state.countSessions.length && !state.countsLoading;
+  if (shouldLoadCounts) {
+    state.countsLoading = true;
+    state.countsError = "";
+  }
   const renderNextStep = () => {
     state.restockStep = nextStep;
     resetRestockPlan();
     renderShell();
   };
   clearRestockTransitionTimer();
-  if (!reduceMotion && document.startViewTransition) {
-    document.startViewTransition(renderNextStep);
-  } else {
-    renderNextStep();
+  if (!reduceMotion) {
+    restockPendingUploadFlip = captureRestockUploadRects();
   }
+  renderNextStep();
   if (!reduceMotion) {
     restockTransitionTimer = window.setTimeout(() => {
       state.restockStep = "config";
@@ -590,8 +647,8 @@ function continueRestockPlanner() {
       renderShell();
     }, RESTOCK_TRANSITION_DURATION_MS);
   }
-  if (!state.countSessions.length && !state.countsLoading) {
-    loadPlannerCounts();
+  if (shouldLoadCounts) {
+    loadPlannerCounts({ renderBefore: false, loadingAlreadySet: true, deferDuringTransition: true });
   }
 }
 
@@ -1088,10 +1145,14 @@ async function loadPastCounts({ selectCountId = null } = {}) {
   }
 }
 
-async function loadPlannerCounts() {
-  state.countsLoading = true;
-  state.countsError = "";
-  renderShell();
+async function loadPlannerCounts({ renderBefore = true, loadingAlreadySet = false, deferDuringTransition = false } = {}) {
+  if (!loadingAlreadySet) {
+    state.countsLoading = true;
+    state.countsError = "";
+  }
+  if (renderBefore && !(deferDuringTransition && isRestockTransitioning())) {
+    renderShell();
+  }
   try {
     const sessions = await getCountSessions();
     applyCountSessions(sessions, state.restockSelectedCountId || state.selectedCountId);
@@ -1099,7 +1160,9 @@ async function loadPlannerCounts() {
     state.countsError = error.message || "Could not load saved counts.";
   } finally {
     state.countsLoading = false;
-    renderShell();
+    if (!(deferDuringTransition && isRestockTransitioning())) {
+      renderShell();
+    }
   }
 }
 
@@ -1396,6 +1459,7 @@ function renderShell() {
   document.querySelector("#delete-count-confirm")?.addEventListener("click", confirmDeleteCount);
   bindSpreadsheetScrollIndicators();
   bindRestockPlanner();
+  applyRestockUploadFlip();
 }
 
 function updateSpreadsheetScrollIndicator(shell) {
