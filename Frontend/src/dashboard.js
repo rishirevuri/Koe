@@ -2146,6 +2146,7 @@ function renderRestockPlanner() {
   const isStart = restockStep === "start";
   return `
     <section class="restock-planner-shell restock-planner-shell--${restockStep} ${state.restockPlan ? "restock-planner-shell--results" : ""}" aria-label="Restock Planner">
+      ${renderRestockWorkInProgressNotice()}
       ${
         isStart
           ? renderRestockStartState()
@@ -2166,6 +2167,15 @@ function renderRestockPlanner() {
           `
       }
     </section>
+  `;
+}
+
+function renderRestockWorkInProgressNotice() {
+  return `
+    <aside class="restock-wip-notice" aria-label="Restock Planner development notice">
+      <span>In progress</span>
+      <p>Restock Planner is still under development and not ready for live ordering. Use it for testing only, and review every suggestion before purchasing.</p>
+    </aside>
   `;
 }
 
