@@ -244,19 +244,34 @@ class RestockPlanSummary(BaseModel):
     needs_review: int
     safety_buffer_percent: int
     history_counts_used: int = 0
-    forecast_mode: Literal["adaptive", "recipe_only", "limited_history"] = "recipe_only"
+    forecast_mode: Literal["claude_adaptive", "claude_recipe_only", "deterministic_adaptive", "deterministic_recipe_only"] = "deterministic_recipe_only"
+    planner_source: Literal["claude", "deterministic_fallback"] = "deterministic_fallback"
+    fallback_reason: str | None = None
+    overall_note: str | None = None
 
 
 class RestockPlanRow(BaseModel):
     ingredient: str
-    projected_need: float
+    projected_need: float | None = None
     adjusted_need: float | None = None
-    current_stock: float | None = None
+    current_stock: float | str | None = None
     current_stock_unit: str | None = None
-    suggested_purchase: float
-    unit: str
+    suggested_purchase: float | None = None
+    unit: str | None = None
     usage_multiplier: float | None = None
+    action: Literal["buy", "hold", "review"] = "review"
     status: Literal["Ready", "Limited History", "Needs Review", "Unit Mismatch", "Stock Unknown"]
+    confidence: Literal["High", "Medium", "Low"] = "Low"
+    usage_signal: Literal["low", "medium", "high", "unknown"] = "unknown"
+    history_signal: Literal[
+        "stable",
+        "depletes_faster_than_expected",
+        "depletes_slower_than_expected",
+        "inconsistent",
+        "limited_history",
+        "unknown",
+    ] = "unknown"
+    risk_signal: Literal["stockout_risk", "waste_risk", "balanced", "needs_review"] = "needs_review"
     reason: str
 
 
@@ -265,7 +280,13 @@ class RestockLearningNote(BaseModel):
     note: str
 
 
+class RestockReviewWarning(BaseModel):
+    ingredient: str
+    warning: str
+
+
 class RestockPlanResponse(BaseModel):
     summary: RestockPlanSummary
     purchase_plan: list[RestockPlanRow]
     learning_notes: list[RestockLearningNote] = Field(default_factory=list)
+    review_warnings: list[RestockReviewWarning] = Field(default_factory=list)

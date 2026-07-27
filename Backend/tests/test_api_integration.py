@@ -14,7 +14,7 @@ from app.models import CountEntry, CountSession, InventoryItem, Issue, Restauran
 from app.routes import ai, integrations
 from app.routes import auth as auth_routes
 from app.seed import seed
-from app.services import external_ai_service, google_sheets_service, speech_to_text_service
+from app.services import external_ai_service, google_sheets_service, restock_planner_service, speech_to_text_service
 from app.services.voice_parse_service import ParsedCandidate
 
 
@@ -353,7 +353,10 @@ def test_restock_plan_endpoint_generates_purchase_plan() -> None:
         "needs_review": 1,
         "safety_buffer_percent": 10,
         "history_counts_used": 0,
-        "forecast_mode": "recipe_only",
+        "forecast_mode": "deterministic_recipe_only",
+        "planner_source": "deterministic_fallback",
+        "fallback_reason": "external_ai_disabled",
+        "overall_note": None,
     }
     rows = {row["ingredient"]: row for row in payload["purchase_plan"]}
     assert rows["Chicken Breast"]["projected_need"] == 25
@@ -366,6 +369,84 @@ def test_restock_plan_endpoint_generates_purchase_plan() -> None:
     assert rows["Burger Buns"]["suggested_purchase"] == 144.5
     assert rows["Ground Beef"]["status"] == "Stock Unknown"
     assert rows["Ground Beef"]["current_stock"] is None
+
+
+def test_restock_plan_endpoint_returns_mocked_claude_plan(monkeypatch) -> None:
+    db = SessionLocal()
+    try:
+        restaurant = db.query(Restaurant).filter(Restaurant.name == "Smoking Pig BBQ").one()
+        count = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            restaurant=restaurant,
+        )
+        db.add(count)
+        db.flush()
+        db.add(
+            CountEntry(
+                count_session_id=count.id,
+                item_name_raw="chicken breast",
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                category="Proteins",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        )
+        db.commit()
+        count_id = count.id
+    finally:
+        db.close()
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        assert evidence_packet["ingredients"][0]["ingredient_name"] == "Chicken Breast"
+        return {
+            "summary": {"forecast_mode": "claude_recipe_only", "overall_note": "Claude reviewed the evidence."},
+            "purchase_plan": [
+                {
+                    "ingredient": "Chicken Breast",
+                    "suggested_purchase": 30,
+                    "unit": "pounds",
+                    "action": "buy",
+                    "status": "Limited History",
+                    "confidence": "Medium",
+                    "projected_need": 25,
+                    "adjusted_need": 28,
+                    "current_stock": 10,
+                    "usage_signal": "medium",
+                    "history_signal": "limited_history",
+                    "risk_signal": "stockout_risk",
+                    "reason": "Claude reviewed sales, menu usage, and current stock, then drafted a cautious purchase amount.",
+                }
+            ],
+            "learning_notes": [],
+            "review_warnings": [],
+        }
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    response = client.post(
+        "/restock/plan",
+        data={"count_id": str(count_id)},
+        files={
+            "sales_file": ("sales.csv", b"item_name,quantity_sold\nChicken Sandwich,400\n", "text/csv"),
+            "recipe_file": (
+                "recipes.csv",
+                b"menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds\n",
+                "text/csv",
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["planner_source"] == "claude"
+    assert payload["summary"]["forecast_mode"] == "claude_recipe_only"
+    assert payload["summary"]["overall_note"] == "Claude reviewed the evidence."
+    assert payload["purchase_plan"][0]["action"] == "buy"
+    assert payload["purchase_plan"][0]["confidence"] == "Medium"
 
 
 def test_restock_plan_endpoint_accepts_previous_count_ids_for_adaptive_plan() -> None:
@@ -432,7 +513,9 @@ def test_restock_plan_endpoint_accepts_previous_count_ids_for_adaptive_plan() ->
     assert response.status_code == 200
     payload = response.json()
     row = payload["purchase_plan"][0]
-    assert payload["summary"]["forecast_mode"] == "adaptive"
+    assert payload["summary"]["forecast_mode"] == "deterministic_adaptive"
+    assert payload["summary"]["planner_source"] == "deterministic_fallback"
+    assert payload["summary"]["fallback_reason"] == "external_ai_disabled"
     assert payload["summary"]["history_counts_used"] == 1
     assert row["usage_multiplier"] == 1.2
     assert row["adjusted_need"] == 30

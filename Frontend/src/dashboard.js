@@ -798,6 +798,20 @@ function restockStatusClass(status) {
   return "restock-status--ready";
 }
 
+function restockActionClass(action) {
+  const normalized = String(action || "").toLowerCase();
+  if (normalized === "buy") return "restock-action--buy";
+  if (normalized === "hold") return "restock-action--hold";
+  return "restock-action--review";
+}
+
+function restockConfidenceClass(confidence) {
+  const normalized = String(confidence || "").toLowerCase();
+  if (normalized === "high") return "restock-confidence--high";
+  if (normalized === "medium") return "restock-confidence--medium";
+  return "restock-confidence--low";
+}
+
 function hasPurchaseQuantity(value) {
   const neededQuantity = String(value ?? "").trim();
   return Boolean(neededQuantity && neededQuantity.toLowerCase() !== "tbd" && neededQuantity !== "—");
@@ -2650,25 +2664,41 @@ function renderRestockPlanResults(plan) {
   const summary = plan.summary || {};
   const rows = plan.purchase_plan || [];
   const notes = plan.learning_notes || [];
-  const reviewRows = rows.filter((row) => ["Needs Review", "Unit Mismatch", "Stock Unknown"].includes(row.status));
+  const reviewWarnings = plan.review_warnings?.length
+    ? plan.review_warnings
+    : rows
+        .filter((row) => ["Needs Review", "Unit Mismatch", "Stock Unknown"].includes(row.status))
+        .map((row) => ({
+          ingredient: row.ingredient || "Inventory",
+          warning: `${row.status || "Needs Review"} — ${row.reason || "Review before ordering."}`,
+        }));
+  const plannerSource = summary.planner_source || "deterministic_fallback";
+  const isClaude = plannerSource === "claude";
+  const sourceCopy = isClaude
+    ? "Claude reviewed sales, menu data, current stock, and count history."
+    : "Fallback forecast used because Claude was unavailable. Review recommendations carefully.";
   return `
     <section class="restock-output-card restock-output-card--results">
       <div class="restock-results-header">
         <div>
-          <span class="restock-output-kicker">Adaptive Purchase Report</span>
-          <h3>Review before ordering.</h3>
+          <span class="restock-output-kicker">Draft Purchase Plan</span>
+          <h3>Manager-reviewed recommendations.</h3>
         </div>
         <small>${escapeHtml(summary.safety_buffer_percent ?? 10)}% safety buffer</small>
+      </div>
+      <div class="restock-source-note ${isClaude ? "is-claude" : "is-fallback"}">
+        <strong>${escapeHtml(isClaude ? "Claude decision layer" : "Fallback forecast used")}</strong>
+        <span>${escapeHtml(sourceCopy)}</span>
       </div>
       <div class="restock-report-section">
         <span class="restock-section-label">Forecast Summary</span>
         <div class="restock-summary-cards">
-          <div><span>Items Forecasted</span><strong>${escapeHtml(summary.items_forecasted ?? rows.length)}</strong></div>
+          <div><span>Forecast Mode</span><strong>${escapeHtml(formatForecastMode(summary.forecast_mode))}</strong></div>
+          <div><span>Planner Source</span><strong>${escapeHtml(formatPlannerSource(plannerSource))}</strong></div>
+          <div><span>History Counts Used</span><strong>${escapeHtml(summary.history_counts_used ?? 0)}</strong></div>
           <div><span>Suggested Purchases</span><strong>${escapeHtml(summary.suggested_purchases ?? 0)}</strong></div>
           <div><span>Needs Review</span><strong>${escapeHtml(summary.needs_review ?? 0)}</strong></div>
-          <div><span>Forecast Mode</span><strong>${escapeHtml(formatForecastMode(summary.forecast_mode))}</strong></div>
-          <div><span>History Counts Used</span><strong>${escapeHtml(summary.history_counts_used ?? 0)}</strong></div>
-          <div><span>Safety Buffer</span><strong>${escapeHtml(summary.safety_buffer_percent ?? 10)}%</strong></div>
+          <div><span>Items Forecasted</span><strong>${escapeHtml(summary.items_forecasted ?? rows.length)}</strong></div>
         </div>
       </div>
       <div class="restock-report-section">
@@ -2691,12 +2721,12 @@ function renderRestockPlanResults(plan) {
           : ""
       }
       ${
-        reviewRows.length
+        reviewWarnings.length
           ? `<div class="restock-report-section restock-review-warnings">
               <span class="restock-section-label">Review Warnings</span>
-              ${reviewRows
+              ${reviewWarnings
                 .slice(0, 4)
-                .map((row) => `<p><strong>${escapeHtml(row.ingredient || "Inventory")}</strong><span>${escapeHtml(row.status || "Needs Review")} — ${escapeHtml(row.reason || "Review before ordering.")}</span></p>`)
+                .map((warning) => `<p><strong>${escapeHtml(warning.ingredient || "Inventory")}</strong><span>${escapeHtml(warning.warning || "Review before ordering.")}</span></p>`)
                 .join("")}
             </div>`
           : ""
@@ -2707,9 +2737,17 @@ function renderRestockPlanResults(plan) {
 
 function formatForecastMode(value) {
   const normalized = String(value || "").toLowerCase();
+  if (normalized === "claude_adaptive") return "Claude Adaptive";
+  if (normalized === "claude_recipe_only") return "Claude Recipe Only";
+  if (normalized === "deterministic_adaptive") return "Fallback Adaptive";
+  if (normalized === "deterministic_recipe_only") return "Fallback Recipe Only";
   if (normalized === "adaptive") return "Adaptive";
   if (normalized === "limited_history") return "Limited History";
   return "Recipe Only";
+}
+
+function formatPlannerSource(value) {
+  return String(value || "").toLowerCase() === "claude" ? "Claude" : "Fallback";
 }
 
 function restockQuantityWithUnit(value, unit, fallback = "Unknown") {
@@ -2717,12 +2755,24 @@ function restockQuantityWithUnit(value, unit, fallback = "Unknown") {
   return `${formatPlanQuantity(value)} ${unit || ""}`.trim();
 }
 
+function formatRestockSuggestion(row) {
+  if (row.suggested_purchase === null || row.suggested_purchase === undefined || row.suggested_purchase === "") {
+    return row.action === "hold" ? "Hold" : "Review";
+  }
+  if (row.action === "hold" && Number(row.suggested_purchase) === 0) {
+    return "Hold";
+  }
+  return restockQuantityWithUnit(row.suggested_purchase, row.unit, "Review");
+}
+
 function renderRestockPlanRow(row) {
   const currentStock = restockQuantityWithUnit(row.current_stock, row.current_stock_unit || row.unit);
   const projected = restockQuantityWithUnit(row.projected_need, row.unit);
   const adjusted = restockQuantityWithUnit(row.adjusted_need ?? row.projected_need, row.unit);
-  const suggested = restockQuantityWithUnit(row.suggested_purchase, row.unit, "0");
+  const suggested = formatRestockSuggestion(row);
   const multiplier = row.usage_multiplier ? ` · Usage multiplier: ${formatPlanQuantity(row.usage_multiplier)}x` : "";
+  const action = row.action || (Number(row.suggested_purchase || 0) > 0 ? "buy" : "review");
+  const confidence = row.confidence || "Low";
   return `
     <article class="restock-plan-card">
       <div class="restock-plan-card-main">
@@ -2734,7 +2784,11 @@ function renderRestockPlanRow(row) {
           <span>Suggested Purchase</span>
           <strong>${escapeHtml(suggested)}</strong>
         </div>
-        <i class="restock-status ${restockStatusClass(row.status)}">${escapeHtml(row.status || "Needs Review")}</i>
+        <div class="restock-plan-pill-stack">
+          <i class="restock-action ${restockActionClass(action)}">${escapeHtml(action)}</i>
+          <i class="restock-status ${restockStatusClass(row.status)}">${escapeHtml(row.status || "Needs Review")}</i>
+          <i class="restock-confidence ${restockConfidenceClass(confidence)}">${escapeHtml(confidence)}</i>
+        </div>
       </div>
       <p>${escapeHtml(row.reason || "Review this suggestion before ordering.")}</p>
     </article>

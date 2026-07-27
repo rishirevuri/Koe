@@ -298,6 +298,105 @@ Do not hardcode only this transcript. Use it as a behavioral example.
 
 SYSTEM_PROMPT = RESTAURANT_INVENTORY_SYSTEM_PROMPT
 
+
+RESTOCK_PLANNER_SYSTEM_PROMPT = """
+You are an expert restaurant inventory manager and purchasing analyst.
+
+Your job is to review structured evidence from a restaurant and draft a manager-reviewed purchase plan.
+You are not placing orders. You must be practical, cautious, and clear.
+
+Rules:
+- Use only the provided evidence.
+- Do not invent ingredients.
+- Do not invent vendors.
+- Do not claim exact certainty.
+- Prefer practical rounded quantities over overly precise decimals.
+- If units are incompatible, mark Unit Mismatch.
+- If stock is unknown, mark Stock Unknown.
+- If current stock is qualitative or unclear, mark Needs Review.
+- If previous counts are missing or unusable, use recipe/menu evidence but mark Limited History.
+- Consider perishability, waste risk, and stockout risk.
+- Consider whether the item is a direct recipe ingredient or a supply item.
+- Explain each reason in plain English.
+- Output strict JSON only.
+- Do not return markdown.
+- Do not write commentary outside the JSON.
+
+Allowed action values:
+- buy
+- hold
+- review
+
+Allowed status values:
+- Ready
+- Limited History
+- Stock Unknown
+- Unit Mismatch
+- Needs Review
+
+Allowed confidence values:
+- High
+- Medium
+- Low
+
+Allowed usage_signal values:
+- low
+- medium
+- high
+- unknown
+
+Allowed history_signal values:
+- stable
+- depletes_faster_than_expected
+- depletes_slower_than_expected
+- inconsistent
+- limited_history
+- unknown
+
+Allowed risk_signal values:
+- stockout_risk
+- waste_risk
+- balanced
+- needs_review
+
+Return this exact JSON shape:
+{
+  "summary": {
+    "forecast_mode": "claude_adaptive" | "claude_recipe_only",
+    "overall_note": "string"
+  },
+  "purchase_plan": [
+    {
+      "ingredient": "string",
+      "suggested_purchase": number | null,
+      "unit": "string | null",
+      "action": "buy" | "hold" | "review",
+      "status": "Ready" | "Limited History" | "Stock Unknown" | "Unit Mismatch" | "Needs Review",
+      "confidence": "High" | "Medium" | "Low",
+      "projected_need": number | null,
+      "adjusted_need": number | null,
+      "current_stock": number | string | null,
+      "usage_signal": "low" | "medium" | "high" | "unknown",
+      "history_signal": "stable" | "depletes_faster_than_expected" | "depletes_slower_than_expected" | "inconsistent" | "limited_history" | "unknown",
+      "risk_signal": "stockout_risk" | "waste_risk" | "balanced" | "needs_review",
+      "reason": "string"
+    }
+  ],
+  "learning_notes": [
+    {
+      "ingredient": "string",
+      "note": "string"
+    }
+  ],
+  "review_warnings": [
+    {
+      "ingredient": "string",
+      "warning": "string"
+    }
+  ]
+}
+"""
+
 ALLOWED_STATUSES = {
     "Clean",
     "Partial Quantity",
@@ -667,6 +766,66 @@ def parse_inventory_with_claude(transcript: str) -> list[ParsedCandidate]:
     parsed = parse_inventory_json_with_claude(transcript)
     candidates = [_coerce_candidate(entry) for entry in parsed["items"]]
     return [candidate for candidate in candidates if candidate is not None]
+
+
+def generate_restock_plan_with_claude(evidence_packet: dict) -> dict:
+    settings = get_settings()
+    if not settings.enable_external_ai:
+        raise RuntimeError("External AI integrations are disabled")
+    if (settings.text_ai_provider or "claude").lower() != "claude":
+        raise RuntimeError("Text AI provider is not Claude")
+    if not settings.is_claude_configured:
+        raise RuntimeError("Claude is not configured")
+
+    response = httpx.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": settings.anthropic_api_key or "",
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": settings.anthropic_model,
+            "max_tokens": 7000,
+            "temperature": 0,
+            "system": RESTOCK_PLANNER_SYSTEM_PROMPT,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Draft a manager-reviewed restock purchase plan from this evidence packet. "
+                        "Return strict JSON only.\n\n"
+                        f"{json.dumps(evidence_packet, ensure_ascii=True, default=str)}"
+                    ),
+                }
+            ],
+        },
+        timeout=45,
+    )
+    if response.status_code >= 400:
+        message = f"Claude request failed with status {response.status_code}"
+        try:
+            error_body = response.json()
+            provider_message = error_body.get("error", {}).get("message")
+            if provider_message:
+                message = provider_message
+        except ValueError:
+            pass
+        raise RuntimeError(message)
+
+    payload = response.json()
+    content = payload.get("content") or []
+    text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+    raw_text = "\n".join(text_parts)
+    parsed = _extract_json_object(raw_text)
+    _log_parse_debug(
+        settings,
+        "restock_claude_json",
+        model=settings.anthropic_model,
+        ingredient_count=len(evidence_packet.get("ingredients", [])) if isinstance(evidence_packet, dict) else 0,
+        plan_count=len(parsed.get("purchase_plan", [])) if isinstance(parsed.get("purchase_plan"), list) else 0,
+    )
+    return parsed
 
 
 def parse_inventory_with_claude_placeholder(transcript: str) -> dict:

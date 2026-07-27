@@ -54,6 +54,6 @@ async def create_restock_plan(
     try:
         sales_bytes = await sales_file.read()
         recipe_bytes = await recipe_file.read()
-        return build_restock_plan(count, sales_bytes, recipe_bytes, previous_counts)
+        return build_restock_plan(count, sales_bytes, recipe_bytes, previous_counts, use_claude=True)
     except RestockPlannerError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app.models import CountEntry, CountSession, Restaurant
+from app.services import restock_planner_service
 from app.services.restock_planner_service import RestockPlannerError, build_restock_plan
 
 
@@ -56,26 +57,26 @@ def test_basic_sales_to_weekly_purchase_plan() -> None:
         ),
     )
 
-    assert result["summary"] == {
-        "items_forecasted": 1,
-        "suggested_purchases": 1,
-        "needs_review": 0,
-        "safety_buffer_percent": 10,
-        "history_counts_used": 0,
-        "forecast_mode": "recipe_only",
-    }
-    assert result["purchase_plan"][0] == {
-        "ingredient": "Chicken Breast",
-        "projected_need": 25,
-        "adjusted_need": 25,
-        "current_stock": 10,
-        "current_stock_unit": "pounds",
-        "suggested_purchase": 17.5,
-        "unit": "pounds",
-        "usage_multiplier": None,
-        "status": "Limited History",
-        "reason": "Based on sales and recipe usage only from 100 projected Chicken Sandwich sales and 0.25 pounds per item. Add previous counts to learn actual depletion.",
-    }
+    assert result["summary"]["items_forecasted"] == 1
+    assert result["summary"]["suggested_purchases"] == 1
+    assert result["summary"]["needs_review"] == 0
+    assert result["summary"]["safety_buffer_percent"] == 10
+    assert result["summary"]["history_counts_used"] == 0
+    assert result["summary"]["forecast_mode"] == "deterministic_recipe_only"
+    assert result["summary"]["planner_source"] == "deterministic_fallback"
+    row = result["purchase_plan"][0]
+    assert row["ingredient"] == "Chicken Breast"
+    assert row["projected_need"] == 25
+    assert row["adjusted_need"] == 25
+    assert row["current_stock"] == 10
+    assert row["current_stock_unit"] == "pounds"
+    assert row["suggested_purchase"] == 17.5
+    assert row["unit"] == "pounds"
+    assert row["usage_multiplier"] is None
+    assert row["action"] == "buy"
+    assert row["confidence"] == "Medium"
+    assert row["status"] == "Limited History"
+    assert row["reason"] == "Based on sales and recipe usage only from 100 projected Chicken Sandwich sales and 0.25 pounds per item. Add previous counts to learn actual depletion."
 
 
 def test_same_ingredient_across_menu_items_sums_and_applies_buffer() -> None:
@@ -221,7 +222,7 @@ def test_previous_count_depletion_creates_adaptive_multiplier() -> None:
     )
 
     row = result["purchase_plan"][0]
-    assert result["summary"]["forecast_mode"] == "adaptive"
+    assert result["summary"]["forecast_mode"] == "deterministic_adaptive"
     assert result["summary"]["history_counts_used"] == 1
     assert row["projected_need"] == 25
     assert row["usage_multiplier"] == 1.2
@@ -265,7 +266,7 @@ def test_negative_depletion_is_ignored_and_flagged_for_review() -> None:
     )
 
     row = result["purchase_plan"][0]
-    assert result["summary"]["forecast_mode"] == "limited_history"
+    assert result["summary"]["forecast_mode"] == "deterministic_recipe_only"
     assert result["summary"]["history_counts_used"] == 0
     assert row["usage_multiplier"] is None
     assert row["status"] == "Needs Review"
@@ -392,6 +393,257 @@ def test_qualitative_current_stock_is_not_used_in_math() -> None:
     assert row["suggested_purchase"] == 2.2
     assert row["status"] == "Needs Review"
     assert "qualitative quantity" in row["reason"]
+
+
+def test_claude_planner_success_uses_evidence_and_returns_adaptive_plan(monkeypatch) -> None:
+    current_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=2,
+    )
+    previous_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=130,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=1,
+    )
+    captured: dict = {}
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        captured["evidence_packet"] = evidence_packet
+        return {
+            "summary": {"forecast_mode": "claude_adaptive", "overall_note": "History was useful."},
+            "purchase_plan": [
+                {
+                    "ingredient": "Chicken Breast",
+                    "suggested_purchase": 30,
+                    "unit": "pounds",
+                    "action": "buy",
+                    "status": "Ready",
+                    "confidence": "High",
+                    "projected_need": 25,
+                    "adjusted_need": 33,
+                    "current_stock": 10,
+                    "usage_signal": "high",
+                    "history_signal": "depletes_faster_than_expected",
+                    "risk_signal": "stockout_risk",
+                    "reason": "Past counts show chicken breast disappears faster than recipe demand alone.",
+                }
+            ],
+            "learning_notes": [{"ingredient": "Chicken Breast", "note": "Chicken breast runs above recipe math."}],
+            "review_warnings": [],
+        }
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    result = build_restock_plan(
+        current_count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        [previous_count],
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    assert result["summary"]["forecast_mode"] == "claude_adaptive"
+    assert result["summary"]["history_counts_used"] == 1
+    assert result["summary"]["overall_note"] == "History was useful."
+    assert result["purchase_plan"][0]["action"] == "buy"
+    assert result["purchase_plan"][0]["confidence"] == "High"
+    assert result["learning_notes"][0]["note"] == "Chicken breast runs above recipe math."
+    evidence = captured["evidence_packet"]["ingredients"][0]
+    assert evidence["ingredient_name"] == "Chicken Breast"
+    assert evidence["previous_counts"][0]["quantity"] == 130
+    assert evidence["deterministic_signals"]["has_usable_history"] is True
+
+
+def test_claude_recipe_only_mode_without_previous_counts(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Whole Milk",
+                normalized_item_name="whole milk",
+                quantity=1,
+                unit="gallons",
+                status="Clean",
+            )
+        ]
+    )
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        assert evidence_packet["previous_count_ids"] == []
+        return {
+            "summary": {"forecast_mode": "claude_recipe_only", "overall_note": "Recipe-only forecast."},
+            "purchase_plan": [
+                {
+                    "ingredient": "Whole Milk",
+                    "suggested_purchase": 2,
+                    "unit": "gallons",
+                    "action": "buy",
+                    "status": "Limited History",
+                    "confidence": "Medium",
+                    "projected_need": 2.5,
+                    "adjusted_need": 2.5,
+                    "current_stock": 1,
+                    "usage_signal": "unknown",
+                    "history_signal": "limited_history",
+                    "risk_signal": "balanced",
+                    "reason": "Based on sales and menu usage only.",
+                }
+            ],
+            "learning_notes": [],
+            "review_warnings": [],
+        }
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nLatte,200"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nLatte,Whole Milk,0.05,gallons"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    assert result["summary"]["forecast_mode"] == "claude_recipe_only"
+    assert result["purchase_plan"][0]["status"] == "Limited History"
+
+
+def test_claude_failure_falls_back_to_deterministic_plan(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        raise TimeoutError("mock Claude timeout")
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "deterministic_fallback"
+    assert result["summary"]["fallback_reason"].startswith("claude_error:TimeoutError:mock Claude timeout")
+    assert result["purchase_plan"][0]["suggested_purchase"] == 17.5
+
+
+def test_malformed_claude_payload_falls_back(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", lambda evidence_packet: {"purchase_plan": "bad"})
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "deterministic_fallback"
+    assert result["summary"]["fallback_reason"].startswith("claude_validation_failed")
+
+
+def test_claude_unknown_ingredient_is_dropped_and_negative_purchase_is_repaired(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Tomatoes",
+                normalized_item_name="tomatoes",
+                quantity=2,
+                unit="boxes",
+                status="Clean",
+            )
+        ]
+    )
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        return {
+            "summary": {"forecast_mode": "claude_recipe_only"},
+            "purchase_plan": [
+                {
+                    "ingredient": "Tomatoes",
+                    "suggested_purchase": -4,
+                    "unit": "boxes",
+                    "action": "hold",
+                    "status": "Ready",
+                    "confidence": "Medium",
+                    "projected_need": 1,
+                    "adjusted_need": 1,
+                    "current_stock": 2,
+                    "usage_signal": "medium",
+                    "history_signal": "limited_history",
+                    "risk_signal": "balanced",
+                    "reason": "Current stock can cover projected demand.",
+                },
+                {
+                    "ingredient": "Fake Vendor Item",
+                    "suggested_purchase": 10,
+                    "unit": "cases",
+                    "action": "buy",
+                    "status": "Ready",
+                    "confidence": "High",
+                    "projected_need": 10,
+                    "adjusted_need": 10,
+                    "current_stock": 0,
+                    "usage_signal": "high",
+                    "history_signal": "unknown",
+                    "risk_signal": "stockout_risk",
+                    "reason": "This should be dropped.",
+                },
+            ],
+            "learning_notes": [],
+            "review_warnings": [],
+        }
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nSalad,40"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nSalad,Tomatoes,0.1,boxes"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    assert len(result["purchase_plan"]) == 1
+    assert result["purchase_plan"][0]["ingredient"] == "Tomatoes"
+    assert result["purchase_plan"][0]["suggested_purchase"] == 0
+    assert any("outside the evidence packet" in warning["warning"] for warning in result["review_warnings"])
 
 
 def test_missing_sales_columns_returns_clear_error() -> None:

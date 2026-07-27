@@ -6929,6 +6929,45 @@ button:disabled,
   border-radius: 999px;
 }
 
+.restock-source-note {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 12px 13px;
+  color: #4f463d;
+  background: rgba(255, 250, 242, 0.72);
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 16px;
+}
+
+.restock-source-note strong {
+  color: #111;
+  font-size: 0.76rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.restock-source-note span {
+  min-width: 0;
+  color: #6e6a63;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.restock-source-note.is-claude {
+  background:
+    linear-gradient(180deg, rgba(255, 240, 230, 0.5), rgba(255, 255, 255, 0.76)),
+    #fffdf9;
+  border-color: rgba(200, 107, 50, 0.16);
+}
+
+.restock-source-note.is-fallback {
+  background: rgba(255, 246, 237, 0.72);
+  border-color: rgba(200, 107, 50, 0.22);
+}
+
 .restock-summary-cards {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -7047,6 +7086,63 @@ button:disabled,
   color: #8b362c;
   background: rgba(181, 68, 55, 0.09);
   border-color: rgba(181, 68, 55, 0.18);
+}
+
+.restock-plan-pill-stack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.restock-action,
+.restock-confidence {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 9px;
+  font-style: normal;
+  font-size: 11px;
+  font-weight: 760;
+  text-transform: capitalize;
+  border: 1px solid transparent;
+  border-radius: 999px;
+}
+
+.restock-action--buy {
+  color: #111;
+  background: rgba(200, 107, 50, 0.12);
+  border-color: rgba(200, 107, 50, 0.22);
+}
+
+.restock-action--hold {
+  color: #3f4d45;
+  background: rgba(17, 17, 17, 0.045);
+  border-color: rgba(17, 17, 17, 0.08);
+}
+
+.restock-action--review {
+  color: #7a4d10;
+  background: rgba(248, 229, 190, 0.7);
+  border-color: rgba(122, 77, 16, 0.15);
+}
+
+.restock-confidence--high {
+  color: #2f6f50;
+  background: rgba(47, 125, 90, 0.1);
+  border-color: rgba(47, 125, 90, 0.16);
+}
+
+.restock-confidence--medium {
+  color: #66543f;
+  background: rgba(17, 17, 17, 0.045);
+  border-color: rgba(17, 17, 17, 0.08);
+}
+
+.restock-confidence--low {
+  color: #8b362c;
+  background: rgba(181, 68, 55, 0.08);
+  border-color: rgba(181, 68, 55, 0.16);
 }
 
 .restock-planner-shell {
@@ -9010,6 +9106,15 @@ button:disabled,
 
   .restock-plan-purchase {
     justify-items: start;
+  }
+
+  .restock-source-note {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .restock-plan-pill-stack {
+    justify-content: flex-start;
   }
 
   .restock-learning-notes p,
