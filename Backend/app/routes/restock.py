@@ -19,16 +19,34 @@ def _validate_csv_upload(upload: UploadFile, label: str) -> None:
 
 @router.post("/plan", response_model=RestockPlanResponse)
 async def create_restock_plan(
-    count_id: int = Form(...),
+    count_id: int | None = Form(None),
+    current_count_id: int | None = Form(None),
+    previous_count_ids: list[int] | None = Form(None),
     sales_file: UploadFile = File(...),
     recipe_file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_restaurant: Restaurant = Depends(get_current_restaurant),
 ) -> dict:
-    count = db.get(CountSession, count_id)
+    selected_count_id = current_count_id or count_id
+    if not selected_count_id:
+        raise HTTPException(status_code=400, detail="Current inventory count is required.")
+
+    count = db.get(CountSession, selected_count_id)
     if not count:
         raise HTTPException(status_code=404, detail="Count session not found")
     ensure_count_belongs_to_restaurant(count.restaurant_id, current_restaurant)
+
+    previous_counts: list[CountSession] = []
+    seen_previous_ids: set[int] = set()
+    for previous_count_id in previous_count_ids or []:
+        if previous_count_id == selected_count_id or previous_count_id in seen_previous_ids:
+            continue
+        previous_count = db.get(CountSession, previous_count_id)
+        if not previous_count:
+            raise HTTPException(status_code=404, detail="Previous count session not found")
+        ensure_count_belongs_to_restaurant(previous_count.restaurant_id, current_restaurant)
+        previous_counts.append(previous_count)
+        seen_previous_ids.add(previous_count_id)
 
     _validate_csv_upload(sales_file, "Sales data")
     _validate_csv_upload(recipe_file, "Recipe data")
@@ -36,6 +54,6 @@ async def create_restock_plan(
     try:
         sales_bytes = await sales_file.read()
         recipe_bytes = await recipe_file.read()
-        return build_restock_plan(count, sales_bytes, recipe_bytes)
+        return build_restock_plan(count, sales_bytes, recipe_bytes, previous_counts)
     except RestockPlannerError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

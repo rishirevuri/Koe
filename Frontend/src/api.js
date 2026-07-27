@@ -125,12 +125,18 @@ export async function getCountSessions() {
   return request("/counts");
 }
 
-export async function generateRestockPlan({ salesFile, recipeFile, countId }) {
+export async function generateRestockPlan({ salesFile, recipeFile, countId, previousCountIds = [] }) {
   const authHeaders = await getAuthHeaders();
   const formData = new FormData();
   formData.append("sales_file", salesFile);
   formData.append("recipe_file", recipeFile);
   formData.append("count_id", String(countId));
+  formData.append("current_count_id", String(countId));
+  previousCountIds.forEach((previousCountId) => {
+    if (previousCountId && Number(previousCountId) !== Number(countId)) {
+      formData.append("previous_count_ids", String(previousCountId));
+    }
+  });
 
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 60000);

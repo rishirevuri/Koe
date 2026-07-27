@@ -7030,6 +7030,12 @@ button:disabled,
   border-color: rgba(47, 125, 90, 0.18);
 }
 
+.restock-status--limited {
+  color: #66543f;
+  background: rgba(17, 17, 17, 0.045);
+  border-color: rgba(17, 17, 17, 0.08);
+}
+
 .restock-status--review,
 .restock-status--unknown {
   color: #7a4d10;
@@ -7482,6 +7488,85 @@ button:disabled,
   border-color: rgba(17, 17, 17, 0.08);
 }
 
+.restock-history-card {
+  gap: 14px;
+}
+
+.restock-history-list {
+  display: grid;
+  gap: 9px;
+}
+
+.restock-history-option {
+  display: flex;
+  width: 100%;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 58px;
+  padding: 12px 13px;
+  color: #17130f;
+  font: inherit;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 16px;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.restock-history-option:hover {
+  transform: translateY(-1px);
+  border-color: rgba(200, 107, 50, 0.2);
+  background: rgba(255, 250, 242, 0.9);
+}
+
+.restock-history-option.is-selected {
+  border-color: rgba(200, 107, 50, 0.52);
+  background:
+    linear-gradient(180deg, rgba(255, 240, 230, 0.62), rgba(255, 255, 255, 0.78)),
+    #fffdf9;
+  box-shadow: inset 3px 0 0 rgba(200, 107, 50, 0.8);
+}
+
+.restock-history-option span {
+  min-width: 0;
+}
+
+.restock-history-option strong,
+.restock-history-option small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.restock-history-option strong {
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.restock-history-option small,
+.restock-history-option em,
+.restock-history-note {
+  color: #6e6a63;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.restock-history-option em {
+  flex: 0 0 auto;
+  font-style: normal;
+}
+
+.restock-history-note {
+  margin: 0;
+}
+
 .restock-upload-error {
   color: #8b362c;
   font-weight: 550;
@@ -7546,6 +7631,128 @@ button:disabled,
 
 .restock-planner-shell--results .restock-output-card {
   min-height: auto;
+}
+
+.restock-report-section {
+  display: grid;
+  gap: 12px;
+}
+
+.restock-section-label {
+  color: #c86b32;
+  font-size: 0.7rem;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.restock-section-heading {
+  display: grid;
+  gap: 4px;
+}
+
+.restock-section-heading p {
+  max-width: 620px;
+  margin: 0;
+  color: #6e6a63;
+  font-size: 13px;
+}
+
+.restock-plan-card-list {
+  display: grid;
+  gap: 12px;
+}
+
+.restock-plan-card {
+  display: grid;
+  gap: 11px;
+  padding: 15px;
+  background: rgba(255, 255, 255, 0.68);
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 18px;
+}
+
+.restock-plan-card-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(132px, auto) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.restock-plan-card h4 {
+  margin: 0;
+  color: #111;
+  font-size: 1rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.restock-plan-card small,
+.restock-plan-card p {
+  color: #6e6a63;
+  line-height: 1.45;
+}
+
+.restock-plan-card small {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.restock-plan-card p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.restock-plan-purchase {
+  display: grid;
+  gap: 2px;
+  justify-items: end;
+}
+
+.restock-plan-purchase span {
+  color: #86786b;
+  font-size: 0.66rem;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.restock-plan-purchase strong {
+  color: #111;
+  font-size: 1.08rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+}
+
+.restock-learning-notes,
+.restock-review-warnings {
+  padding: 14px;
+  background: rgba(255, 250, 242, 0.66);
+  border: 1px solid rgba(17, 17, 17, 0.08);
+  border-radius: 18px;
+}
+
+.restock-learning-notes p,
+.restock-review-warnings p {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.42fr) minmax(0, 1fr);
+  gap: 10px;
+  margin: 0;
+  color: #6e6a63;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.restock-learning-notes strong,
+.restock-review-warnings strong {
+  color: #111;
+  font-weight: 650;
+}
+
+.restock-review-warnings {
+  background: rgba(255, 246, 237, 0.72);
+  border-color: rgba(200, 107, 50, 0.18);
 }
 
 .restock-planner-shell--transitioning .restock-planner-intro {
@@ -8731,6 +8938,25 @@ button:disabled,
   .restock-picker-button {
     min-height: 36px;
     padding: 0 15px;
+  }
+
+  .restock-history-option {
+    min-height: 54px;
+    padding: 11px 12px;
+  }
+
+  .restock-plan-card-main {
+    grid-template-columns: 1fr;
+  }
+
+  .restock-plan-purchase {
+    justify-items: start;
+  }
+
+  .restock-learning-notes p,
+  .restock-review-warnings p {
+    grid-template-columns: 1fr;
+    gap: 3px;
   }
 
   .restock-continue-row {

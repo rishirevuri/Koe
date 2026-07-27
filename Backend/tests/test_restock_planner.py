@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import pytest
 
 from app.models import CountEntry, CountSession, Restaurant
@@ -8,13 +10,19 @@ def _csv(text: str) -> bytes:
     return text.strip().encode("utf-8")
 
 
-def _count_with_entries(entries: list[CountEntry]) -> CountSession:
+def _count_with_entries(entries: list[CountEntry], *, count_id: int = 1, completed_at: datetime | None = None) -> CountSession:
     restaurant = Restaurant(id=1, name="Demo Restaurant")
-    count = CountSession(id=1, restaurant_id=1, status="completed", restaurant=restaurant)
+    count = CountSession(
+        id=count_id,
+        restaurant_id=1,
+        status="completed",
+        completed_at=completed_at or datetime(2026, 7, 20, tzinfo=timezone.utc),
+        restaurant=restaurant,
+    )
     count.entries = entries
     for index, entry in enumerate(entries, start=1):
         entry.id = index
-        entry.count_session_id = 1
+        entry.count_session_id = count_id
         entry.count_session = count
     return count
 
@@ -53,16 +61,20 @@ def test_basic_sales_to_weekly_purchase_plan() -> None:
         "suggested_purchases": 1,
         "needs_review": 0,
         "safety_buffer_percent": 10,
+        "history_counts_used": 0,
+        "forecast_mode": "recipe_only",
     }
     assert result["purchase_plan"][0] == {
         "ingredient": "Chicken Breast",
-        "projected_need": 27.5,
+        "projected_need": 25,
+        "adjusted_need": 25,
         "current_stock": 10,
         "current_stock_unit": "pounds",
         "suggested_purchase": 17.5,
         "unit": "pounds",
-        "status": "Ready",
-        "reason": "Based on 100 projected Chicken Sandwich sales and 0.25 pounds per item.",
+        "usage_multiplier": None,
+        "status": "Limited History",
+        "reason": "Based on sales and recipe usage only from 100 projected Chicken Sandwich sales and 0.25 pounds per item. Add previous counts to learn actual depletion.",
     }
 
 
@@ -99,10 +111,11 @@ def test_same_ingredient_across_menu_items_sums_and_applies_buffer() -> None:
 
     row = result["purchase_plan"][0]
     assert row["ingredient"] == "Burger Buns"
-    assert row["projected_need"] == 192.5
+    assert row["projected_need"] == 175
+    assert row["adjusted_need"] == 175
     assert row["current_stock"] == 48
     assert row["suggested_purchase"] == 144.5
-    assert row["status"] == "Ready"
+    assert row["status"] == "Limited History"
 
 
 def test_suggested_purchase_never_goes_negative() -> None:
@@ -125,9 +138,10 @@ def test_suggested_purchase_never_goes_negative() -> None:
     )
 
     row = result["purchase_plan"][0]
-    assert row["projected_need"] == 2.75
+    assert row["projected_need"] == 2.5
+    assert row["adjusted_need"] == 2.5
     assert row["suggested_purchase"] == 0
-    assert row["status"] == "Ready"
+    assert row["status"] == "Limited History"
 
 
 def test_unknown_stock_row_is_included_for_review() -> None:
@@ -169,7 +183,215 @@ def test_unit_mismatch_is_flagged_without_subtracting_stock() -> None:
     assert row["current_stock_unit"] == "cases"
     assert row["suggested_purchase"] == 27.5
     assert row["status"] == "Unit Mismatch"
-    assert "did not safely subtract" in row["reason"]
+    assert "cannot safely subtract" in row["reason"]
+
+
+def test_previous_count_depletion_creates_adaptive_multiplier() -> None:
+    current_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=2,
+    )
+    previous_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=130,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=1,
+        completed_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
+    )
+
+    result = build_restock_plan(
+        current_count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        [previous_count],
+    )
+
+    row = result["purchase_plan"][0]
+    assert result["summary"]["forecast_mode"] == "adaptive"
+    assert result["summary"]["history_counts_used"] == 1
+    assert row["projected_need"] == 25
+    assert row["usage_multiplier"] == 1.2
+    assert row["adjusted_need"] == 30
+    assert row["suggested_purchase"] == 23
+    assert row["status"] == "Ready"
+    assert result["learning_notes"]
+
+
+def test_negative_depletion_is_ignored_and_flagged_for_review() -> None:
+    current_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=20,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=2,
+    )
+    previous_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=1,
+    )
+
+    result = build_restock_plan(
+        current_count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        [previous_count],
+    )
+
+    row = result["purchase_plan"][0]
+    assert result["summary"]["forecast_mode"] == "limited_history"
+    assert result["summary"]["history_counts_used"] == 0
+    assert row["usage_multiplier"] is None
+    assert row["status"] == "Needs Review"
+    assert "ignored that interval" in result["learning_notes"][0]["note"]
+
+
+def test_usage_multiplier_is_clamped_for_extreme_history() -> None:
+    current_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=2,
+    )
+    previous_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=500,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=1,
+    )
+
+    result = build_restock_plan(
+        current_count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        [previous_count],
+    )
+
+    row = result["purchase_plan"][0]
+    assert row["usage_multiplier"] == 2.5
+    assert row["adjusted_need"] == 62.5
+    assert row["status"] == "Needs Review"
+    assert result["summary"]["needs_review"] == 1
+
+
+def test_multiple_previous_counts_use_weighted_average_multiplier() -> None:
+    current_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=3,
+        completed_at=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+    recent_previous = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=110,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=2,
+        completed_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+    )
+    older_previous = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=210,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=1,
+        completed_at=datetime(2026, 7, 12, tzinfo=timezone.utc),
+    )
+
+    result = build_restock_plan(
+        current_count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        [older_previous, recent_previous],
+    )
+
+    row = result["purchase_plan"][0]
+    assert row["usage_multiplier"] == 1.46
+    assert row["adjusted_need"] == 36.49
+    assert row["status"] == "Ready"
+    assert result["summary"]["history_counts_used"] == 2
+
+
+def test_qualitative_current_stock_is_not_used_in_math() -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Peanut Butter",
+                normalized_item_name="peanut butter",
+                quantity=None,
+                quantity_label="Mostly full",
+                unit="bucket",
+                status="Needs Review",
+            )
+        ]
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nPB Sandwich,80"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nPB Sandwich,Peanut Butter,0.1,bucket"),
+    )
+
+    row = result["purchase_plan"][0]
+    assert row["current_stock"] is None
+    assert row["suggested_purchase"] == 2.2
+    assert row["status"] == "Needs Review"
+    assert "qualitative quantity" in row["reason"]
 
 
 def test_missing_sales_columns_returns_clear_error() -> None:

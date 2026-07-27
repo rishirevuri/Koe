@@ -243,19 +243,29 @@ class RestockPlanSummary(BaseModel):
     suggested_purchases: int
     needs_review: int
     safety_buffer_percent: int
+    history_counts_used: int = 0
+    forecast_mode: Literal["adaptive", "recipe_only", "limited_history"] = "recipe_only"
 
 
 class RestockPlanRow(BaseModel):
     ingredient: str
     projected_need: float
+    adjusted_need: float | None = None
     current_stock: float | None = None
     current_stock_unit: str | None = None
     suggested_purchase: float
     unit: str
-    status: Literal["Ready", "Needs Review", "Unit Mismatch", "Stock Unknown"]
+    usage_multiplier: float | None = None
+    status: Literal["Ready", "Limited History", "Needs Review", "Unit Mismatch", "Stock Unknown"]
     reason: str
+
+
+class RestockLearningNote(BaseModel):
+    ingredient: str
+    note: str
 
 
 class RestockPlanResponse(BaseModel):
     summary: RestockPlanSummary
     purchase_plan: list[RestockPlanRow]
+    learning_notes: list[RestockLearningNote] = Field(default_factory=list)
