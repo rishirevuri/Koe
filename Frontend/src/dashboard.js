@@ -39,6 +39,11 @@ const RESTOCK_REQUIRED_COLUMNS = {
   recipe: ["menu_item", "ingredient_name", "quantity_per_item", "unit"],
 };
 const RESTOCK_TRANSITION_DURATION_MS = 1750;
+const RESTOCK_LOCAL_STORAGE_MAX_CHARS = 2 * 1024 * 1024;
+const RESTOCK_LOCAL_STORAGE_KEYS = {
+  sales: "koe_restock_sales_file_v1",
+  recipe: "koe_restock_menu_file_v1",
+};
 
 const state = {
   restaurantName: "Your Restaurant",
@@ -468,12 +473,11 @@ function splitCsvRow(line) {
   return values;
 }
 
-async function inspectRestockCsvFile(file, type) {
-  if (!file) throw new Error("Choose a CSV file.");
-  if (!file.name.toLowerCase().endsWith(".csv")) {
+function inspectRestockCsvText({ name, text, type }) {
+  if (!name) throw new Error("Choose a CSV file.");
+  if (!name.toLowerCase().endsWith(".csv")) {
     throw new Error("Upload a .csv file.");
   }
-  const text = await file.text();
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
   if (!lines.length) throw new Error("This CSV is empty.");
   const headers = splitCsvRow(lines[0]).map(normalizeRestockHeader);
@@ -482,9 +486,88 @@ async function inspectRestockCsvFile(file, type) {
     throw new Error(`Missing required columns: ${missing.join(", ")}`);
   }
   return {
-    name: file.name,
+    name,
     rowCount: Math.max(0, lines.length - 1),
+    text,
   };
+}
+
+async function inspectRestockCsvFile(file, type) {
+  if (!file) throw new Error("Choose a CSV file.");
+  const text = await file.text();
+  return inspectRestockCsvText({ name: file.name, text, type });
+}
+
+function getRestockFileStateKeys(type) {
+  return type === "sales"
+    ? { fileKey: "restockSalesFile", metaKey: "restockSalesMeta", errorKey: "restockSalesError" }
+    : { fileKey: "restockRecipeFile", metaKey: "restockRecipeMeta", errorKey: "restockRecipeError" };
+}
+
+function createRestockFileFromText(name, text) {
+  return new File([text], name, { type: "text/csv" });
+}
+
+function clearStoredRestockDataset(type) {
+  try {
+    window.localStorage.removeItem(RESTOCK_LOCAL_STORAGE_KEYS[type]);
+  } catch {
+    // Browser storage may be unavailable; upload state can still work in memory.
+  }
+}
+
+function saveRestockDatasetToStorage(type, meta) {
+  if (!meta?.text || meta.text.length > RESTOCK_LOCAL_STORAGE_MAX_CHARS) return "";
+  const savedAt = new Date().toISOString();
+  try {
+    window.localStorage.setItem(
+      RESTOCK_LOCAL_STORAGE_KEYS[type],
+      JSON.stringify({
+        name: meta.name,
+        csvText: meta.text,
+        rowCount: meta.rowCount,
+        savedAt,
+      }),
+    );
+    return savedAt;
+  } catch {
+    return "";
+  }
+}
+
+function restoreRestockDatasetFromStorage(type) {
+  const storageKey = RESTOCK_LOCAL_STORAGE_KEYS[type];
+  const { fileKey, metaKey, errorKey } = getRestockFileStateKeys(type);
+  let stored = "";
+  try {
+    stored = window.localStorage.getItem(storageKey) || "";
+  } catch {
+    return;
+  }
+  if (!stored) return;
+
+  try {
+    const parsed = JSON.parse(stored);
+    const name = String(parsed?.name || "");
+    const text = String(parsed?.csvText || "");
+    const savedAt = String(parsed?.savedAt || "");
+    const meta = inspectRestockCsvText({ name, text, type });
+    state[fileKey] = createRestockFileFromText(meta.name, meta.text);
+    state[metaKey] = {
+      name: meta.name,
+      rowCount: meta.rowCount,
+      savedAt,
+      storageLabel: "Restored from this browser",
+    };
+    state[errorKey] = "";
+  } catch {
+    clearStoredRestockDataset(type);
+  }
+}
+
+function restoreRestockDatasetsFromStorage() {
+  restoreRestockDatasetFromStorage("sales");
+  restoreRestockDatasetFromStorage("recipe");
 }
 
 function resetRestockPlan() {
@@ -564,18 +647,20 @@ function resetRestockWorkflow() {
 }
 
 async function handleRestockFile(type, file) {
-  const fileKey = type === "sales" ? "restockSalesFile" : "restockRecipeFile";
-  const metaKey = type === "sales" ? "restockSalesMeta" : "restockRecipeMeta";
-  const errorKey = type === "sales" ? "restockSalesError" : "restockRecipeError";
-  state[fileKey] = null;
-  state[metaKey] = null;
+  const { fileKey, metaKey, errorKey } = getRestockFileStateKeys(type);
   state[errorKey] = "";
   resetRestockPlan();
   renderShell();
   try {
     const meta = await inspectRestockCsvFile(file, type);
+    const savedAt = saveRestockDatasetToStorage(type, meta);
     state[fileKey] = file;
-    state[metaKey] = meta;
+    state[metaKey] = {
+      name: meta.name,
+      rowCount: meta.rowCount,
+      savedAt,
+      storageLabel: savedAt ? "Saved locally" : "",
+    };
   } catch (error) {
     state[errorKey] = error.message || "Could not read this CSV.";
   }
@@ -583,6 +668,7 @@ async function handleRestockFile(type, file) {
 }
 
 function removeRestockFile(type) {
+  clearStoredRestockDataset(type);
   if (type === "sales") {
     state.restockSalesFile = null;
     state.restockSalesMeta = null;
@@ -1018,6 +1104,7 @@ async function initialize() {
   const arrivedFromLogin = consumeDashboardAuthRedirect() || isAuthCallbackUrl();
   debugAuthFlow("dashboard boot start", { arrivedFromLogin });
   state.phase = "loading";
+  restoreRestockDatasetsFromStorage();
   renderShell();
 
   if (!isSupabaseConfigured) {
@@ -2359,6 +2446,7 @@ function renderRestockUploadCard({ type, number, title, helper, dropText, varian
   const meta = type === "sales" ? state.restockSalesMeta : state.restockRecipeMeta;
   const error = type === "sales" ? state.restockSalesError : state.restockRecipeError;
   const pickerLabel = type === "sales" ? "Choose sales CSV" : "Choose menu ingredients CSV";
+  const storageLabel = meta?.storageLabel ? ` • ${meta.storageLabel}` : "";
   return `
     <article class="restock-card restock-upload-card restock-upload-card--${escapeHtml(variant)}" data-restock-card="${escapeHtml(type)}">
       <div class="restock-card-heading">
@@ -2385,7 +2473,7 @@ function renderRestockUploadCard({ type, number, title, helper, dropText, varian
       ${
         meta
           ? `<div class="restock-file-state">
-              <span><strong>Ready for forecast</strong><small>${escapeHtml(meta.name)} • ${escapeHtml(meta.rowCount)} rows</small></span>
+              <span><strong>Ready for forecast</strong><small>${escapeHtml(meta.name)} • ${escapeHtml(meta.rowCount)} rows${escapeHtml(storageLabel)}</small></span>
               <button data-restock-remove="${escapeHtml(type)}" type="button">Remove</button>
             </div>`
           : ""
