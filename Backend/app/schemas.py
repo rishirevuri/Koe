@@ -285,8 +285,30 @@ class RestockReviewWarning(BaseModel):
     warning: str
 
 
+class RestockSalesPreviewRow(BaseModel):
+    item_name: str
+    quantity_sold: float
+    date: str | None = None
+    confidence: Literal["High", "Medium", "Low"] = "Medium"
+    source_hint: str | None = None
+
+
+class RestockSalesWarning(BaseModel):
+    message: str
+
+
+class RestockSalesNormalization(BaseModel):
+    source: Literal["direct", "claude"] = "direct"
+    rows_read: int = 0
+    sales_rows_extracted: int = 0
+    columns_detected: dict[str, str | None] = Field(default_factory=dict)
+    warnings: list[RestockSalesWarning] = Field(default_factory=list)
+    preview_rows: list[RestockSalesPreviewRow] = Field(default_factory=list)
+
+
 class RestockPlanResponse(BaseModel):
     summary: RestockPlanSummary
     purchase_plan: list[RestockPlanRow]
     learning_notes: list[RestockLearningNote] = Field(default_factory=list)
     review_warnings: list[RestockReviewWarning] = Field(default_factory=list)
+    sales_normalization: RestockSalesNormalization | None = None

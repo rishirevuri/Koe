@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from app.models import CountEntry, CountSession
-from app.services.external_ai_service import generate_restock_plan_with_claude
+from app.services.external_ai_service import generate_restock_plan_with_claude, normalize_sales_report_with_claude
 from app.utils.text import normalize_text, simple_singular
 from app.utils.units import normalize_unit
 
@@ -25,6 +25,48 @@ ALLOWED_HISTORY_SIGNALS = {
     "unknown",
 }
 ALLOWED_RISK_SIGNALS = {"stockout_risk", "waste_risk", "balanced", "needs_review"}
+SALES_NORMALIZATION_ERROR = "Koe could not read sales quantities from this file. Try another export or paste the report text."
+SALES_CONFIDENCE_ORDER = {"Low": 0, "Medium": 1, "High": 2}
+SALES_ITEM_COLUMN_ALIASES = {
+    "itemname",
+    "item",
+    "menuitem",
+    "product",
+    "productname",
+    "name",
+    "description",
+    "solditem",
+}
+SALES_QUANTITY_COLUMN_ALIASES = {
+    "quantitysold",
+    "qty",
+    "quantity",
+    "qtysold",
+    "itemssold",
+    "unitssold",
+    "count",
+    "netqty",
+    "sold",
+}
+SALES_DATE_COLUMN_ALIASES = {"date", "businessdate", "orderdate", "transactiondate", "saledate"}
+SALES_SUMMARY_TERMS = {
+    "subtotal",
+    "grandtotal",
+    "total",
+    "tax",
+    "tip",
+    "tips",
+    "discount",
+    "discounts",
+    "refund",
+    "refunds",
+    "payment",
+    "paymentmethod",
+    "cash",
+    "visa",
+    "mastercard",
+    "amex",
+}
 
 
 class RestockPlannerError(ValueError):
@@ -39,6 +81,37 @@ class ClaudeRestockValidationError(ValueError):
 class SalesRow:
     item_name: str
     quantity_sold: float
+    date: str | None = None
+    confidence: str = "High"
+    source_hint: str = ""
+
+
+@dataclass
+class SalesNormalizationResult:
+    rows: list[SalesRow]
+    source: str
+    rows_read: int
+    columns_detected: dict[str, str | None]
+    warnings: list[dict[str, str]] = field(default_factory=list)
+
+    def to_response(self) -> dict:
+        return {
+            "source": self.source,
+            "rows_read": self.rows_read,
+            "sales_rows_extracted": len(self.rows),
+            "columns_detected": self.columns_detected,
+            "warnings": self.warnings,
+            "preview_rows": [
+                {
+                    "item_name": row.item_name,
+                    "quantity_sold": _round_quantity(row.quantity_sold),
+                    "date": row.date,
+                    "confidence": row.confidence,
+                    "source_hint": row.source_hint,
+                }
+                for row in self.rows[:5]
+            ],
+        }
 
 
 @dataclass
@@ -135,17 +208,19 @@ def _parse_float(value: str | float | int | None, *, field_name: str, row_number
         raise RestockPlannerError(f"{label} row {row_number} has invalid {field_name}.") from exc
 
 
-def _read_csv_rows(data: bytes, *, label: str, required_columns: list[str]) -> list[dict[str, str]]:
+def _decode_csv_text(data: bytes, *, label: str) -> str:
     if not data:
         raise RestockPlannerError(f"{label} CSV is empty.")
     if len(data) > MAX_CSV_BYTES:
         raise RestockPlannerError(f"{label} CSV is too large. Upload a file under 2 MB.")
-
     try:
-        text = data.decode("utf-8-sig")
+        return data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise RestockPlannerError(f"{label} CSV must be UTF-8 text.") from exc
 
+
+def _read_csv_rows(data: bytes, *, label: str, required_columns: list[str]) -> list[dict[str, str]]:
+    text = _decode_csv_text(data, label=label)
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
         raise RestockPlannerError(f"{label} CSV is missing a header row.")
@@ -168,20 +243,189 @@ def _read_csv_rows(data: bytes, *, label: str, required_columns: list[str]) -> l
     return rows
 
 
-def parse_sales_csv(data: bytes) -> list[SalesRow]:
-    rows = _read_csv_rows(data, label="Sales", required_columns=["item_name", "quantity_sold"])
-    parsed: list[SalesRow] = []
-    for index, row in enumerate(rows, start=2):
-        item_name = row["item_name"].strip()
-        if not item_name:
-            raise RestockPlannerError(f"Sales row {index} is missing item_name.")
-        parsed.append(
+def _detect_sales_columns(fieldnames: list[str] | None) -> dict[str, str | None]:
+    detected: dict[str, str | None] = {"item_name": None, "quantity_sold": None, "date": None}
+    for header in fieldnames or []:
+        key = _header_key(header)
+        if not detected["item_name"] and key in SALES_ITEM_COLUMN_ALIASES:
+            detected["item_name"] = header
+        if not detected["quantity_sold"] and key in SALES_QUANTITY_COLUMN_ALIASES:
+            detected["quantity_sold"] = header
+        if not detected["date"] and key in SALES_DATE_COLUMN_ALIASES:
+            detected["date"] = header
+    return detected
+
+
+def _is_summary_sales_item(item_name: str) -> bool:
+    key = _header_key(item_name)
+    normalized = normalize_text(item_name)
+    if not key:
+        return True
+    if key in SALES_SUMMARY_TERMS:
+        return True
+    return any(term in normalized.split() for term in SALES_SUMMARY_TERMS)
+
+
+def _confidence_floor(current: str, next_value: str) -> str:
+    current = current if current in SALES_CONFIDENCE_ORDER else "Medium"
+    next_value = next_value if next_value in SALES_CONFIDENCE_ORDER else "Medium"
+    return current if SALES_CONFIDENCE_ORDER[current] <= SALES_CONFIDENCE_ORDER[next_value] else next_value
+
+
+def _merge_sales_rows(rows: list[SalesRow]) -> list[SalesRow]:
+    merged: dict[str, SalesRow] = {}
+    for row in rows:
+        key = _canonical_name(row.item_name)
+        if key not in merged:
+            merged[key] = SalesRow(
+                item_name=_display_name(row.item_name),
+                quantity_sold=float(row.quantity_sold),
+                date=row.date,
+                confidence=row.confidence,
+                source_hint=row.source_hint,
+            )
+            continue
+        existing = merged[key]
+        existing.quantity_sold += float(row.quantity_sold)
+        existing.date = existing.date if existing.date == row.date else None
+        existing.confidence = _confidence_floor(existing.confidence, row.confidence)
+    return sorted(merged.values(), key=lambda row: row.item_name.lower())
+
+
+def _parse_sales_text_direct(text: str) -> SalesNormalizationResult:
+    reader = csv.DictReader(io.StringIO(text))
+    if not reader.fieldnames:
+        raise RestockPlannerError("Sales CSV is missing a header row.")
+    detected = _detect_sales_columns(reader.fieldnames)
+    if not detected["item_name"] or not detected["quantity_sold"]:
+        raise RestockPlannerError("Sales CSV did not contain recognizable sales columns.")
+
+    rows: list[SalesRow] = []
+    warnings: list[dict[str, str]] = []
+    rows_read = 0
+    ignored_rows = 0
+    for index, raw_row in enumerate(reader, start=2):
+        rows_read += 1
+        item_name = str(raw_row.get(detected["item_name"] or "") or "").strip()
+        if not item_name or _is_summary_sales_item(item_name):
+            ignored_rows += 1
+            continue
+        try:
+            quantity_sold = _parse_float(
+                raw_row.get(detected["quantity_sold"] or ""),
+                field_name="quantity_sold",
+                row_number=index,
+                label="Sales",
+            )
+        except RestockPlannerError:
+            ignored_rows += 1
+            continue
+        if quantity_sold < 0:
+            ignored_rows += 1
+            continue
+        if quantity_sold == 0:
+            ignored_rows += 1
+            continue
+        rows.append(
             SalesRow(
                 item_name=item_name,
-                quantity_sold=_parse_float(row["quantity_sold"], field_name="quantity_sold", row_number=index, label="Sales"),
+                quantity_sold=quantity_sold,
+                date=str(raw_row.get(detected["date"] or "") or "").strip() or None,
+                confidence="High",
+                source_hint=f"Matched from {detected['item_name']} and {detected['quantity_sold']} columns",
             )
         )
-    return parsed
+
+    merged = _merge_sales_rows(rows)
+    if ignored_rows:
+        warnings.append({"message": f"Koe ignored {ignored_rows} summary, blank, or non-sales rows while cleaning this report."})
+    if not merged:
+        raise RestockPlannerError(SALES_NORMALIZATION_ERROR)
+    return SalesNormalizationResult(
+        rows=merged,
+        source="direct",
+        rows_read=rows_read,
+        columns_detected=detected,
+        warnings=warnings,
+    )
+
+
+def _validate_claude_sales_payload(payload: dict, *, rows_read: int) -> SalesNormalizationResult:
+    if not isinstance(payload, dict) or not isinstance(payload.get("sales_rows"), list):
+        raise RestockPlannerError(SALES_NORMALIZATION_ERROR)
+
+    parsed_rows: list[SalesRow] = []
+    for raw_row in payload["sales_rows"]:
+        if not isinstance(raw_row, dict):
+            continue
+        item_name = _display_name(str(raw_row.get("item_name") or ""))
+        if not item_name or item_name == "Unnamed ingredient":
+            continue
+        quantity = raw_row.get("quantity_sold")
+        try:
+            quantity_sold = float(str(quantity).replace(",", ""))
+        except (TypeError, ValueError):
+            continue
+        if quantity_sold <= 0:
+            continue
+        confidence = str(raw_row.get("confidence") or "Medium").strip()
+        if confidence not in SALES_CONFIDENCE_ORDER:
+            confidence = "Medium"
+        parsed_rows.append(
+            SalesRow(
+                item_name=item_name,
+                quantity_sold=quantity_sold,
+                date=str(raw_row.get("date") or "").strip() or None,
+                confidence=confidence,
+                source_hint=str(raw_row.get("source_hint") or "").strip(),
+            )
+        )
+
+    merged = _merge_sales_rows(parsed_rows)
+    if not merged:
+        raise RestockPlannerError(SALES_NORMALIZATION_ERROR)
+
+    raw_summary = payload.get("normalization_summary") if isinstance(payload.get("normalization_summary"), dict) else {}
+    raw_columns = raw_summary.get("columns_detected") if isinstance(raw_summary.get("columns_detected"), dict) else {}
+    warnings = []
+    for warning in payload.get("warnings") or []:
+        if isinstance(warning, dict) and str(warning.get("message") or "").strip():
+            warnings.append({"message": str(warning["message"]).strip()})
+
+    return SalesNormalizationResult(
+        rows=merged,
+        source="claude",
+        rows_read=int(raw_summary.get("rows_read") or rows_read),
+        columns_detected={
+            "item_name": str(raw_columns.get("item_name") or "") or None,
+            "quantity_sold": str(raw_columns.get("quantity_sold") or "") or None,
+            "date": str(raw_columns.get("date") or "") or None,
+        },
+        warnings=warnings,
+    )
+
+
+def normalize_sales_csv(data: bytes, *, use_claude: bool = False) -> SalesNormalizationResult:
+    text = _decode_csv_text(data, label="Sales")
+    lines = [line for line in text.splitlines() if line.strip()]
+    rows_read = max(0, len(lines) - 1)
+    try:
+        return _parse_sales_text_direct(text)
+    except RestockPlannerError as direct_error:
+        if not use_claude:
+            if str(direct_error) == SALES_NORMALIZATION_ERROR:
+                raise
+            raise RestockPlannerError(SALES_NORMALIZATION_ERROR) from direct_error
+
+    try:
+        payload = normalize_sales_report_with_claude(text)
+        return _validate_claude_sales_payload(payload, rows_read=rows_read)
+    except Exception as exc:
+        raise RestockPlannerError(SALES_NORMALIZATION_ERROR) from exc
+
+
+def parse_sales_csv(data: bytes) -> list[SalesRow]:
+    return normalize_sales_csv(data, use_claude=False).rows
 
 
 def parse_recipe_csv(data: bytes) -> list[RecipeRow]:
@@ -662,8 +906,11 @@ def _build_deterministic_plan_context(
     sales_csv: bytes,
     recipe_csv: bytes,
     previous_counts: list[CountSession] | None = None,
+    *,
+    use_claude: bool = False,
 ) -> dict:
-    sales_rows = parse_sales_csv(sales_csv)
+    sales_normalization = normalize_sales_csv(sales_csv, use_claude=use_claude)
+    sales_rows = sales_normalization.rows
     recipe_rows = parse_recipe_csv(recipe_csv)
     previous_counts = previous_counts or []
     stock_index = _stock_index(count)
@@ -763,6 +1010,7 @@ def _build_deterministic_plan_context(
         "current_count_id": count.id,
         "current_count_date": _count_timestamp(count).isoformat(),
         "previous_count_ids": [previous_count.id for previous_count in previous_counts],
+        "sales_normalization": sales_normalization.to_response(),
         "ingredients": evidence_rows,
     }
     return {
@@ -771,8 +1019,10 @@ def _build_deterministic_plan_context(
             "purchase_plan": rows,
             "learning_notes": learning_notes,
             "review_warnings": review_warnings,
+            "sales_normalization": sales_normalization.to_response(),
         },
         "evidence_packet": evidence_packet,
+        "sales_normalization": sales_normalization,
         "history_counts_used": history_counts_used,
     }
 
@@ -900,6 +1150,7 @@ def _validate_claude_plan(claude_payload: dict, deterministic_context: dict) -> 
         "purchase_plan": rows,
         "learning_notes": _sanitize_claude_notes(claude_payload.get("learning_notes"), evidence_keys, field_name="note"),
         "review_warnings": review_warnings,
+        "sales_normalization": deterministic_context["sales_normalization"].to_response(),
     }
 
 
@@ -911,7 +1162,7 @@ def build_restock_plan(
     *,
     use_claude: bool = False,
 ) -> dict:
-    context = _build_deterministic_plan_context(count, sales_csv, recipe_csv, previous_counts)
+    context = _build_deterministic_plan_context(count, sales_csv, recipe_csv, previous_counts, use_claude=use_claude)
     deterministic_plan = context["plan"]
     if not use_claude:
         return deterministic_plan

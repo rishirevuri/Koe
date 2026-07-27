@@ -397,6 +397,95 @@ Return this exact JSON shape:
 }
 """
 
+
+SALES_NORMALIZATION_SYSTEM_PROMPT = """
+You are Koe's sales data normalization engine for restaurant POS exports.
+
+Your task is to convert one messy sales CSV into clean menu item sales rows for a restaurant restock planner.
+Return strict JSON only. Do not return markdown or commentary.
+
+Normalize the uploaded report into:
+- item_name
+- quantity_sold
+- date when available
+- confidence
+- source_hint
+
+Column names may vary. Common item columns include:
+- item_name
+- item
+- item name
+- menu item
+- product
+- product name
+- name
+- description
+- sold item
+
+Common quantity columns include:
+- quantity_sold
+- qty
+- quantity
+- qty sold
+- quantity sold
+- items sold
+- units sold
+- count
+- net qty
+- sold
+
+Common date columns include:
+- date
+- business date
+- order date
+- transaction date
+- sale date
+
+Ignore:
+- category headers
+- subtotal rows
+- grand total rows
+- tax rows
+- tips
+- discounts
+- refunds
+- payment method rows
+- blank rows
+- non-menu rows
+- modifiers unless they appear to be standalone sold items
+
+Merge duplicate menu items when safe by summing quantity_sold.
+Do not invent menu items or quantities.
+Use confidence High, Medium, or Low.
+
+Return this exact JSON shape:
+{
+  "sales_rows": [
+    {
+      "item_name": "Crispy Chicken Sandwich",
+      "quantity_sold": 120,
+      "date": "2026-07-20",
+      "confidence": "High",
+      "source_hint": "Matched from Product Name and Qty Sold columns"
+    }
+  ],
+  "warnings": [
+    {
+      "message": "Some rows looked like modifiers and were ignored."
+    }
+  ],
+  "normalization_summary": {
+    "rows_read": 200,
+    "sales_rows_extracted": 36,
+    "columns_detected": {
+      "item_name": "Product Name",
+      "quantity_sold": "Qty Sold",
+      "date": "Business Date"
+    }
+  }
+}
+"""
+
 ALLOWED_STATUSES = {
     "Clean",
     "Partial Quantity",
@@ -824,6 +913,60 @@ def generate_restock_plan_with_claude(evidence_packet: dict) -> dict:
         model=settings.anthropic_model,
         ingredient_count=len(evidence_packet.get("ingredients", [])) if isinstance(evidence_packet, dict) else 0,
         plan_count=len(parsed.get("purchase_plan", [])) if isinstance(parsed.get("purchase_plan"), list) else 0,
+    )
+    return parsed
+
+
+def normalize_sales_report_with_claude(csv_text: str, *, filename: str = "sales.csv") -> dict:
+    settings = get_settings()
+    if not settings.enable_external_ai:
+        raise RuntimeError("External AI integrations are disabled")
+    if (settings.text_ai_provider or "claude").lower() != "claude":
+        raise RuntimeError("Text AI provider is not Claude")
+    if not settings.is_claude_configured:
+        raise RuntimeError("Claude is not configured")
+
+    response = httpx.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": settings.anthropic_api_key or "",
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": settings.anthropic_model,
+            "max_tokens": 5000,
+            "temperature": 0,
+            "system": SALES_NORMALIZATION_SYSTEM_PROMPT,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": f"Normalize this restaurant sales CSV named {filename}:\n\n{csv_text}",
+                }
+            ],
+        },
+        timeout=35,
+    )
+    if response.status_code >= 400:
+        message = f"Claude request failed with status {response.status_code}"
+        try:
+            error_body = response.json()
+            provider_message = error_body.get("error", {}).get("message")
+            if provider_message:
+                message = provider_message
+        except ValueError:
+            pass
+        raise RuntimeError(message)
+
+    payload = response.json()
+    content = payload.get("content") or []
+    text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+    parsed = _extract_json_object("\n".join(text_parts))
+    _log_parse_debug(
+        settings,
+        "sales_normalization_claude_json",
+        model=settings.anthropic_model,
+        rows=len(parsed.get("sales_rows", [])) if isinstance(parsed.get("sales_rows"), list) else 0,
     )
     return parsed
 

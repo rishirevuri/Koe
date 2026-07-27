@@ -369,6 +369,59 @@ def test_restock_plan_endpoint_generates_purchase_plan() -> None:
     assert rows["Burger Buns"]["suggested_purchase"] == 144.5
     assert rows["Ground Beef"]["status"] == "Stock Unknown"
     assert rows["Ground Beef"]["current_stock"] is None
+    assert payload["sales_normalization"]["source"] == "direct"
+    assert payload["sales_normalization"]["sales_rows_extracted"] == 2
+    assert payload["sales_normalization"]["preview_rows"][0]["item_name"] == "Burger"
+
+
+def test_restock_plan_endpoint_accepts_pos_sales_column_aliases() -> None:
+    db = SessionLocal()
+    try:
+        restaurant = db.query(Restaurant).filter(Restaurant.name == "Smoking Pig BBQ").one()
+        count = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            restaurant=restaurant,
+        )
+        db.add(count)
+        db.flush()
+        db.add(
+            CountEntry(
+                count_session_id=count.id,
+                item_name_raw="whole milk",
+                item_name="Whole Milk",
+                normalized_item_name="whole milk",
+                category="Dairy & Eggs",
+                quantity=1,
+                unit="gallons",
+                status="Clean",
+            )
+        )
+        db.commit()
+        count_id = count.id
+    finally:
+        db.close()
+
+    response = client.post(
+        "/restock/plan",
+        data={"count_id": str(count_id)},
+        files={
+            "sales_file": ("pos-sales.csv", b"Product Name,Qty Sold\nLatte,200\nSubtotal,200\n", "text/csv"),
+            "recipe_file": (
+                "recipes.csv",
+                b"menu_item,ingredient_name,quantity_per_item,unit\nLatte,Whole Milk,0.05,gallons\n",
+                "text/csv",
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["sales_normalization"]["source"] == "direct"
+    assert payload["sales_normalization"]["columns_detected"]["item_name"] == "Product Name"
+    assert payload["sales_normalization"]["preview_rows"][0]["item_name"] == "Latte"
+    assert payload["purchase_plan"][0]["ingredient"] == "Whole Milk"
 
 
 def test_restock_plan_endpoint_returns_mocked_claude_plan(monkeypatch) -> None:
@@ -543,7 +596,7 @@ def test_restock_plan_endpoint_rejects_missing_sales_columns() -> None:
     )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Missing required sales columns: quantity_sold"
+    assert response.json()["detail"] == "Koe could not read sales quantities from this file. Try another export or paste the report text."
 
 
 def test_restock_plan_endpoint_rejects_another_restaurants_count() -> None:

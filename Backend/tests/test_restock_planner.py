@@ -4,7 +4,7 @@ import pytest
 
 from app.models import CountEntry, CountSession, Restaurant
 from app.services import restock_planner_service
-from app.services.restock_planner_service import RestockPlannerError, build_restock_plan
+from app.services.restock_planner_service import RestockPlannerError, build_restock_plan, normalize_sales_csv
 
 
 def _csv(text: str) -> bytes:
@@ -117,6 +117,127 @@ def test_same_ingredient_across_menu_items_sums_and_applies_buffer() -> None:
     assert row["current_stock"] == 48
     assert row["suggested_purchase"] == 144.5
     assert row["status"] == "Limited History"
+
+
+def test_sales_exact_columns_parse_without_claude(monkeypatch) -> None:
+    def fail_if_called(csv_text: str) -> dict:
+        raise AssertionError("Claude should not be used for exact sales columns")
+
+    monkeypatch.setattr(restock_planner_service, "normalize_sales_report_with_claude", fail_if_called)
+
+    result = normalize_sales_csv(_csv("item_name,quantity_sold\nChicken Sandwich,400"), use_claude=True)
+
+    assert result.source == "direct"
+    assert result.rows[0].item_name == "Chicken Sandwich"
+    assert result.rows[0].quantity_sold == 400
+
+
+def test_sales_alias_columns_parse_directly_and_ignore_summary_rows() -> None:
+    result = normalize_sales_csv(
+        _csv(
+            """
+            Product Name,Qty Sold,Business Date
+            Crispy Chicken Sandwich,120,2026-07-20
+            Subtotal,120,2026-07-20
+            Tax,10,2026-07-20
+            """
+        ),
+        use_claude=False,
+    )
+
+    assert result.source == "direct"
+    assert result.columns_detected == {
+        "item_name": "Product Name",
+        "quantity_sold": "Qty Sold",
+        "date": "Business Date",
+    }
+    assert len(result.rows) == 1
+    assert result.rows[0].item_name == "Crispy Chicken Sandwich"
+    assert result.rows[0].quantity_sold == 120
+    assert result.rows[0].date == "2026-07-20"
+    assert result.warnings
+
+
+def test_sales_menu_item_items_sold_aliases_and_duplicates_merge() -> None:
+    result = normalize_sales_csv(
+        _csv(
+            """
+            Menu Item,Items Sold
+            Classic Cheeseburger,50
+            Classic Cheeseburger,45
+            Iced Latte,180
+            """
+        )
+    )
+
+    rows = {row.item_name: row for row in result.rows}
+    assert rows["Classic Cheeseburger"].quantity_sold == 95
+    assert rows["Iced Latte"].quantity_sold == 180
+
+
+def test_claude_sales_normalization_success_feeds_restock_planner(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    def mock_normalize(csv_text: str) -> dict:
+        assert "POS Item" in csv_text
+        return {
+            "sales_rows": [
+                {
+                    "item_name": "Chicken Sandwich",
+                    "quantity_sold": 400,
+                    "confidence": "High",
+                    "source_hint": "Matched from POS Item and Units columns",
+                }
+            ],
+            "warnings": [{"message": "Ignored modifier rows."}],
+            "normalization_summary": {
+                "rows_read": 2,
+                "sales_rows_extracted": 1,
+                "columns_detected": {"item_name": "POS Item", "quantity_sold": "Units", "date": None},
+            },
+        }
+
+    monkeypatch.setattr(restock_planner_service, "normalize_sales_report_with_claude", mock_normalize)
+
+    result = build_restock_plan(
+        count,
+        _csv("POS Item,Units\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert result["sales_normalization"]["source"] == "claude"
+    assert result["sales_normalization"]["sales_rows_extracted"] == 1
+    assert result["sales_normalization"]["preview_rows"][0]["item_name"] == "Chicken Sandwich"
+    assert result["purchase_plan"][0]["projected_need"] == 25
+
+
+def test_malformed_claude_sales_normalization_returns_friendly_error(monkeypatch) -> None:
+    monkeypatch.setattr(restock_planner_service, "normalize_sales_report_with_claude", lambda csv_text: {"sales_rows": "bad"})
+
+    with pytest.raises(RestockPlannerError, match="Koe could not read sales quantities from this file"):
+        normalize_sales_csv(_csv("POS Item,Units\nChicken Sandwich,400"), use_claude=True)
+
+
+def test_claude_sales_normalization_with_no_usable_rows_returns_friendly_error(monkeypatch) -> None:
+    monkeypatch.setattr(
+        restock_planner_service,
+        "normalize_sales_report_with_claude",
+        lambda csv_text: {"sales_rows": [{"item_name": "Subtotal", "quantity_sold": "not a number"}]},
+    )
+
+    with pytest.raises(RestockPlannerError, match="Koe could not read sales quantities from this file"):
+        normalize_sales_csv(_csv("POS Item,Units\nSubtotal,abc"), use_claude=True)
 
 
 def test_suggested_purchase_never_goes_negative() -> None:
@@ -647,7 +768,7 @@ def test_claude_unknown_ingredient_is_dropped_and_negative_purchase_is_repaired(
 
 
 def test_missing_sales_columns_returns_clear_error() -> None:
-    with pytest.raises(RestockPlannerError, match="Missing required sales columns: quantity_sold"):
+    with pytest.raises(RestockPlannerError, match="Koe could not read sales quantities from this file"):
         build_restock_plan(
             _count_with_entries([]),
             _csv("item_name\nChicken Sandwich"),

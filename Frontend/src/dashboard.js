@@ -481,9 +481,11 @@ function inspectRestockCsvText({ name, text, type }) {
   const lines = text.split(/\r?\n/).filter((line) => line.trim());
   if (!lines.length) throw new Error("This CSV is empty.");
   const headers = splitCsvRow(lines[0]).map(normalizeRestockHeader);
-  const missing = RESTOCK_REQUIRED_COLUMNS[type].filter((column) => !headers.includes(normalizeRestockHeader(column)));
-  if (missing.length) {
-    throw new Error(`Missing required columns: ${missing.join(", ")}`);
+  if (type !== "sales") {
+    const missing = RESTOCK_REQUIRED_COLUMNS[type].filter((column) => !headers.includes(normalizeRestockHeader(column)));
+    if (missing.length) {
+      throw new Error(`Missing required columns: ${missing.join(", ")}`);
+    }
   }
   return {
     name,
@@ -526,6 +528,10 @@ function saveRestockDatasetToStorage(type, meta) {
         name: meta.name,
         csvText: meta.text,
         rowCount: meta.rowCount,
+        normalizationSource: meta.normalizationSource || "",
+        detectedItems: meta.detectedItems || 0,
+        previewRows: meta.previewRows || [],
+        warnings: meta.warnings || [],
         savedAt,
       }),
     );
@@ -555,7 +561,11 @@ function restoreRestockDatasetFromStorage(type) {
     state[fileKey] = createRestockFileFromText(meta.name, meta.text);
     state[metaKey] = {
       name: meta.name,
-      rowCount: meta.rowCount,
+      rowCount: Number(parsed?.detectedItems || parsed?.rowCount || meta.rowCount) || meta.rowCount,
+      normalizationSource: parsed?.normalizationSource || "",
+      detectedItems: Number(parsed?.detectedItems || 0) || 0,
+      previewRows: Array.isArray(parsed?.previewRows) ? parsed.previewRows : [],
+      warnings: Array.isArray(parsed?.warnings) ? parsed.warnings : [],
       savedAt,
       storageLabel: "Restored from this browser",
     };
@@ -658,6 +668,10 @@ async function handleRestockFile(type, file) {
     state[metaKey] = {
       name: meta.name,
       rowCount: meta.rowCount,
+      normalizationSource: type === "sales" ? "" : undefined,
+      detectedItems: 0,
+      previewRows: [],
+      warnings: [],
       savedAt,
       storageLabel: savedAt ? "Saved locally" : "",
     };
@@ -680,6 +694,44 @@ function removeRestockFile(type) {
   }
   resetRestockWorkflow();
   renderShell();
+}
+
+function formatSalesNormalizationSource(source) {
+  const normalized = String(source || "").toLowerCase();
+  if (normalized === "claude") return "Cleaned by Claude";
+  if (normalized === "direct") return "Parsed directly";
+  return "Ready to clean";
+}
+
+function getSalesUploadDetail(meta) {
+  if (!meta) return "";
+  if (meta.detectedItems) {
+    return `${meta.detectedItems} menu items detected • ${formatSalesNormalizationSource(meta.normalizationSource)}`;
+  }
+  return `${meta.rowCount ?? 0} rows ready • Koe will clean this report`;
+}
+
+async function applyRestockSalesNormalization(normalization) {
+  if (!normalization || !state.restockSalesMeta) return;
+  const previewRows = Array.isArray(normalization.preview_rows) ? normalization.preview_rows : [];
+  const warnings = Array.isArray(normalization.warnings) ? normalization.warnings : [];
+  const detectedItems = Number(normalization.sales_rows_extracted || previewRows.length || 0) || 0;
+  state.restockSalesMeta = {
+    ...state.restockSalesMeta,
+    rowCount: detectedItems || state.restockSalesMeta.rowCount,
+    normalizationSource: normalization.source || "",
+    detectedItems,
+    previewRows,
+    warnings,
+  };
+  try {
+    const text = await state.restockSalesFile?.text?.();
+    if (text) {
+      saveRestockDatasetToStorage("sales", { ...state.restockSalesMeta, text });
+    }
+  } catch {
+    // Local preview metadata can still live in memory if file text is unavailable.
+  }
 }
 
 function getRestockAvailableCounts() {
@@ -1320,12 +1372,14 @@ async function submitRestockPlan() {
   state.restockPlan = null;
   renderShell();
   try {
-    state.restockPlan = await generateRestockPlan({
+    const plan = await generateRestockPlan({
       salesFile: state.restockSalesFile,
       recipeFile: state.restockRecipeFile,
       countId: selectedCount.id,
       previousCountIds: state.restockPreviousCountIds,
     });
+    await applyRestockSalesNormalization(plan.sales_normalization);
+    state.restockPlan = plan;
   } catch (error) {
     state.restockError = error.message || "Could not generate the purchase plan.";
   } finally {
@@ -2381,6 +2435,7 @@ function renderRestockPlanner() {
             <div class="restock-planner-grid">
               <div class="restock-setup-column">
                 ${renderRestockUploadCards("compact")}
+                ${renderRestockSalesPreview()}
                 ${renderRestockInventorySelector()}
                 ${renderRestockHistorySelector()}
                 ${renderRestockGenerateCard()}
@@ -2407,9 +2462,9 @@ function renderRestockUploadCards(variant = "large") {
     ${renderRestockUploadCard({
       type: "sales",
       number: "1",
-      title: "Sales Data",
-      helper: "Upload last month’s item sales.",
-      dropText: "Drop CSV here",
+      title: "Sales Report",
+      helper: "Upload a POS export, spreadsheet, or sales report. Koe will clean it automatically.",
+      dropText: "Drop sales CSV here",
       variant,
     })}
     ${renderRestockUploadCard({
@@ -2456,11 +2511,51 @@ function renderRestockGenerateCard() {
   `;
 }
 
+function renderRestockSalesPreview() {
+  const meta = state.restockSalesMeta;
+  if (!meta) return "";
+  const previewRows = Array.isArray(meta.previewRows) ? meta.previewRows : [];
+  const warnings = Array.isArray(meta.warnings) ? meta.warnings : [];
+  const sourceLabel = formatSalesNormalizationSource(meta.normalizationSource);
+  return `
+    <article class="restock-card restock-sales-preview-card">
+      <div class="restock-section-heading">
+        <span class="restock-section-label">Sales Data Preview</span>
+        <h3>${escapeHtml(meta.detectedItems ? `${meta.detectedItems} menu items detected` : "Ready for cleanup")}</h3>
+        <p>${escapeHtml(meta.detectedItems ? sourceLabel : "Koe will clean this sales report when you generate a purchase plan.")}</p>
+      </div>
+      ${
+        previewRows.length
+          ? `<div class="restock-sales-preview-list">
+              ${previewRows
+                .slice(0, 5)
+                .map(
+                  (row) => `
+                    <div>
+                      <strong>${escapeHtml(row.item_name || "Menu item")}</strong>
+                      <span>${escapeHtml(formatPlanQuantity(row.quantity_sold))} sold${row.confidence ? ` • ${escapeHtml(row.confidence)}` : ""}</span>
+                    </div>
+                  `,
+                )
+                .join("")}
+            </div>`
+          : `<div class="restock-empty-state">Upload can continue. Preview appears after Koe reads the sales quantities.</div>`
+      }
+      ${
+        warnings.length
+          ? `<div class="restock-sales-preview-warning">${escapeHtml(warnings[0].message || "Koe ignored some non-sales rows while cleaning this report.")}</div>`
+          : ""
+      }
+    </article>
+  `;
+}
+
 function renderRestockUploadCard({ type, number, title, helper, dropText, variant = "large" }) {
   const meta = type === "sales" ? state.restockSalesMeta : state.restockRecipeMeta;
   const error = type === "sales" ? state.restockSalesError : state.restockRecipeError;
   const pickerLabel = type === "sales" ? "Choose sales CSV" : "Choose menu ingredients CSV";
   const storageLabel = meta?.storageLabel ? ` • ${meta.storageLabel}` : "";
+  const metaDetail = type === "sales" && meta ? getSalesUploadDetail(meta) : meta ? `${meta.rowCount} rows detected` : "";
   return `
     <article class="restock-card restock-upload-card restock-upload-card--${escapeHtml(variant)}" data-restock-card="${escapeHtml(type)}">
       <div class="restock-card-heading">
@@ -2481,13 +2576,13 @@ function renderRestockUploadCard({ type, number, title, helper, dropText, varian
         </i>
         ${meta ? `<em class="restock-ready-pill">Ready</em>` : ""}
         <strong>${meta ? escapeHtml(meta.name) : escapeHtml(dropText)}</strong>
-        <small>${meta ? `${escapeHtml(meta.rowCount)} rows detected` : "or"}</small>
+        <small>${meta ? escapeHtml(metaDetail) : "or"}</small>
         ${meta ? "" : `<button class="restock-picker-button" data-restock-browse="${escapeHtml(type)}" aria-label="${escapeHtml(pickerLabel)}" type="button">Choose CSV</button>`}
       </div>
       ${
         meta
           ? `<div class="restock-file-state">
-              <span><strong>Ready for forecast</strong><small>${escapeHtml(meta.name)} • ${escapeHtml(meta.rowCount)} rows${escapeHtml(storageLabel)}</small></span>
+              <span><strong>Ready for forecast</strong><small>${escapeHtml(meta.name)} • ${escapeHtml(metaDetail)}${escapeHtml(storageLabel)}</small></span>
               <button data-restock-remove="${escapeHtml(type)}" type="button">Remove</button>
             </div>`
           : ""
