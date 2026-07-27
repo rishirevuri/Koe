@@ -2579,6 +2579,8 @@ function renderRestockPlanResults(plan) {
           <div><span>Suggested Purchases</span><strong>${escapeHtml(summary.suggested_purchases ?? 0)}</strong></div>
           <div><span>Needs Review</span><strong>${escapeHtml(summary.needs_review ?? 0)}</strong></div>
           <div><span>Forecast Mode</span><strong>${escapeHtml(formatForecastMode(summary.forecast_mode))}</strong></div>
+          <div><span>History Counts Used</span><strong>${escapeHtml(summary.history_counts_used ?? 0)}</strong></div>
+          <div><span>Safety Buffer</span><strong>${escapeHtml(summary.safety_buffer_percent ?? 10)}%</strong></div>
         </div>
       </div>
       <div class="restock-report-section">
@@ -2632,12 +2634,13 @@ function renderRestockPlanRow(row) {
   const projected = restockQuantityWithUnit(row.projected_need, row.unit);
   const adjusted = restockQuantityWithUnit(row.adjusted_need ?? row.projected_need, row.unit);
   const suggested = restockQuantityWithUnit(row.suggested_purchase, row.unit, "0");
+  const multiplier = row.usage_multiplier ? ` · Usage multiplier: ${formatPlanQuantity(row.usage_multiplier)}x` : "";
   return `
     <article class="restock-plan-card">
       <div class="restock-plan-card-main">
         <div>
           <h4>${escapeHtml(row.ingredient || "Unnamed ingredient")}</h4>
-          <small>Projected: ${escapeHtml(projected)} · Adjusted: ${escapeHtml(adjusted)} · Current: ${escapeHtml(currentStock)}</small>
+          <small>Projected: ${escapeHtml(projected)} · Adjusted: ${escapeHtml(adjusted)} · Current: ${escapeHtml(currentStock)}${escapeHtml(multiplier)}</small>
         </div>
         <div class="restock-plan-purchase">
           <span>Suggested Purchase</span>

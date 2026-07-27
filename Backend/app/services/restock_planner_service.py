@@ -83,7 +83,7 @@ COUNT_UNIT_ALIASES = {
 
 
 def _round_quantity(value: float) -> float:
-    rounded = round(value, 2)
+    rounded = round(float(value), 2)
     return int(rounded) if rounded.is_integer() else rounded
 
 
