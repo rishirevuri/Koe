@@ -564,24 +564,103 @@ FRAGMENT_NAME_PATTERNS = [
     re.compile(r"\b(?:with|but|and)\s*$", re.IGNORECASE),
 ]
 
+INVENTORY_COUNT_TOOL_NAME = "submit_inventory_count_rows"
+INVENTORY_COUNT_TOOL = {
+    "name": INVENTORY_COUNT_TOOL_NAME,
+    "description": "Submit cleaned restaurant inventory count rows.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "item_name_raw": {"type": "string"},
+                        "item_name_clean": {"type": "string"},
+                        "quantity": {"type": ["number", "null"]},
+                        "quantity_label": {"type": ["string", "null"]},
+                        "unit": {"type": ["string", "null"]},
+                        "category": {"type": "string"},
+                        "status": {
+                            "type": "string",
+                            "enum": ["Clean", "Needs Review", "Partial Quantity", "Missing Unit", "Possible Duplicate"],
+                        },
+                        "original_phrase": {"type": "string"},
+                    },
+                    "required": [
+                        "item_name_raw",
+                        "item_name_clean",
+                        "quantity",
+                        "quantity_label",
+                        "unit",
+                        "category",
+                        "status",
+                        "original_phrase",
+                    ],
+                },
+            }
+        },
+        "required": ["items"],
+    },
+}
+
+
+class ClaudeInventoryParseError(ValueError):
+    def __init__(self, reason: str, message: str | None = None):
+        self.reason = reason
+        super().__init__(message or reason)
+
 
 def _extract_json_object(value: str) -> dict:
     text = value.strip()
-    if text.startswith("```"):
-        text = re.sub(r"^```(?:json)?\s*", "", text, flags=re.IGNORECASE)
-        text = re.sub(r"\s*```$", "", text)
+    fence_match = re.search(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.IGNORECASE | re.DOTALL)
+    if fence_match:
+        text = fence_match.group(1).strip()
 
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError:
-        match = re.search(r"\{.*\}", text, flags=re.DOTALL)
-        if not match:
-            raise ValueError("Claude response did not contain JSON") from None
-        parsed = json.loads(match.group(0))
+    decoder = json.JSONDecoder()
+    parsed = None
+    parse_errors: list[str] = []
+    for index, char in enumerate(text):
+        if char not in "[{":
+            continue
+        try:
+            candidate, _ = decoder.raw_decode(text[index:])
+        except json.JSONDecodeError as error:
+            parse_errors.append(str(error))
+            continue
+        if isinstance(candidate, list):
+            parsed = {"items": candidate}
+            break
+        if isinstance(candidate, dict):
+            parsed = candidate
+            break
+
+    if parsed is None:
+        detail = parse_errors[0] if parse_errors else "Claude response did not contain JSON"
+        raise ValueError(detail) from None
 
     if not isinstance(parsed, dict):
-        raise ValueError("Claude response JSON must be an object")
+        raise ValueError("Claude response JSON must be an object or item array")
     return parsed
+
+
+def _extract_inventory_payload_from_claude_response(payload: dict) -> dict:
+    content = payload.get("content") or []
+    for part in content:
+        if (
+            isinstance(part, dict)
+            and part.get("type") == "tool_use"
+            and part.get("name") == INVENTORY_COUNT_TOOL_NAME
+            and isinstance(part.get("input"), dict)
+        ):
+            return part["input"]
+    text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+    return _extract_json_object("\n".join(text_parts))
+
+
+def is_inventory_sentence_fragment(value: object) -> bool:
+    return _looks_like_sentence_fragment(value)
 
 
 def _safe_string(value: object) -> str:
@@ -854,71 +933,136 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
     if not settings.is_claude_configured:
         raise RuntimeError("Claude is not configured")
 
-    response = httpx.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "x-api-key": settings.anthropic_api_key or "",
-            "anthropic-version": "2023-06-01",
-            "content-type": "application/json",
-        },
-        json={
+    def post_claude(message: str, *, system_prompt: str, use_tool: bool = True, max_tokens: int = 5000) -> dict:
+        request_json = {
             "model": settings.anthropic_model,
-            "max_tokens": 5000,
+            "max_tokens": max_tokens,
             "temperature": 0,
-            "system": SYSTEM_PROMPT,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": f"Parse this restaurant inventory count transcript:\n\n{transcript}",
-                }
-            ],
-        },
-        timeout=25,
-    )
-    if response.status_code >= 400:
-        message = f"Claude request failed with status {response.status_code}"
-        try:
-            error_body = response.json()
-            provider_message = error_body.get("error", {}).get("message")
-            if provider_message:
-                message = provider_message
-        except ValueError:
-            pass
-        raise RuntimeError(message)
+            "system": system_prompt,
+            "messages": [{"role": "user", "content": message}],
+        }
+        if use_tool:
+            request_json["tools"] = [INVENTORY_COUNT_TOOL]
+            request_json["tool_choice"] = {"type": "tool", "name": INVENTORY_COUNT_TOOL_NAME}
 
-    payload = response.json()
-    content = payload.get("content") or []
-    text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
-    raw_text = "\n".join(text_parts)
-    try:
-        parsed = _extract_json_object(raw_text)
+        response = httpx.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": settings.anthropic_api_key or "",
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json=request_json,
+            timeout=25,
+        )
+        if response.status_code >= 400:
+            message = f"Claude request failed with status {response.status_code}"
+            try:
+                error_body = response.json()
+                provider_message = error_body.get("error", {}).get("message")
+                if provider_message:
+                    message = provider_message
+            except ValueError:
+                pass
+            raise RuntimeError(message)
+        return response.json()
+
+    def parse_and_normalize(payload: dict, *, attempt: str) -> dict:
+        parsed = _extract_inventory_payload_from_claude_response(payload)
+        normalized = normalize_claude_inventory_payload(parsed, reject_fragment_heavy=True)
         raw_items = parsed.get("items") if isinstance(parsed.get("items"), list) else parsed.get("entries", [])
         _log_parse_debug(
             settings,
             "raw_claude_json",
             model=settings.anthropic_model,
+            attempt=attempt,
             valid_json=True,
             item_count=len(raw_items) if isinstance(raw_items, list) else 0,
             first_2_raw_items=raw_items[:2] if isinstance(raw_items, list) else [],
         )
-    except Exception as error:
+        _log_parse_debug(
+            settings,
+            "normalized_backend_entries",
+            model=settings.anthropic_model,
+            attempt=attempt,
+            item_count=len(normalized["items"]),
+            first_2_normalized_entries=normalized["items"][:2],
+        )
+        return normalized
+
+    primary_message = (
+        "Parse this restaurant inventory count transcript.\n\n"
+        "You are parsing restaurant inventory counts. Return only real inventory items. Never create rows from "
+        "sentence fragments. Handle spoiled/unusable quantities inside the real item row. If a transcript says "
+        '"22 tomatoes but 6 are bad," return tomatoes quantity 16 or mark Needs Review. Do not create a separate '
+        'row for "6 are bad." If a transcript says "1 case of lemons with 24 in the case, but 7 lemons are bad," '
+        'return lemons quantity 17 individual or Needs Review. Do not create rows for "lemons with" or '
+        '"in the case."\n\n'
+        f"{transcript}"
+    )
+    primary_payload = post_claude(primary_message, system_prompt=INVENTORY_COUNT_SYSTEM_PROMPT, use_tool=True)
+    primary_raw_text = "\n".join(
+        part.get("text", "") for part in (primary_payload.get("content") or []) if isinstance(part, dict) and part.get("type") == "text"
+    )
+    try:
+        return parse_and_normalize(primary_payload, attempt="primary")
+    except Exception as primary_error:
         _log_parse_debug(
             settings,
             "raw_claude_json",
             model=settings.anthropic_model,
+            attempt="primary",
+            valid_json=False,
+            error_type=type(primary_error).__name__,
+        )
+
+    repair_message = (
+        "Return only valid JSON matching the inventory schema. Do not add commentary. Do not change the inventory "
+        "meaning. Support this exact shape: {\"items\":[{\"item_name_raw\":\"string\","
+        "\"item_name_clean\":\"string\",\"quantity\":number_or_null,\"quantity_label\":string_or_null,"
+        "\"unit\":\"string\",\"category\":\"string\",\"status\":\"Clean or Needs Review or Partial Quantity or "
+        "Missing Unit or Possible Duplicate\",\"original_phrase\":\"string\"}]}.\n\n"
+        "Malformed Claude response to repair:\n"
+        f"{primary_raw_text or json.dumps(primary_payload)}"
+    )
+    repair_error: Exception | None = None
+    try:
+        repair_payload = post_claude(repair_message, system_prompt=INVENTORY_COUNT_SYSTEM_PROMPT, use_tool=False, max_tokens=5000)
+        return parse_and_normalize(repair_payload, attempt="repair")
+    except Exception as error:
+        repair_error = error
+        _log_parse_debug(
+            settings,
+            "raw_claude_json",
+            model=settings.anthropic_model,
+            attempt="repair",
             valid_json=False,
             error_type=type(error).__name__,
         )
-        raise
-    normalized = normalize_claude_inventory_payload(parsed, reject_fragment_heavy=True)
-    _log_parse_debug(
-        settings,
-        "normalized_backend_entries",
-        model=settings.anthropic_model,
-        item_count=len(normalized["items"]),
-        first_2_normalized_entries=normalized["items"][:2],
+
+    strict_prompt = (
+        "You are parsing restaurant inventory counts. Return compact valid JSON only. No markdown. No explanations. "
+        "No duplicated transcript. Extract only real inventory item rows. Do not create sentence-fragment rows. "
+        "Subtract spoiled, bad, cracked, rotten, or unusable quantities from the matching real item row when clear. "
+        "Use {\"items\":[...]} only."
     )
-    return normalized
+    strict_message = f"Inventory transcript:\n{transcript}"
+    try:
+        strict_payload = post_claude(strict_message, system_prompt=strict_prompt, use_tool=False, max_tokens=4000)
+        return parse_and_normalize(strict_payload, attempt="strict_reparse")
+    except Exception as strict_error:
+        _log_parse_debug(
+            settings,
+            "raw_claude_json",
+            model=settings.anthropic_model,
+            attempt="strict_reparse",
+            valid_json=False,
+            error_type=type(strict_error).__name__,
+        )
+        raise ClaudeInventoryParseError(
+            "claude_strict_reparse_failed",
+            f"claude_json_parse_failed_primary; claude_json_repair_failed; claude_strict_reparse_failed: {strict_error}",
+        ) from repair_error
 
 
 def parse_inventory_count_with_claude(transcript: str) -> list[ParsedCandidate]:

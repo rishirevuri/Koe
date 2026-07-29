@@ -296,6 +296,143 @@ class MockClaudeResponse:
         }
 
 
+class MockClaudeTextResponse:
+    status_code = 200
+
+    def __init__(self, text: str):
+        self.text = text
+
+    def json(self) -> dict:
+        return {"content": [{"type": "text", "text": self.text}]}
+
+
+class MockClaudeToolResponse:
+    status_code = 200
+
+    def __init__(self, items: list[dict]):
+        self.items = items
+
+    def json(self) -> dict:
+        return {
+            "content": [
+                {
+                    "type": "tool_use",
+                    "name": "submit_inventory_count_rows",
+                    "input": {"items": self.items},
+                }
+            ]
+        }
+
+
+def _tomato_item(quantity: int | float = 12) -> dict:
+    return {
+        "item_name_raw": "tomatoes",
+        "item_name_clean": "Tomatoes",
+        "category": "Produce",
+        "quantity": quantity,
+        "quantity_label": None,
+        "unit": "individual",
+        "status": "Clean",
+        "original_phrase": "10 tomatoes, actually make that 12 tomatoes",
+    }
+
+
+def test_parse_inventory_count_with_claude_accepts_tool_response(monkeypatch) -> None:
+    captured: dict = {}
+
+    def mock_post(url, headers, json, timeout):
+        captured["tool_choice"] = json.get("tool_choice")
+        return MockClaudeToolResponse([_tomato_item()])
+
+    monkeypatch.setattr(external_ai_service, "get_settings", lambda: EnabledClaudeSettings())
+    monkeypatch.setattr(external_ai_service.httpx, "post", mock_post)
+
+    candidates = parse_inventory_count_with_claude("I have 12 tomatoes.")
+
+    assert captured["tool_choice"] == {"type": "tool", "name": "submit_inventory_count_rows"}
+    assert [(candidate.item_name, candidate.quantity, candidate.unit) for candidate in candidates] == [
+        ("Tomatoes", 12.0, "individual")
+    ]
+
+
+def test_parse_inventory_json_with_claude_extracts_markdown_json(monkeypatch) -> None:
+    def mock_post(url, headers, json, timeout):
+        return MockClaudeTextResponse(f"```json\n{external_ai_service.json.dumps({'items': [_tomato_item()]})}\n```")
+
+    monkeypatch.setattr(external_ai_service, "get_settings", lambda: EnabledClaudeSettings())
+    monkeypatch.setattr(external_ai_service.httpx, "post", mock_post)
+
+    parsed = parse_inventory_json_with_claude("I have 12 tomatoes.")
+
+    assert parsed["items"][0]["item_name_clean"] == "Tomatoes"
+    assert parsed["items"][0]["quantity"] == 12
+
+
+def test_parse_inventory_json_with_claude_accepts_items_object(monkeypatch) -> None:
+    def mock_post(url, headers, json, timeout):
+        return MockClaudeTextResponse(external_ai_service.json.dumps({"items": [_tomato_item(16)]}))
+
+    monkeypatch.setattr(external_ai_service, "get_settings", lambda: EnabledClaudeSettings())
+    monkeypatch.setattr(external_ai_service.httpx, "post", mock_post)
+
+    parsed = parse_inventory_json_with_claude("I have tomatoes.")
+
+    assert parsed["items"][0]["quantity"] == 16
+
+
+def test_parse_inventory_json_with_claude_accepts_raw_array(monkeypatch) -> None:
+    def mock_post(url, headers, json, timeout):
+        return MockClaudeTextResponse(external_ai_service.json.dumps([_tomato_item(18)]))
+
+    monkeypatch.setattr(external_ai_service, "get_settings", lambda: EnabledClaudeSettings())
+    monkeypatch.setattr(external_ai_service.httpx, "post", mock_post)
+
+    parsed = parse_inventory_json_with_claude("I have tomatoes.")
+
+    assert parsed["items"][0]["quantity"] == 18
+
+
+def test_parse_inventory_json_with_claude_repairs_malformed_primary(monkeypatch) -> None:
+    responses = [
+        MockClaudeTextResponse('{"items":[{"item_name_clean":"Tomatoes","quantity":12 "unit":"individual"}]}'),
+        MockClaudeTextResponse(external_ai_service.json.dumps({"items": [_tomato_item()]})),
+    ]
+    calls = []
+
+    def mock_post(url, headers, json, timeout):
+        calls.append(json)
+        return responses.pop(0)
+
+    monkeypatch.setattr(external_ai_service, "get_settings", lambda: EnabledClaudeSettings())
+    monkeypatch.setattr(external_ai_service.httpx, "post", mock_post)
+
+    parsed = parse_inventory_json_with_claude("I have 12 tomatoes.")
+
+    assert parsed["items"][0]["item_name_clean"] == "Tomatoes"
+    assert len(calls) == 2
+    assert calls[0]["tool_choice"] == {"type": "tool", "name": "submit_inventory_count_rows"}
+    assert "tool_choice" not in calls[1]
+
+
+def test_parse_inventory_json_with_claude_strict_reparse_after_repair_failure(monkeypatch) -> None:
+    responses = [
+        MockClaudeTextResponse('{"items":[{"item_name_clean":"Tomatoes","quantity":12 "unit":"individual"}]}'),
+        MockClaudeTextResponse("still not json"),
+        MockClaudeTextResponse(external_ai_service.json.dumps({"items": [_tomato_item(14)]})),
+    ]
+
+    def mock_post(url, headers, json, timeout):
+        return responses.pop(0)
+
+    monkeypatch.setattr(external_ai_service, "get_settings", lambda: EnabledClaudeSettings())
+    monkeypatch.setattr(external_ai_service.httpx, "post", mock_post)
+
+    parsed = parse_inventory_json_with_claude("I have tomatoes.")
+
+    assert parsed["items"][0]["quantity"] == 14
+    assert not responses
+
+
 def test_mocked_claude_hard_transcript_behavior(monkeypatch) -> None:
     transcript = (
         "Okay I am doing the inventory count now. I see 10 tomatoes, actually make that 12 tomatoes because "

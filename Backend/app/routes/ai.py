@@ -11,7 +11,7 @@ from app.auth import SupabaseUser, ensure_restaurant_id_matches, get_current_res
 from app.services.category_service import normalize_inventory_category
 from app.services.issue_service import create_issue
 from app.services.matching_service import MatchResult, match_inventory_item
-from app.services.external_ai_service import parse_inventory_count_with_claude
+from app.services.external_ai_service import ClaudeInventoryParseError, is_inventory_sentence_fragment, parse_inventory_count_with_claude
 from app.services.par_estimate_service import estimate_par_status
 from app.services.upload_parse_service import parse_upload_text
 from app.services.voice_parse_service import ParsedCandidate, parse_voice_text
@@ -29,6 +29,7 @@ INVALID_FALLBACK_ITEM_NAMES = {
     "is half empty",
     "more on the bottom shelf",
 }
+SAFE_FALLBACK_PARSE_FAILURE_MESSAGE = "Koe could not safely parse this count. Please try again or shorten the transcript."
 
 # Backward-compatible test hook. The route uses this inventory-specific callable
 # for /ai/parse-voice; Restock Planner and sales normalization use separate
@@ -98,7 +99,14 @@ def _parser_debug(settings, parser_source: str, fallback_reason: str | None = No
 
 def _is_invalid_fallback_candidate(candidate: ParsedCandidate) -> bool:
     name = " ".join(candidate.item_name.lower().strip(" ,.").split())
-    return name in INVALID_FALLBACK_ITEM_NAMES
+    return name in INVALID_FALLBACK_ITEM_NAMES or is_inventory_sentence_fragment(candidate.item_name)
+
+
+def _filter_deterministic_fallback_candidates(candidates: list[ParsedCandidate]) -> tuple[list[ParsedCandidate], int, bool]:
+    fragment_count = sum(1 for candidate in candidates if _is_invalid_fallback_candidate(candidate))
+    if candidates and fragment_count / len(candidates) > 0.20:
+        return [], fragment_count, True
+    return [candidate for candidate in candidates if not _is_invalid_fallback_candidate(candidate)], fragment_count, False
 
 
 def _status_for_candidate(candidate: ParsedCandidate, match: MatchResult, parser_source: str | None = None) -> str:
@@ -375,6 +383,15 @@ def parse_voice(
         candidates = parse_voice_text(payload.text)
         logger.info("parse_voice: deterministic parse finished candidate_count=%s", len(candidates))
         if fallback_reason:
+            candidates, fragment_count, fragment_heavy = _filter_deterministic_fallback_candidates(candidates)
+            if fragment_heavy:
+                fallback_reason = f"{fallback_reason};deterministic_fallback_used:fallback_fragment_heavy:{SAFE_FALLBACK_PARSE_FAILURE_MESSAGE}"
+                logger.warning(
+                    "parse_voice: deterministic fallback blocked fragment-heavy output fragment_count=%s",
+                    fragment_count,
+                )
+            elif fragment_count:
+                fallback_reason = f"{fallback_reason};deterministic_fallback_used:filtered_fragment_rows:{fragment_count}"
             logger.warning(
                 "parse_voice: Claude parse skipped; using deterministic_fallback; fallback_reason=%s model=%s",
                 fallback_reason,
@@ -389,7 +406,10 @@ def parse_voice(
                 fallback_reason = None
                 logger.info("parse_voice: Claude parse finished candidate_count=%s", len(candidates))
             except Exception as error:
-                fallback_reason = f"claude_error:{type(error).__name__}"
+                if isinstance(error, ClaudeInventoryParseError):
+                    fallback_reason = error.reason
+                else:
+                    fallback_reason = f"claude_error:{type(error).__name__}"
                 safe_message = _safe_error_message(error)
                 if safe_message:
                     fallback_reason = f"{fallback_reason}:{safe_message}"
@@ -402,6 +422,15 @@ def parse_voice(
                 logger.info("parse_voice: deterministic fallback parse started")
                 candidates = parse_voice_text(payload.text)
                 logger.info("parse_voice: deterministic fallback parse finished candidate_count=%s", len(candidates))
+                candidates, fragment_count, fragment_heavy = _filter_deterministic_fallback_candidates(candidates)
+                if fragment_heavy:
+                    fallback_reason = f"{fallback_reason};deterministic_fallback_used:fallback_fragment_heavy:{SAFE_FALLBACK_PARSE_FAILURE_MESSAGE}"
+                    logger.warning(
+                        "parse_voice: deterministic fallback blocked fragment-heavy output fragment_count=%s",
+                        fragment_count,
+                    )
+                elif fragment_count:
+                    fallback_reason = f"{fallback_reason};deterministic_fallback_used:filtered_fragment_rows:{fragment_count}"
         logger.info("parse_voice: using parser_source=%s fallback_reason=%s", parser_source, fallback_reason or "")
 
         return _handle_candidates(

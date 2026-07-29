@@ -1109,6 +1109,36 @@ def test_voice_parse_mocked_claude_failure_returns_fallback_source(monkeypatch) 
     ]
 
 
+def test_voice_parse_all_claude_attempts_fail_blocks_fragment_heavy_fallback(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+    transcript = (
+        "We have 22 regular tomatoes, but 6 are soft and starting to rot, so those should not be counted. "
+        "There are 3 bunches of cilantro. There are 9 cucumbers, but 2 are already sliced and should still be usable tomorrow. "
+        "We have 1 case of lemons with 24 in the case, but 7 lemons are bad."
+    )
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        assert text == transcript
+        raise RuntimeError("claude_json_parse_failed_primary; claude_json_repair_failed; claude_strict_reparse_failed")
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": transcript, "area": "Walk-in", "save": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parser_source"] == "deterministic_fallback"
+    assert "deterministic_fallback_used" in payload["fallback_reason"]
+    assert "fallback_fragment_heavy" in payload["fallback_reason"]
+    assert "Koe could not safely parse this count" in payload["fallback_reason"]
+    assert payload["entries"] == []
+
+
 def test_voice_parse_claude_regression_spoiled_items_do_not_create_fragments(monkeypatch) -> None:
     settings = EnabledClaudeSettings()
     monkeypatch.setattr(ai, "get_settings", lambda: settings)
