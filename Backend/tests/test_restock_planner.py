@@ -767,6 +767,101 @@ def test_claude_unknown_ingredient_is_dropped_and_negative_purchase_is_repaired(
     assert any("outside the evidence packet" in warning["warning"] for warning in result["review_warnings"])
 
 
+def test_claude_stock_unknown_forces_low_confidence(monkeypatch) -> None:
+    count = _count_with_entries([])
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        return {
+            "summary": {"forecast_mode": "claude_recipe_only"},
+            "purchase_plan": [
+                {
+                    "ingredient": "Whole Milk",
+                    "suggested_purchase": 3,
+                    "unit": "gallons",
+                    "action": "review",
+                    "status": "Stock Unknown",
+                    "confidence": "High",
+                    "projected_need": 2.5,
+                    "adjusted_need": 2.5,
+                    "current_stock": None,
+                    "usage_signal": "unknown",
+                    "history_signal": "limited_history",
+                    "risk_signal": "needs_review",
+                    "reason": "No matching current stock row was found.",
+                }
+            ],
+            "learning_notes": [],
+            "review_warnings": [],
+        }
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nLatte,200"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nLatte,Whole Milk,0.05,gallons"),
+        use_claude=True,
+    )
+
+    row = result["purchase_plan"][0]
+    assert row["status"] == "Stock Unknown"
+    assert row["confidence"] == "Low"
+
+
+def test_claude_unit_mismatch_removes_unsafe_purchase_quantity(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=3,
+                unit="boxes",
+                status="Clean",
+            )
+        ]
+    )
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        return {
+            "summary": {"forecast_mode": "claude_recipe_only"},
+            "purchase_plan": [
+                {
+                    "ingredient": "Chicken Breast",
+                    "suggested_purchase": 18,
+                    "unit": "pounds",
+                    "action": "buy",
+                    "status": "Unit Mismatch",
+                    "confidence": "Medium",
+                    "projected_need": 25,
+                    "adjusted_need": 25,
+                    "current_stock": 3,
+                    "usage_signal": "unknown",
+                    "history_signal": "limited_history",
+                    "risk_signal": "needs_review",
+                    "reason": "Recipe uses pounds but current count is boxes, so manager review is required.",
+                }
+            ],
+            "learning_notes": [],
+            "review_warnings": [],
+        }
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    row = result["purchase_plan"][0]
+    assert row["status"] == "Unit Mismatch"
+    assert row["action"] == "review"
+    assert row["confidence"] == "Low"
+    assert row["suggested_purchase"] is None
+    assert any("removed the purchase quantity" in warning["warning"] for warning in result["review_warnings"])
+
+
 def test_missing_sales_columns_returns_clear_error() -> None:
     with pytest.raises(RestockPlannerError, match="Koe could not read sales quantities from this file"):
         build_restock_plan(

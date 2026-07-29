@@ -325,6 +325,11 @@ Rules:
 - If previous counts are missing or unusable, use recipe/menu evidence but mark Limited History.
 - Consider perishability, waste risk, and stockout risk.
 - Consider whether the item is a direct recipe ingredient or a supply item.
+- Supplies and packaging may not map perfectly to menu-item sales; use count history and stockout risk when available.
+- Do not silently subtract stock when units are incompatible.
+- Do not overbuy high-waste produce unless sales demand or count history strongly supports it.
+- Dry goods and packaging can tolerate a practical buffer more safely than fragile produce.
+- Qualitative or unclear current stock should lower confidence and require manager review.
 - Explain each reason in plain English.
 - Output strict JSON only.
 - Do not return markdown.
