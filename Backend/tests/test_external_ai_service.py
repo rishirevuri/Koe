@@ -3,6 +3,7 @@ from app.services.external_ai_service import (
     SYSTEM_PROMPT,
     _coerce_candidate,
     normalize_claude_inventory_payload,
+    parse_inventory_count_with_claude,
     parse_inventory_json_with_claude,
 )
 
@@ -100,6 +101,66 @@ def test_normalize_claude_inventory_payload_legacy_entries_shape() -> None:
     ]
     assert parsed["summary"]["rows_needing_review"] == 1
     assert parsed["summary"]["manager_insights"] == ["1 row needs manager review before export."]
+
+
+def test_normalize_claude_inventory_payload_drops_sentence_fragment_rows() -> None:
+    payload = {
+        "items": [
+            {
+                "item_name_raw": "regular tomatoes",
+                "item_name_clean": "Regular Tomatoes",
+                "category": "Produce",
+                "quantity": 16,
+                "unit": "individual",
+                "status": "Needs Review",
+                "original_phrase": "22 regular tomatoes, but 6 are soft and starting to rot",
+            },
+            {
+                "item_name_raw": "are soft and starting to rot",
+                "item_name_clean": "are soft and starting to rot",
+                "category": "Produce",
+                "quantity": 6,
+                "unit": "individual",
+                "status": "Needs Review",
+                "original_phrase": "6 are soft and starting to rot, so those should not be counted",
+            },
+            {
+                "item_name_raw": "lemons with",
+                "item_name_clean": "lemons with",
+                "category": "Produce",
+                "quantity": 1,
+                "unit": "case",
+                "status": "Clean",
+                "original_phrase": "1 case of lemons with 24 in the case",
+            },
+        ]
+    }
+
+    parsed = normalize_claude_inventory_payload(payload)
+
+    assert [item["item_name_clean"] for item in parsed["items"]] == ["Regular Tomatoes"]
+
+
+def test_normalize_claude_inventory_payload_rejects_fragment_heavy_response() -> None:
+    payload = {
+        "items": [
+            {"item_name_clean": "Regular Tomatoes", "quantity": 16, "unit": "individual", "status": "Clean"},
+            {"item_name_clean": "regular tomatoes, but", "quantity": 22, "unit": "individual", "status": "Clean"},
+            {"item_name_clean": "are soft and starting to rot, so those should not be counted", "quantity": 6, "unit": "individual", "status": "Needs Review"},
+            {"item_name_clean": "cucumbers but", "quantity": 9, "unit": "individual", "status": "Clean"},
+            {"item_name_clean": "are already sliced and should still be usable tomorrow", "quantity": 2, "unit": "individual", "status": "Needs Review"},
+            {"item_name_clean": "lemons with", "quantity": 1, "unit": "case", "status": "Clean"},
+            {"item_name_clean": "in the case, but", "quantity": 24, "unit": "individual", "status": "Clean"},
+            {"item_name_clean": "lemons are bad", "quantity": 7, "unit": "individual", "status": "Needs Review"},
+        ]
+    }
+
+    try:
+        normalize_claude_inventory_payload(payload, reject_fragment_heavy=True)
+    except ValueError as error:
+        assert "sentence-fragment rows" in str(error)
+    else:
+        raise AssertionError("fragment-heavy Claude response should be rejected")
 
 
 def test_coerce_candidate_cleans_obvious_units_and_vague_quantity() -> None:

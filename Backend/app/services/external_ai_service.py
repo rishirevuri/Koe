@@ -34,12 +34,19 @@ Do not create rows from filler words, connectors, or partial grammar.
 Never create item names like:
 - "of"
 - "and"
+- "but"
 - "then"
 - "packs of"
 - "cases of"
 - "bunches wait"
 - "is half empty"
 - "there are"
+- "regular tomatoes, but"
+- "are soft and starting to rot"
+- "cilantro. There are"
+- "lemons with"
+- "in the case, but"
+- "lemons are bad"
 - "I have"
 - "with"
 - "actually change that to"
@@ -296,7 +303,8 @@ Do not hardcode only this transcript. Use it as a behavioral example.
 """.strip()
 
 
-SYSTEM_PROMPT = RESTAURANT_INVENTORY_SYSTEM_PROMPT
+INVENTORY_COUNT_SYSTEM_PROMPT = RESTAURANT_INVENTORY_SYSTEM_PROMPT
+SYSTEM_PROMPT = INVENTORY_COUNT_SYSTEM_PROMPT
 
 
 RESTOCK_PLANNER_SYSTEM_PROMPT = """
@@ -534,6 +542,27 @@ QUALITATIVE_CONTAINER_UNITS = {
     "tub",
     "tubs",
 }
+FRAGMENT_ONLY_NAMES = {
+    "and",
+    "but",
+    "there are",
+    "there is",
+    "in the case",
+    "in the case but",
+    "should not be counted",
+    "do not count",
+    "do not count those",
+    "not be counted",
+    "those should not be counted",
+}
+FRAGMENT_NAME_PATTERNS = [
+    re.compile(r"^(?:are|is|were|was|be|being)\b", re.IGNORECASE),
+    re.compile(r"^(?:there\s+(?:are|is)|in\s+the\s+case)\b", re.IGNORECASE),
+    re.compile(r"\b(?:should\s+not\s+be\s+counted|do\s+not\s+count|not\s+counted)\b", re.IGNORECASE),
+    re.compile(r"\b(?:soft|rotten|rot|starting\s+to\s+rot|bad|spoiled|unusable|cracked)\b.*\b(?:counted|usable)\b", re.IGNORECASE),
+    re.compile(r",?\s+\b(?:but|and)\b$", re.IGNORECASE),
+    re.compile(r"\b(?:with|but|and)\s*$", re.IGNORECASE),
+]
 
 
 def _extract_json_object(value: str) -> dict:
@@ -557,6 +586,21 @@ def _extract_json_object(value: str) -> dict:
 
 def _safe_string(value: object) -> str:
     return str(value or "").strip()
+
+
+def _normalized_fragment_text(value: object) -> str:
+    return re.sub(r"\s+", " ", _safe_string(value).lower().strip(" ,.;:")).strip()
+
+
+def _looks_like_sentence_fragment(value: object) -> bool:
+    text = _normalized_fragment_text(value)
+    if not text:
+        return True
+    if text in FRAGMENT_ONLY_NAMES:
+        return True
+    if len(text.split()) <= 2 and text in {"there are", "there is", "in case", "the case"}:
+        return True
+    return any(pattern.search(text) for pattern in FRAGMENT_NAME_PATTERNS)
 
 
 def _safe_float(value: object) -> float | None:
@@ -639,6 +683,8 @@ def _normalize_claude_item(entry: dict) -> dict | None:
         item_name_clean = item_name_raw
     if not item_name_clean:
         return None
+    if _looks_like_sentence_fragment(item_name_clean):
+        return None
 
     raw_quantity = entry.get("quantity")
     quantity = _safe_float(raw_quantity)
@@ -714,14 +760,38 @@ def _summary_from_items(items: list[dict], summary: dict | None = None) -> dict:
     }
 
 
-def normalize_claude_inventory_payload(payload: dict) -> dict:
+def normalize_claude_inventory_payload(payload: dict, *, reject_fragment_heavy: bool = False) -> dict:
     raw_items = payload.get("items")
     if raw_items is None:
         raw_items = payload.get("entries", [])
     if not isinstance(raw_items, list):
         raise ValueError("Claude response items must be a list")
 
-    items = [item for entry in raw_items if (item := _normalize_claude_item(entry))]
+    fragment_rows = 0
+    items = []
+    for entry in raw_items:
+        if isinstance(entry, dict):
+            raw_name = (
+                entry.get("item_name_clean")
+                or entry.get("clean_item_name")
+                or entry.get("item_name")
+                or entry.get("name")
+                or entry.get("item_name_raw")
+                or entry.get("raw_item_name")
+            )
+            if _looks_like_sentence_fragment(raw_name):
+                fragment_rows += 1
+                continue
+        item = _normalize_claude_item(entry)
+        if item:
+            items.append(item)
+
+    total_rows = len(raw_items)
+    if reject_fragment_heavy and total_rows and fragment_rows / total_rows > 0.20:
+        raise ValueError(
+            f"Claude inventory response contained too many sentence-fragment rows "
+            f"({fragment_rows}/{total_rows})"
+        )
     return {"items": items, "summary": _summary_from_items(items, payload.get("summary"))}
 
 
@@ -840,7 +910,7 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
             error_type=type(error).__name__,
         )
         raise
-    normalized = normalize_claude_inventory_payload(parsed)
+    normalized = normalize_claude_inventory_payload(parsed, reject_fragment_heavy=True)
     _log_parse_debug(
         settings,
         "normalized_backend_entries",
@@ -851,10 +921,14 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
     return normalized
 
 
-def parse_inventory_with_claude(transcript: str) -> list[ParsedCandidate]:
+def parse_inventory_count_with_claude(transcript: str) -> list[ParsedCandidate]:
     parsed = parse_inventory_json_with_claude(transcript)
     candidates = [_coerce_candidate(entry) for entry in parsed["items"]]
     return [candidate for candidate in candidates if candidate is not None]
+
+
+def parse_inventory_with_claude(transcript: str) -> list[ParsedCandidate]:
+    return parse_inventory_count_with_claude(transcript)
 
 
 def generate_restock_plan_with_claude(evidence_packet: dict) -> dict:

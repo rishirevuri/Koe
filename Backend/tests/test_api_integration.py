@@ -1109,6 +1109,90 @@ def test_voice_parse_mocked_claude_failure_returns_fallback_source(monkeypatch) 
     ]
 
 
+def test_voice_parse_claude_regression_spoiled_items_do_not_create_fragments(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+    transcript = (
+        "We have 4 heads of romaine lettuce. We have 22 regular tomatoes, but 6 are soft and starting to rot, "
+        "so those should not be counted. There are 18 Roma tomatoes in the green crate. We have 2 heads of "
+        "iceberg lettuce. We have 3 bunches of cilantro. We have 9 cucumbers, but 2 are already sliced and "
+        "should still be usable tomorrow. We have 1 case of lemons with 24 in the case, but 7 lemons are bad."
+    )
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        assert text == transcript
+        return [
+            ParsedCandidate("4 heads of romaine lettuce", 4, "heads", "Romaine Lettuce", None, False, None, "Clean", "Produce"),
+            ParsedCandidate("22 regular tomatoes, but 6 are soft and starting to rot", 16, "individual", "Regular Tomatoes", None, True, "6 tomatoes were excluded as spoiled.", "Needs Review", "Produce"),
+            ParsedCandidate("18 Roma tomatoes in the green crate", 18, "individual", "Roma Tomatoes", None, False, None, "Clean", "Produce"),
+            ParsedCandidate("2 heads of iceberg lettuce", 2, "heads", "Iceberg Lettuce", None, False, None, "Clean", "Produce"),
+            ParsedCandidate("3 bunches of cilantro", 3, "bunches", "Cilantro", None, False, None, "Clean", "Produce"),
+            ParsedCandidate("9 cucumbers, but 2 are already sliced and should still be usable tomorrow", 9, "individual", "Cucumbers", None, True, "Confirm sliced cucumbers are usable tomorrow.", "Needs Review", "Produce"),
+            ParsedCandidate("1 case of lemons with 24 in the case, but 7 lemons are bad", 17, "individual", "Lemons", None, True, "7 bad lemons were excluded.", "Needs Review", "Produce"),
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": transcript, "area": "Walk-in", "save": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parser_source"] == "claude"
+    names = [entry["item_name_clean"] for entry in payload["entries"]]
+    assert "Regular Tomatoes" in names
+    assert "Lemons" in names
+    lowered = [name.lower() for name in names]
+    assert not any("but" in name for name in lowered)
+    assert not any(name.startswith("are ") for name in lowered)
+    assert not any(name.startswith("in the case") for name in lowered)
+    assert not any("should not be counted" in name for name in lowered)
+    assert {entry["item_name_clean"]: entry["quantity"] for entry in payload["entries"]}["Regular Tomatoes"] == 16.0
+    assert {entry["item_name_clean"]: entry["quantity"] for entry in payload["entries"]}["Lemons"] == 17.0
+
+
+def test_voice_parse_claude_existing_good_parser_example_has_no_fragments(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+    transcript = (
+        "I have 10 tomatoes, actually make that 12 tomatoes. I have 3 gallons of two percent milk, "
+        "3 bottles of olive oil with one bottle half empty, and 12 dozen eggs but 6 are cracked."
+    )
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        assert text == transcript
+        return [
+            ParsedCandidate("10 tomatoes, actually make that 12 tomatoes", 12, "individual", "Tomatoes", None, False, None, "Clean", "Produce"),
+            ParsedCandidate("3 gallons of two percent milk", 3, "gallons", "2 Percent Milk", None, False, None, "Clean", "Dairy & Eggs"),
+            ParsedCandidate("3 bottles of olive oil with one bottle half empty", 2.5, "bottles", "Olive Oil", "one bottle half empty", False, None, "Partial Quantity", "Oils & Liquids"),
+            ParsedCandidate("12 dozen eggs but 6 are cracked", 138, "eggs", "Eggs", None, True, "6 cracked eggs were excluded.", "Needs Review", "Dairy & Eggs"),
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": transcript, "area": "Walk-in", "save": False},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parser_source"] == "claude"
+    rows = {entry["item_name_clean"]: entry for entry in payload["entries"]}
+    assert rows["Tomatoes"]["quantity"] == 12.0
+    assert rows["2 Percent Milk"]["quantity"] == 3.0
+    assert rows["2 Percent Milk"]["unit"] == "gallons"
+    assert rows["Olive Oil"]["quantity"] == 2.5
+    assert rows["Eggs"]["quantity"] == 138.0
+    lowered = [name.lower() for name in rows]
+    assert not any("but" in name for name in lowered)
+    assert not any(name.startswith("are ") for name in lowered)
+
+
 def test_voice_parse_mocked_claude_complex_transcript_returns_clean_global_rows(monkeypatch) -> None:
     settings = EnabledClaudeSettings()
     monkeypatch.setattr(ai, "get_settings", lambda: settings)

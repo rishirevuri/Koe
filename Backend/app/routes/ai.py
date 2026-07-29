@@ -11,7 +11,7 @@ from app.auth import SupabaseUser, ensure_restaurant_id_matches, get_current_res
 from app.services.category_service import normalize_inventory_category
 from app.services.issue_service import create_issue
 from app.services.matching_service import MatchResult, match_inventory_item
-from app.services.external_ai_service import parse_inventory_with_claude
+from app.services.external_ai_service import parse_inventory_count_with_claude
 from app.services.par_estimate_service import estimate_par_status
 from app.services.upload_parse_service import parse_upload_text
 from app.services.voice_parse_service import ParsedCandidate, parse_voice_text
@@ -29,6 +29,11 @@ INVALID_FALLBACK_ITEM_NAMES = {
     "is half empty",
     "more on the bottom shelf",
 }
+
+# Backward-compatible test hook. The route uses this inventory-specific callable
+# for /ai/parse-voice; Restock Planner and sales normalization use separate
+# Claude methods in external_ai_service.py.
+parse_inventory_with_claude = parse_inventory_count_with_claude
 
 
 def _candidate_log_summary(
