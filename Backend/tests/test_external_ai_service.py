@@ -141,10 +141,28 @@ def test_normalize_claude_inventory_payload_drops_sentence_fragment_rows() -> No
     assert [item["item_name_clean"] for item in parsed["items"]] == ["Regular Tomatoes"]
 
 
-def test_normalize_claude_inventory_payload_rejects_fragment_heavy_response() -> None:
+def test_normalize_claude_inventory_payload_keeps_good_rows_from_fragment_heavy_response() -> None:
     payload = {
         "items": [
             {"item_name_clean": "Regular Tomatoes", "quantity": 16, "unit": "individual", "status": "Clean"},
+            {"item_name_clean": "regular tomatoes, but", "quantity": 22, "unit": "individual", "status": "Clean"},
+            {"item_name_clean": "are soft and starting to rot, so those should not be counted", "quantity": 6, "unit": "individual", "status": "Needs Review"},
+            {"item_name_clean": "cucumbers but", "quantity": 9, "unit": "individual", "status": "Clean"},
+            {"item_name_clean": "are already sliced and should still be usable tomorrow", "quantity": 2, "unit": "individual", "status": "Needs Review"},
+            {"item_name_clean": "lemons with", "quantity": 1, "unit": "case", "status": "Clean"},
+            {"item_name_clean": "in the case, but", "quantity": 24, "unit": "individual", "status": "Clean"},
+            {"item_name_clean": "lemons are bad", "quantity": 7, "unit": "individual", "status": "Needs Review"},
+        ]
+    }
+
+    parsed = normalize_claude_inventory_payload(payload, reject_fragment_heavy=True)
+
+    assert [item["item_name_clean"] for item in parsed["items"]] == ["Regular Tomatoes"]
+
+
+def test_normalize_claude_inventory_payload_rejects_fragment_heavy_response_with_no_valid_rows() -> None:
+    payload = {
+        "items": [
             {"item_name_clean": "regular tomatoes, but", "quantity": 22, "unit": "individual", "status": "Clean"},
             {"item_name_clean": "are soft and starting to rot, so those should not be counted", "quantity": 6, "unit": "individual", "status": "Needs Review"},
             {"item_name_clean": "cucumbers but", "quantity": 9, "unit": "individual", "status": "Clean"},

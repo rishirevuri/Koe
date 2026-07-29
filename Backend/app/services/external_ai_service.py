@@ -558,8 +558,11 @@ FRAGMENT_ONLY_NAMES = {
 FRAGMENT_NAME_PATTERNS = [
     re.compile(r"^(?:are|is|were|was|be|being)\b", re.IGNORECASE),
     re.compile(r"^(?:there\s+(?:are|is)|in\s+the\s+case)\b", re.IGNORECASE),
+    re.compile(r"[\.;]\s*there\s+(?:are|is)$", re.IGNORECASE),
     re.compile(r"\b(?:should\s+not\s+be\s+counted|do\s+not\s+count|not\s+counted)\b", re.IGNORECASE),
     re.compile(r"\b(?:soft|rotten|rot|starting\s+to\s+rot|bad|spoiled|unusable|cracked)\b.*\b(?:counted|usable)\b", re.IGNORECASE),
+    re.compile(r"\b(?:are|is)\s+(?:bad|spoiled|unusable|cracked|soft|rotten|brown)\b", re.IGNORECASE),
+    re.compile(r"\balready\s+sliced\s+and\s+should\b", re.IGNORECASE),
     re.compile(r",?\s+\b(?:but|and)\b$", re.IGNORECASE),
     re.compile(r"\b(?:with|but|and)\s*$", re.IGNORECASE),
 ]
@@ -764,6 +767,8 @@ def _normalize_claude_item(entry: dict) -> dict | None:
         return None
     if _looks_like_sentence_fragment(item_name_clean):
         return None
+    if item_name_raw == item_name_clean and _looks_like_sentence_fragment(item_name_raw):
+        return None
 
     raw_quantity = entry.get("quantity")
     quantity = _safe_float(raw_quantity)
@@ -839,13 +844,17 @@ def _summary_from_items(items: list[dict], summary: dict | None = None) -> dict:
     }
 
 
-def normalize_claude_inventory_payload(payload: dict, *, reject_fragment_heavy: bool = False) -> dict:
+def _inventory_payload_items(payload: dict) -> list:
     raw_items = payload.get("items")
     if raw_items is None:
         raw_items = payload.get("entries", [])
     if not isinstance(raw_items, list):
         raise ValueError("Claude response items must be a list")
+    return raw_items
 
+
+def normalize_claude_inventory_payload(payload: dict, *, reject_fragment_heavy: bool = False) -> dict:
+    raw_items = _inventory_payload_items(payload)
     fragment_rows = 0
     items = []
     for entry in raw_items:
@@ -866,7 +875,7 @@ def normalize_claude_inventory_payload(payload: dict, *, reject_fragment_heavy: 
             items.append(item)
 
     total_rows = len(raw_items)
-    if reject_fragment_heavy and total_rows and fragment_rows / total_rows > 0.20:
+    if reject_fragment_heavy and total_rows and not items and fragment_rows / total_rows > 0.20:
         raise ValueError(
             f"Claude inventory response contained too many sentence-fragment rows "
             f"({fragment_rows}/{total_rows})"
@@ -965,28 +974,60 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
             except ValueError:
                 pass
             raise RuntimeError(message)
-        return response.json()
+        response_payload = response.json()
+        content = response_payload.get("content") or []
+        content_types = [part.get("type") for part in content if isinstance(part, dict)]
+        _log_parse_debug(
+            settings,
+            "inventory_claude_raw_response_type",
+            model=settings.anthropic_model,
+            content_types=content_types,
+            used_tool_request=use_tool,
+        )
+        return response_payload
 
     def parse_and_normalize(payload: dict, *, attempt: str) -> dict:
         parsed = _extract_inventory_payload_from_claude_response(payload)
+        raw_items = _inventory_payload_items(parsed)
+        fragment_rows = 0
+        for entry in raw_items:
+            if isinstance(entry, dict):
+                raw_name = (
+                    entry.get("item_name_clean")
+                    or entry.get("clean_item_name")
+                    or entry.get("item_name")
+                    or entry.get("name")
+                    or entry.get("item_name_raw")
+                    or entry.get("raw_item_name")
+                )
+                if _looks_like_sentence_fragment(raw_name):
+                    fragment_rows += 1
         normalized = normalize_claude_inventory_payload(parsed, reject_fragment_heavy=True)
-        raw_items = parsed.get("items") if isinstance(parsed.get("items"), list) else parsed.get("entries", [])
+        if not normalized["items"]:
+            raise ValueError("Claude inventory response had zero valid item rows after validation")
         _log_parse_debug(
             settings,
-            "raw_claude_json",
+            "inventory_claude_rows_extracted_count",
             model=settings.anthropic_model,
             attempt=attempt,
             valid_json=True,
-            item_count=len(raw_items) if isinstance(raw_items, list) else 0,
+            item_count=len(raw_items),
             first_2_raw_items=raw_items[:2] if isinstance(raw_items, list) else [],
         )
         _log_parse_debug(
             settings,
-            "normalized_backend_entries",
+            "inventory_claude_rows_after_validation_count",
             model=settings.anthropic_model,
             attempt=attempt,
             item_count=len(normalized["items"]),
             first_2_normalized_entries=normalized["items"][:2],
+        )
+        _log_parse_debug(
+            settings,
+            "inventory_rows_dropped_as_fragments_count",
+            model=settings.anthropic_model,
+            attempt=attempt,
+            dropped_count=fragment_rows,
         )
         return normalized
 
@@ -1000,6 +1041,7 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
         '"in the case."\n\n'
         f"{transcript}"
     )
+    _log_parse_debug(settings, "inventory_claude_attempt_started", model=settings.anthropic_model, attempt="primary")
     primary_payload = post_claude(primary_message, system_prompt=INVENTORY_COUNT_SYSTEM_PROMPT, use_tool=True)
     primary_raw_text = "\n".join(
         part.get("text", "") for part in (primary_payload.get("content") or []) if isinstance(part, dict) and part.get("type") == "text"
@@ -1027,6 +1069,7 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
     )
     repair_error: Exception | None = None
     try:
+        _log_parse_debug(settings, "inventory_claude_attempt_started", model=settings.anthropic_model, attempt="repair")
         repair_payload = post_claude(repair_message, system_prompt=INVENTORY_COUNT_SYSTEM_PROMPT, use_tool=False, max_tokens=5000)
         return parse_and_normalize(repair_payload, attempt="repair")
     except Exception as error:
@@ -1048,6 +1091,7 @@ def parse_inventory_json_with_claude(transcript: str) -> dict:
     )
     strict_message = f"Inventory transcript:\n{transcript}"
     try:
+        _log_parse_debug(settings, "inventory_claude_attempt_started", model=settings.anthropic_model, attempt="strict_reparse")
         strict_payload = post_claude(strict_message, system_prompt=strict_prompt, use_tool=False, max_tokens=4000)
         return parse_and_normalize(strict_payload, attempt="strict_reparse")
     except Exception as strict_error:

@@ -102,11 +102,29 @@ def _is_invalid_fallback_candidate(candidate: ParsedCandidate) -> bool:
     return name in INVALID_FALLBACK_ITEM_NAMES or is_inventory_sentence_fragment(candidate.item_name)
 
 
-def _filter_deterministic_fallback_candidates(candidates: list[ParsedCandidate]) -> tuple[list[ParsedCandidate], int, bool]:
-    fragment_count = sum(1 for candidate in candidates if _is_invalid_fallback_candidate(candidate))
-    if candidates and fragment_count / len(candidates) > 0.20:
-        return [], fragment_count, True
-    return [candidate for candidate in candidates if not _is_invalid_fallback_candidate(candidate)], fragment_count, False
+def _filter_deterministic_fallback_candidates(candidates: list[ParsedCandidate]) -> tuple[list[ParsedCandidate], int, bool, bool]:
+    filtered = [candidate for candidate in candidates if not _is_invalid_fallback_candidate(candidate)]
+    fragment_count = len(candidates) - len(filtered)
+    no_usable_rows = bool(candidates) and not filtered
+    fragment_heavy = bool(candidates) and fragment_count / len(candidates) > 0.20
+    return filtered, fragment_count, no_usable_rows, fragment_heavy
+
+
+def _append_fallback_filter_reason(
+    fallback_reason: str | None,
+    *,
+    fragment_count: int,
+    fragment_heavy: bool,
+    no_usable_rows: bool,
+) -> str:
+    reason = fallback_reason or "deterministic_fallback_used"
+    if no_usable_rows:
+        return f"{reason};deterministic_fallback_used:fallback_fragment_heavy:no_valid_inventory_rows"
+    if fragment_heavy:
+        return f"{reason};deterministic_fallback_used:fallback_fragment_heavy:filtered_fragment_rows:{fragment_count}"
+    if fragment_count:
+        return f"{reason};deterministic_fallback_used:filtered_fragment_rows:{fragment_count}"
+    return reason
 
 
 def _status_for_candidate(candidate: ParsedCandidate, match: MatchResult, parser_source: str | None = None) -> str:
@@ -383,15 +401,21 @@ def parse_voice(
         candidates = parse_voice_text(payload.text)
         logger.info("parse_voice: deterministic parse finished candidate_count=%s", len(candidates))
         if fallback_reason:
-            candidates, fragment_count, fragment_heavy = _filter_deterministic_fallback_candidates(candidates)
-            if fragment_heavy:
-                fallback_reason = f"{fallback_reason};deterministic_fallback_used:fallback_fragment_heavy:{SAFE_FALLBACK_PARSE_FAILURE_MESSAGE}"
+            logger.info("parse_voice: inventory_fallback_used reason=%s", fallback_reason)
+            candidates, fragment_count, no_usable_fallback_rows, fragment_heavy = _filter_deterministic_fallback_candidates(candidates)
+            logger.info("parse_voice: inventory_rows_dropped_as_fragments_count=%s parser_source=deterministic_fallback", fragment_count)
+            if no_usable_fallback_rows or fragment_count:
+                fallback_reason = _append_fallback_filter_reason(
+                    fallback_reason,
+                    fragment_count=fragment_count,
+                    fragment_heavy=fragment_heavy,
+                    no_usable_rows=no_usable_fallback_rows,
+                )
+            if no_usable_fallback_rows:
                 logger.warning(
-                    "parse_voice: deterministic fallback blocked fragment-heavy output fragment_count=%s",
+                    "parse_voice: deterministic fallback blocked no-usable output fragment_count=%s",
                     fragment_count,
                 )
-            elif fragment_count:
-                fallback_reason = f"{fallback_reason};deterministic_fallback_used:filtered_fragment_rows:{fragment_count}"
             logger.warning(
                 "parse_voice: Claude parse skipped; using deterministic_fallback; fallback_reason=%s model=%s",
                 fallback_reason,
@@ -399,8 +423,11 @@ def parse_voice(
             )
         else:
             try:
-                logger.info("parse_voice: Claude parse started")
+                logger.info("parse_voice: inventory_claude_attempt_started")
                 claude_candidates = parse_inventory_with_claude(payload.text)
+                logger.info("parse_voice: inventory_claude_rows_after_validation_count=%s", len(claude_candidates))
+                if not claude_candidates:
+                    raise ClaudeInventoryParseError("claude_zero_valid_rows", "Claude returned zero valid inventory rows")
                 candidates = claude_candidates
                 parser_source = "claude"
                 fallback_reason = None
@@ -420,18 +447,32 @@ def parse_voice(
                     model,
                 )
                 logger.info("parse_voice: deterministic fallback parse started")
+                logger.info("parse_voice: inventory_fallback_used reason=%s", fallback_reason)
                 candidates = parse_voice_text(payload.text)
                 logger.info("parse_voice: deterministic fallback parse finished candidate_count=%s", len(candidates))
-                candidates, fragment_count, fragment_heavy = _filter_deterministic_fallback_candidates(candidates)
-                if fragment_heavy:
-                    fallback_reason = f"{fallback_reason};deterministic_fallback_used:fallback_fragment_heavy:{SAFE_FALLBACK_PARSE_FAILURE_MESSAGE}"
+                candidates, fragment_count, no_usable_fallback_rows, fragment_heavy = _filter_deterministic_fallback_candidates(candidates)
+                logger.info("parse_voice: inventory_rows_dropped_as_fragments_count=%s parser_source=deterministic_fallback", fragment_count)
+                if no_usable_fallback_rows or fragment_count:
+                    fallback_reason = _append_fallback_filter_reason(
+                        fallback_reason,
+                        fragment_count=fragment_count,
+                        fragment_heavy=fragment_heavy,
+                        no_usable_rows=no_usable_fallback_rows,
+                    )
+                if no_usable_fallback_rows:
                     logger.warning(
-                        "parse_voice: deterministic fallback blocked fragment-heavy output fragment_count=%s",
+                        "parse_voice: deterministic fallback blocked no-usable output fragment_count=%s",
                         fragment_count,
                     )
-                elif fragment_count:
-                    fallback_reason = f"{fallback_reason};deterministic_fallback_used:filtered_fragment_rows:{fragment_count}"
+        logger.info("parse_voice: inventory_final_rows_count=%s", len(candidates))
         logger.info("parse_voice: using parser_source=%s fallback_reason=%s", parser_source, fallback_reason or "")
+        if not candidates:
+            logger.warning(
+                "parse_voice: blocked parse with no valid inventory rows parser_source=%s fallback_reason=%s",
+                parser_source,
+                fallback_reason or "no_valid_inventory_rows",
+            )
+            raise HTTPException(status_code=400, detail=SAFE_FALLBACK_PARSE_FAILURE_MESSAGE)
 
         return _handle_candidates(
             db,

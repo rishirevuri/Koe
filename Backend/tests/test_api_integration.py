@@ -1109,6 +1109,69 @@ def test_voice_parse_mocked_claude_failure_returns_fallback_source(monkeypatch) 
     ]
 
 
+def test_voice_parse_normal_transcript_returns_rows_when_claude_skipped(monkeypatch) -> None:
+    monkeypatch.setattr(ai, "get_settings", lambda: DisabledIntegrationSettings())
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "We have 12 tomatoes, 3 gallons of milk, and 2 bottles of olive oil.",
+            "area": "Walk-in",
+            "save": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parser_source"] == "deterministic_fallback"
+    assert len(payload["entries"]) >= 3
+    rows = {entry["item_name_clean"].lower(): entry for entry in payload["entries"]}
+    assert rows["tomatoes"]["quantity"] == 12.0
+    assert rows["milk"]["quantity"] == 3.0
+    assert rows["milk"]["unit"] == "gallons"
+    assert rows["olive oil"]["quantity"] == 2.0
+    assert rows["olive oil"]["unit"] == "bottles"
+
+
+def test_voice_parse_claude_failure_keeps_good_mixed_fallback_rows(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        raise RuntimeError("mock Claude JSON failure")
+
+    def mock_parse_voice_text(text: str) -> list[ParsedCandidate]:
+        return [
+            ParsedCandidate("12 tomatoes", 12, "individual", "Tomatoes", None, False, None, "Clean", "Produce"),
+            ParsedCandidate("3 gallons of milk", 3, "gallons", "Milk", None, False, None, "Clean", "Dairy & Eggs"),
+            ParsedCandidate("6 are soft and starting to rot", 6, "individual", "are soft and starting to rot", None, False, None, "Clean", "Produce"),
+            ParsedCandidate("2 bottles of olive oil", 2, "bottles", "Olive Oil", None, False, None, "Clean", "Oils & Liquids"),
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    monkeypatch.setattr(ai, "parse_voice_text", mock_parse_voice_text)
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={
+            "count_session_id": count_id,
+            "text": "mock mixed fallback",
+            "area": "Walk-in",
+            "save": False,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["parser_source"] == "deterministic_fallback"
+    assert "filtered_fragment_rows:1" in payload["fallback_reason"]
+    names = [entry["item_name_clean"].lower() for entry in payload["entries"]]
+    assert names == ["tomatoes", "milk", "olive oil"]
+
+
 def test_voice_parse_all_claude_attempts_fail_blocks_fragment_heavy_fallback(monkeypatch) -> None:
     settings = EnabledClaudeSettings()
     monkeypatch.setattr(ai, "get_settings", lambda: settings)
@@ -1130,13 +1193,49 @@ def test_voice_parse_all_claude_attempts_fail_blocks_fragment_heavy_fallback(mon
         json={"count_session_id": count_id, "text": transcript, "area": "Walk-in", "save": False},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 400
     payload = response.json()
-    assert payload["parser_source"] == "deterministic_fallback"
-    assert "deterministic_fallback_used" in payload["fallback_reason"]
-    assert "fallback_fragment_heavy" in payload["fallback_reason"]
-    assert "Koe could not safely parse this count" in payload["fallback_reason"]
-    assert payload["entries"] == []
+    assert payload["detail"] == "Koe could not safely parse this count. Please try again or shorten the transcript."
+
+
+def test_voice_parse_no_valid_rows_does_not_save_empty_count(monkeypatch) -> None:
+    settings = EnabledClaudeSettings()
+    monkeypatch.setattr(ai, "get_settings", lambda: settings)
+
+    def mock_parse_inventory_with_claude(text: str) -> list[ParsedCandidate]:
+        raise RuntimeError("claude_json_parse_failed_primary")
+
+    def mock_parse_voice_text(text: str) -> list[ParsedCandidate]:
+        return [
+            ParsedCandidate(
+                "6 are soft and starting to rot",
+                6,
+                "individual",
+                "are soft and starting to rot",
+                None,
+                False,
+                None,
+                "Clean",
+                "Produce",
+            )
+        ]
+
+    monkeypatch.setattr(ai, "parse_inventory_with_claude", mock_parse_inventory_with_claude)
+    monkeypatch.setattr(ai, "parse_voice_text", mock_parse_voice_text)
+    count_id = client.post("/counts", json={"area": "Walk-in"}).json()["id"]
+
+    response = client.post(
+        "/ai/parse-voice",
+        json={"count_session_id": count_id, "text": "mock bad fallback", "area": "Walk-in", "save": True},
+    )
+
+    assert response.status_code == 400
+    with SessionLocal() as db:
+        count = db.get(CountSession, count_id)
+        assert count is not None
+        assert count.completed_at is None
+        assert count.status != "completed"
+        assert db.query(CountEntry).filter(CountEntry.count_session_id == count_id).count() == 0
 
 
 def test_voice_parse_claude_regression_spoiled_items_do_not_create_fragments(monkeypatch) -> None:
