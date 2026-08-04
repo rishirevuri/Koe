@@ -244,6 +244,9 @@ class RestockPlanSummary(BaseModel):
     needs_review: int
     safety_buffer_percent: int
     history_counts_used: int = 0
+    history_selection: Literal["auto", "manual", "none"] = "none"
+    history_quality: Literal["none", "basic", "strong", "weak"] = "none"
+    history_interval_notes: list[dict] = Field(default_factory=list)
     forecast_mode: Literal["claude_adaptive", "claude_recipe_only", "deterministic_adaptive", "deterministic_recipe_only"] = "deterministic_recipe_only"
     planner_source: Literal["claude", "deterministic_fallback"] = "deterministic_fallback"
     fallback_reason: str | None = None

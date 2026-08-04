@@ -353,6 +353,9 @@ def test_restock_plan_endpoint_generates_purchase_plan() -> None:
         "needs_review": 1,
         "safety_buffer_percent": 10,
         "history_counts_used": 0,
+        "history_selection": "none",
+        "history_quality": "none",
+        "history_interval_notes": [],
         "forecast_mode": "deterministic_recipe_only",
         "planner_source": "deterministic_fallback",
         "fallback_reason": "external_ai_disabled",
@@ -570,11 +573,221 @@ def test_restock_plan_endpoint_accepts_previous_count_ids_for_adaptive_plan() ->
     assert payload["summary"]["planner_source"] == "deterministic_fallback"
     assert payload["summary"]["fallback_reason"] == "external_ai_disabled"
     assert payload["summary"]["history_counts_used"] == 1
+    assert payload["summary"]["history_selection"] == "manual"
     assert row["usage_multiplier"] == 1.2
     assert row["adjusted_need"] == 30
     assert row["suggested_purchase"] == 23
     assert row["status"] == "Ready"
     assert payload["learning_notes"]
+
+
+def test_restock_plan_endpoint_auto_selects_ideal_previous_count() -> None:
+    db = SessionLocal()
+    try:
+        restaurant = db.query(Restaurant).filter(Restaurant.name == "Smoking Pig BBQ").one()
+        previous = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc) - timedelta(days=7),
+            restaurant=restaurant,
+        )
+        current = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            restaurant=restaurant,
+        )
+        db.add_all([previous, current])
+        db.flush()
+        db.add_all(
+            [
+                CountEntry(
+                    count_session_id=previous.id,
+                    item_name_raw="chicken breast",
+                    item_name="Chicken Breast",
+                    normalized_item_name="chicken breast",
+                    category="Proteins",
+                    quantity=130,
+                    unit="pounds",
+                    status="Clean",
+                ),
+                CountEntry(
+                    count_session_id=current.id,
+                    item_name_raw="chicken breast",
+                    item_name="Chicken Breast",
+                    normalized_item_name="chicken breast",
+                    category="Proteins",
+                    quantity=10,
+                    unit="pounds",
+                    status="Clean",
+                ),
+            ]
+        )
+        db.commit()
+        current_id = current.id
+        previous_id = previous.id
+    finally:
+        db.close()
+
+    response = client.post(
+        "/restock/plan",
+        data={"current_count_id": str(current_id)},
+        files={
+            "sales_file": ("sales.csv", b"item_name,quantity_sold\nChicken Sandwich,400\n", "text/csv"),
+            "recipe_file": (
+                "recipes.csv",
+                b"menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds\n",
+                "text/csv",
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["forecast_mode"] == "deterministic_adaptive"
+    assert payload["summary"]["history_selection"] == "auto"
+    assert payload["summary"]["history_counts_used"] == 1
+    assert payload["summary"]["history_quality"] == "basic"
+    assert payload["summary"]["history_interval_notes"][0]["previous_count_id"] == previous_id
+    assert payload["summary"]["history_interval_notes"][0]["quality"] == "ideal"
+
+
+def test_restock_plan_endpoint_auto_selects_two_best_previous_counts() -> None:
+    db = SessionLocal()
+    try:
+        restaurant = db.query(Restaurant).filter(Restaurant.name == "Smoking Pig BBQ").one()
+        current = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            restaurant=restaurant,
+        )
+        one_week = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc) - timedelta(days=7),
+            restaurant=restaurant,
+        )
+        two_weeks = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc) - timedelta(days=14),
+            restaurant=restaurant,
+        )
+        yesterday = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc) - timedelta(days=1),
+            restaurant=restaurant,
+        )
+        db.add_all([current, one_week, two_weeks, yesterday])
+        db.flush()
+        for count, quantity in [(current, 10), (one_week, 130), (two_weeks, 230), (yesterday, 20)]:
+            db.add(
+                CountEntry(
+                    count_session_id=count.id,
+                    item_name_raw="chicken breast",
+                    item_name="Chicken Breast",
+                    normalized_item_name="chicken breast",
+                    category="Proteins",
+                    quantity=quantity,
+                    unit="pounds",
+                    status="Clean",
+                )
+            )
+        db.commit()
+        current_id = current.id
+        selected_ids = {one_week.id, two_weeks.id}
+    finally:
+        db.close()
+
+    response = client.post(
+        "/restock/plan",
+        data={"current_count_id": str(current_id)},
+        files={
+            "sales_file": ("sales.csv", b"item_name,quantity_sold\nChicken Sandwich,400\n", "text/csv"),
+            "recipe_file": (
+                "recipes.csv",
+                b"menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds\n",
+                "text/csv",
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["history_selection"] == "auto"
+    assert payload["summary"]["history_counts_used"] == 2
+    assert payload["summary"]["history_quality"] == "strong"
+    assert {note["previous_count_id"] for note in payload["summary"]["history_interval_notes"]} == selected_ids
+
+
+def test_restock_plan_endpoint_auto_selects_weak_previous_count_when_only_option() -> None:
+    db = SessionLocal()
+    try:
+        restaurant = db.query(Restaurant).filter(Restaurant.name == "Smoking Pig BBQ").one()
+        current = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc),
+            restaurant=restaurant,
+        )
+        yesterday = CountSession(
+            restaurant_id=restaurant.id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc) - timedelta(days=1),
+            restaurant=restaurant,
+        )
+        db.add_all([current, yesterday])
+        db.flush()
+        db.add_all(
+            [
+                CountEntry(
+                    count_session_id=current.id,
+                    item_name_raw="chicken breast",
+                    item_name="Chicken Breast",
+                    normalized_item_name="chicken breast",
+                    category="Proteins",
+                    quantity=10,
+                    unit="pounds",
+                    status="Clean",
+                ),
+                CountEntry(
+                    count_session_id=yesterday.id,
+                    item_name_raw="chicken breast",
+                    item_name="Chicken Breast",
+                    normalized_item_name="chicken breast",
+                    category="Proteins",
+                    quantity=130,
+                    unit="pounds",
+                    status="Clean",
+                ),
+            ]
+        )
+        db.commit()
+        current_id = current.id
+    finally:
+        db.close()
+
+    response = client.post(
+        "/restock/plan",
+        data={"current_count_id": str(current_id)},
+        files={
+            "sales_file": ("sales.csv", b"item_name,quantity_sold\nChicken Sandwich,400\n", "text/csv"),
+            "recipe_file": (
+                "recipes.csv",
+                b"menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds\n",
+                "text/csv",
+            ),
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["history_selection"] == "auto"
+    assert payload["summary"]["history_counts_used"] == 1
+    assert payload["summary"]["history_quality"] == "weak"
+    assert payload["summary"]["history_interval_notes"][0]["quality"] == "weak_short"
 
 
 def test_restock_plan_endpoint_rejects_missing_sales_columns() -> None:

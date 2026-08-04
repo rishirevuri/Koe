@@ -2,6 +2,7 @@ from app.services import external_ai_service
 from app.services.external_ai_service import (
     SYSTEM_PROMPT,
     _coerce_candidate,
+    generate_restock_plan_with_claude,
     normalize_claude_inventory_payload,
     parse_inventory_count_with_claude,
     parse_inventory_json_with_claude,
@@ -408,6 +409,42 @@ def test_parse_inventory_json_with_claude_accepts_raw_array(monkeypatch) -> None
     parsed = parse_inventory_json_with_claude("I have tomatoes.")
 
     assert parsed["items"][0]["quantity"] == 18
+
+
+def test_generate_restock_plan_with_claude_extracts_markdown_json(monkeypatch) -> None:
+    payload = {
+        "summary": {"forecast_mode": "claude_recipe_only", "overall_note": "Review before ordering."},
+        "purchase_plan": [
+            {
+                "ingredient": "Chicken Breast",
+                "suggested_purchase": 30,
+                "unit": "pounds",
+                "action": "buy",
+                "status": "Ready",
+                "confidence": "High",
+                "projected_need": 25,
+                "adjusted_need": 33,
+                "current_stock": 10,
+                "usage_signal": "high",
+                "history_signal": "limited_history",
+                "risk_signal": "stockout_risk",
+                "reason": "Current stock is low against menu demand.",
+            }
+        ],
+        "learning_notes": [],
+        "review_warnings": [],
+    }
+
+    def mock_post(url, headers, json, timeout):
+        return MockClaudeTextResponse(f"```json\n{external_ai_service.json.dumps(payload)}\n```")
+
+    monkeypatch.setattr(external_ai_service, "get_settings", lambda: EnabledClaudeSettings())
+    monkeypatch.setattr(external_ai_service.httpx, "post", mock_post)
+
+    parsed = generate_restock_plan_with_claude({"ingredients": [{"ingredient_name": "Chicken Breast"}]})
+
+    assert parsed["purchase_plan"][0]["ingredient"] == "Chicken Breast"
+    assert parsed["summary"]["forecast_mode"] == "claude_recipe_only"
 
 
 def test_parse_inventory_json_with_claude_repairs_malformed_primary(monkeypatch) -> None:

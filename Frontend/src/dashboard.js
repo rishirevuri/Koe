@@ -441,6 +441,12 @@ function formatDuration(seconds) {
   return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
 }
 
+function formatDownloadDate(value = new Date()) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 10);
+  return date.toISOString().slice(0, 10);
+}
+
 function formatQty(value) {
   if (value === null || value === undefined || value === "") return "—";
   return Number.isInteger(value) ? String(value) : String(value);
@@ -746,13 +752,59 @@ function getRestockSelectedCount() {
 
 function getRestockPreviousOptions() {
   const selected = getRestockSelectedCount();
-  return getRestockAvailableCounts().filter((session) => Number(session.id) !== Number(selected?.id));
+  const selectedTime = new Date(getCountTimestamp(selected) || 0).getTime();
+  return getRestockAvailableCounts().filter((session) => {
+    if (Number(session.id) === Number(selected?.id)) return false;
+    const sessionTime = new Date(getCountTimestamp(session) || 0).getTime();
+    return selectedTime && sessionTime && sessionTime < selectedTime;
+  });
+}
+
+function getRestockHistoryIntervalDays(session, selected = getRestockSelectedCount()) {
+  const selectedTime = new Date(getCountTimestamp(selected) || 0).getTime();
+  const sessionTime = new Date(getCountTimestamp(session) || 0).getTime();
+  if (!selectedTime || !sessionTime || Number.isNaN(selectedTime) || Number.isNaN(sessionTime)) return null;
+  return Math.max(0, Math.round((selectedTime - sessionTime) / 86400000));
+}
+
+function classifyRestockHistoryInterval(daysBetween) {
+  if (daysBetween === null || daysBetween === undefined) return "unknown";
+  if (daysBetween >= 5 && daysBetween <= 10) return "ideal";
+  if (daysBetween >= 3 && daysBetween <= 14) return "usable";
+  if (daysBetween < 3) return "weak_short";
+  return "weak_long";
+}
+
+function scoreRestockHistoryOption(session, targetDays, selected = getRestockSelectedCount()) {
+  const daysBetween = getRestockHistoryIntervalDays(session, selected);
+  const quality = classifyRestockHistoryInterval(daysBetween);
+  const qualityRank = { ideal: 0, usable: 1, weak_short: 2, weak_long: 2, unknown: 3 }[quality] ?? 3;
+  const distance = daysBetween === null ? 9999 : Math.abs(daysBetween - targetDays);
+  return [qualityRank, distance, -Number(session.id || 0)];
+}
+
+function compareRestockHistoryScore(left, right) {
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) return left[index] - right[index];
+  }
+  return 0;
 }
 
 function getDefaultRestockPreviousIds() {
-  return getRestockPreviousOptions()
-    .slice(0, 2)
-    .map((session) => Number(session.id));
+  const selected = getRestockSelectedCount();
+  let remaining = getRestockPreviousOptions();
+  const chosen = [];
+  [7, 14].forEach((targetDays) => {
+    if (!remaining.length || chosen.length >= 2) return;
+    const best = [...remaining].sort((left, right) =>
+      compareRestockHistoryScore(scoreRestockHistoryOption(left, targetDays, selected), scoreRestockHistoryOption(right, targetDays, selected)),
+    )[0];
+    if (best) {
+      chosen.push(best);
+      remaining = remaining.filter((session) => Number(session.id) !== Number(best.id));
+    }
+  });
+  return chosen.map((session) => Number(session.id));
 }
 
 function normalizeRestockPreviousSelection({ forceDefault = false } = {}) {
@@ -1376,7 +1428,7 @@ async function submitRestockPlan() {
       salesFile: state.restockSalesFile,
       recipeFile: state.restockRecipeFile,
       countId: selectedCount.id,
-      previousCountIds: state.restockPreviousCountIds,
+      previousCountIds: state.restockPreviousCountsTouched ? state.restockPreviousCountIds : [],
     });
     await applyRestockSalesNormalization(plan.sales_normalization);
     state.restockPlan = plan;
@@ -1747,6 +1799,7 @@ function bindRestockPlanner() {
 
   document.querySelector("#restock-continue")?.addEventListener("click", continueRestockPlanner);
   document.querySelector("#restock-generate")?.addEventListener("click", submitRestockPlan);
+  document.querySelector("#restock-download-report")?.addEventListener("click", downloadRestockReport);
 }
 
 function renderDeleteCountDialog() {
@@ -2665,6 +2718,7 @@ function renderRestockInventorySelector() {
 function renderRestockHistorySelector() {
   const options = getRestockPreviousOptions();
   const selectedIds = new Set(state.restockPreviousCountIds.map(Number));
+  const selectionNote = getRestockHistorySelectionNote(options, selectedIds);
   if (state.countsLoading && !options.length) {
     return `
       <article class="restock-card restock-history-card">
@@ -2679,10 +2733,10 @@ function renderRestockHistorySelector() {
   return `
     <article class="restock-card restock-history-card">
       <div class="restock-card-heading">
-        <span>4</span>
+          <span>4</span>
         <div>
           <h3>Count History</h3>
-          <p>Choose past counts so Koe can learn actual usage between inventory checks.</p>
+          <p>For adaptive forecasting, select at least one previous count from about a week ago. Two or three past counts make recommendations stronger.</p>
         </div>
       </div>
       ${
@@ -2705,12 +2759,129 @@ function renderRestockHistorySelector() {
                 .join("")}
             </div>
             <p class="restock-history-note">
-              ${selectedIds.size ? `${escapeHtml(selectedIds.size)} history count${selectedIds.size === 1 ? "" : "s"} selected.` : "Koe can run a recipe-only forecast, but count history makes recommendations smarter."}
+              ${escapeHtml(selectionNote)}
             </p>`
-          : `<div class="restock-empty-state">Need at least one past count to learn usage history. Koe can still run from sales and recipes only.</div>`
+          : `<div class="restock-empty-state">No previous count found. Koe can still run a recipe-only forecast, but adaptive forecasting needs at least one earlier count.</div>`
       }
     </article>
   `;
+}
+
+function getRestockHistorySelectionNote(options, selectedIds) {
+  if (!options.length) {
+    return "No previous count found. Koe can still run a recipe-only forecast, but adaptive forecasting needs at least one earlier count.";
+  }
+  if (!selectedIds.size) {
+    return "Koe can run a recipe-only forecast, but count history makes recommendations smarter.";
+  }
+  const selected = options.find((session) => selectedIds.has(Number(session.id))) || null;
+  const quality = classifyRestockHistoryInterval(getRestockHistoryIntervalDays(selected));
+  if (!state.restockPreviousCountsTouched) {
+    if (quality === "ideal") return "Koe selected the best previous count automatically. Good weekly interval for adaptive forecasting.";
+    if (quality === "usable") return "Koe selected the best previous count automatically. This interval can support adaptive forecasting.";
+    return "Koe selected the best previous count automatically. This count interval is not ideal, so history confidence is limited.";
+  }
+  if (quality === "ideal") return "Good weekly interval for adaptive forecasting.";
+  if (quality === "usable") return `${selectedIds.size} history count${selectedIds.size === 1 ? "" : "s"} selected.`;
+  return "This count interval is not ideal, so history confidence is limited.";
+}
+
+function restockReportLine(label, value) {
+  return `${label}: ${value === null || value === undefined || value === "" ? "Unknown" : value}`;
+}
+
+function titleCase(value) {
+  return String(value || "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+}
+
+function restockReportQuantity(value, unit, fallback = "Unknown") {
+  if (value === null || value === undefined || value === "") return fallback;
+  return `${formatPlanQuantity(value)} ${unit || ""}`.trim();
+}
+
+function restockReportSuggestion(row) {
+  if (String(row.action || "").toLowerCase() === "review") return "Review";
+  if (row.suggested_purchase === null || row.suggested_purchase === undefined || row.suggested_purchase === "") return "Review";
+  if (String(row.action || "").toLowerCase() === "hold" && Number(row.suggested_purchase) === 0) return "Hold";
+  return restockReportQuantity(row.suggested_purchase, row.unit, "Review");
+}
+
+function buildRestockReportText(plan) {
+  const summary = plan?.summary || {};
+  const rows = Array.isArray(plan?.purchase_plan) ? plan.purchase_plan : [];
+  const notes = Array.isArray(plan?.learning_notes) ? plan.learning_notes : [];
+  const warnings = Array.isArray(plan?.review_warnings) ? plan.review_warnings : [];
+  const generated = new Intl.DateTimeFormat(undefined, {
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date());
+  const divider = "------------------------------------------------------------";
+  const lines = [
+    "KOE RESTOCK PLANNER",
+    "Manager-Reviewed Draft Purchase Plan",
+    "",
+    restockReportLine("Restaurant", state.restaurantName || "Restaurant"),
+    restockReportLine("Generated", generated),
+    restockReportLine("Forecast Mode", formatForecastMode(summary.forecast_mode)),
+    restockReportLine("Planner Source", formatPlannerSource(summary.planner_source)),
+    restockReportLine("History Counts Used", summary.history_counts_used ?? 0),
+    restockReportLine("History Quality", formatHistoryQuality(summary.history_quality)),
+  ];
+  if (summary.planner_source === "deterministic_fallback" && summary.fallback_reason) {
+    lines.push(restockReportLine("Fallback Reason", summary.fallback_reason));
+  }
+  lines.push("", divider, "SUMMARY", divider);
+  lines.push(restockReportLine("Items Forecasted", summary.items_forecasted ?? rows.length));
+  lines.push(restockReportLine("Suggested Purchases", summary.suggested_purchases ?? 0));
+  lines.push(restockReportLine("Needs Review", summary.needs_review ?? 0));
+  lines.push("", divider, "SUGGESTED PURCHASES", divider, "");
+  if (rows.length) {
+    rows.forEach((row, index) => {
+      lines.push(`${index + 1}. ${row.ingredient || "Unnamed ingredient"}`);
+      lines.push(restockReportLine("Suggested Purchase", restockReportSuggestion(row)));
+      lines.push(restockReportLine("Action", titleCase(row.action || "review")));
+      lines.push(restockReportLine("Status", row.status || "Needs Review"));
+      lines.push(restockReportLine("Confidence", row.confidence || "Low"));
+      lines.push(restockReportLine("Projected", restockReportQuantity(row.projected_need, row.unit)));
+      lines.push(restockReportLine("Adjusted", restockReportQuantity(row.adjusted_need, row.unit)));
+      lines.push(restockReportLine("Current Stock", restockReportQuantity(row.current_stock, row.current_stock_unit || row.unit)));
+      lines.push("", "Reason:", row.reason || "Review this suggestion before ordering.", "");
+    });
+  } else {
+    lines.push("No purchase suggestions were generated.", "");
+  }
+  if (notes.length) {
+    lines.push(divider, "LEARNING NOTES", divider);
+    notes.forEach((note) => lines.push(`- ${note.ingredient || "Inventory"}: ${note.note || ""}`));
+    lines.push("");
+  }
+  if (warnings.length) {
+    lines.push(divider, "REVIEW WARNINGS", divider);
+    warnings.forEach((warning) => lines.push(`- ${warning.ingredient || "Inventory"}: ${warning.warning || ""}`));
+    lines.push("");
+  }
+  lines.push(divider, "NOTE", divider);
+  lines.push("This is a manager-reviewed purchase plan. Koe does not place vendor orders automatically. Review all quantities before purchasing.");
+  return `${lines.join("\n")}\n`;
+}
+
+function downloadRestockReport() {
+  if (!state.restockPlan) return;
+  const text = buildRestockReportText(state.restockPlan);
+  const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `koe-restock-plan-${formatDownloadDate()}.txt`;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
 }
 
 function renderRestockOutputPanel() {
@@ -2759,6 +2930,8 @@ function renderRestockPlanResults(plan) {
   const summary = plan.summary || {};
   const rows = plan.purchase_plan || [];
   const notes = plan.learning_notes || [];
+  const historyNotes = Array.isArray(summary.history_interval_notes) ? summary.history_interval_notes : [];
+  const historyQuality = summary.history_quality || "none";
   const reviewWarnings = plan.review_warnings?.length
     ? plan.review_warnings
     : rows
@@ -2769,9 +2942,11 @@ function renderRestockPlanResults(plan) {
         }));
   const plannerSource = summary.planner_source || "deterministic_fallback";
   const isClaude = plannerSource === "claude";
+  const fallbackReason = summary.fallback_reason || "";
   const sourceCopy = isClaude
     ? "Claude reviewed sales, menu data, current stock, and count history."
-    : "Fallback forecast used because Claude was unavailable. Review recommendations carefully.";
+    : `Fallback forecast used because Claude was unavailable. Review recommendations carefully.${fallbackReason ? ` Reason: ${fallbackReason}` : ""}`;
+  const historyCopy = getRestockHistorySummaryCopy(summary);
   return `
     <section class="restock-output-card restock-output-card--results">
       <div class="restock-results-header">
@@ -2779,11 +2954,18 @@ function renderRestockPlanResults(plan) {
           <span class="restock-output-kicker">Draft Purchase Plan</span>
           <h3>Manager-reviewed recommendations.</h3>
         </div>
-        <small>${escapeHtml(summary.safety_buffer_percent ?? 10)}% safety buffer</small>
+        <div class="restock-results-actions">
+          <small>${escapeHtml(summary.safety_buffer_percent ?? 10)}% safety buffer</small>
+          <button class="restock-download-button" id="restock-download-report" type="button">Download Report</button>
+        </div>
       </div>
       <div class="restock-source-note ${isClaude ? "is-claude" : "is-fallback"}">
         <strong>${escapeHtml(isClaude ? "Claude decision layer" : "Fallback forecast used")}</strong>
         <span>${escapeHtml(sourceCopy)}</span>
+      </div>
+      <div class="restock-source-note restock-source-note--history">
+        <strong>${escapeHtml(formatHistoryQuality(historyQuality))}</strong>
+        <span>${escapeHtml(historyCopy)}</span>
       </div>
       <div class="restock-report-section">
         <span class="restock-section-label">Forecast Summary</span>
@@ -2791,11 +2973,23 @@ function renderRestockPlanResults(plan) {
           <div><span>Forecast Mode</span><strong>${escapeHtml(formatForecastMode(summary.forecast_mode))}</strong></div>
           <div><span>Planner Source</span><strong>${escapeHtml(formatPlannerSource(plannerSource))}</strong></div>
           <div><span>History Counts Used</span><strong>${escapeHtml(summary.history_counts_used ?? 0)}</strong></div>
+          <div><span>History Quality</span><strong>${escapeHtml(formatHistoryQuality(historyQuality))}</strong></div>
           <div><span>Suggested Purchases</span><strong>${escapeHtml(summary.suggested_purchases ?? 0)}</strong></div>
           <div><span>Needs Review</span><strong>${escapeHtml(summary.needs_review ?? 0)}</strong></div>
           <div><span>Items Forecasted</span><strong>${escapeHtml(summary.items_forecasted ?? rows.length)}</strong></div>
         </div>
       </div>
+      ${
+        historyNotes.length
+          ? `<div class="restock-report-section restock-history-notes">
+              <span class="restock-section-label">History Intervals</span>
+              ${historyNotes
+                .slice(0, 3)
+                .map((note) => `<p><strong>${escapeHtml(formatHistoryIntervalQuality(note.quality))}</strong><span>${escapeHtml(note.note || "")}</span></p>`)
+                .join("")}
+            </div>`
+          : ""
+      }
       <div class="restock-report-section">
         <div class="restock-section-heading">
           <span class="restock-section-label">Suggested Purchase List</span>
@@ -2832,10 +3026,10 @@ function renderRestockPlanResults(plan) {
 
 function formatForecastMode(value) {
   const normalized = String(value || "").toLowerCase();
-  if (normalized === "claude_adaptive") return "Claude Adaptive";
-  if (normalized === "claude_recipe_only") return "Claude Recipe Only";
-  if (normalized === "deterministic_adaptive") return "Fallback Adaptive";
-  if (normalized === "deterministic_recipe_only") return "Fallback Recipe Only";
+  if (normalized === "claude_adaptive") return "Adaptive";
+  if (normalized === "claude_recipe_only") return "Recipe Only";
+  if (normalized === "deterministic_adaptive") return "Basic Adaptive";
+  if (normalized === "deterministic_recipe_only") return "Recipe Only";
   if (normalized === "adaptive") return "Adaptive";
   if (normalized === "limited_history") return "Limited History";
   return "Recipe Only";
@@ -2843,6 +3037,32 @@ function formatForecastMode(value) {
 
 function formatPlannerSource(value) {
   return String(value || "").toLowerCase() === "claude" ? "Claude" : "Fallback";
+}
+
+function formatHistoryQuality(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "strong") return "Strong History";
+  if (normalized === "basic") return "Basic History";
+  if (normalized === "weak") return "Weak History";
+  return "Limited History";
+}
+
+function formatHistoryIntervalQuality(value) {
+  const normalized = String(value || "").toLowerCase();
+  if (normalized === "ideal") return "Good weekly interval";
+  if (normalized === "usable") return "Usable interval";
+  if (normalized === "weak_short") return "Too recent";
+  if (normalized === "weak_long") return "Long interval";
+  return "Unknown interval";
+}
+
+function getRestockHistorySummaryCopy(summary) {
+  const quality = String(summary.history_quality || "none").toLowerCase();
+  const count = Number(summary.history_counts_used || 0);
+  if (quality === "strong") return "Adaptive forecast using multiple count intervals.";
+  if (quality === "basic" || count === 1) return "Basic adaptive forecast using one previous count interval.";
+  if (quality === "weak") return "Count history was selected, but timing or stock movement limits confidence.";
+  return "This plan uses sales, menu data, and current stock. Add a previous count from about a week ago for adaptive forecasting.";
 }
 
 function restockQuantityWithUnit(value, unit, fallback = "Unknown") {

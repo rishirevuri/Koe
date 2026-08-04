@@ -6918,6 +6918,15 @@ button:disabled,
   justify-content: space-between;
 }
 
+.restock-results-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .restock-results-header small {
   flex: 0 0 auto;
   padding: 8px 10px;
@@ -6927,6 +6936,31 @@ button:disabled,
   background: rgba(255, 240, 230, 0.9);
   border: 1px solid rgba(200, 107, 50, 0.16);
   border-radius: 999px;
+}
+
+.restock-download-button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: #111;
+  font-size: 12px;
+  font-weight: 720;
+  letter-spacing: -0.01em;
+  background: rgba(255, 255, 255, 0.82);
+  border: 1px solid rgba(17, 17, 17, 0.12);
+  border-radius: 999px;
+  cursor: pointer;
+  transition:
+    transform 180ms ease,
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.restock-download-button:hover,
+.restock-download-button:focus-visible {
+  border-color: rgba(200, 107, 50, 0.32);
+  box-shadow: 0 10px 22px rgba(31, 27, 22, 0.08);
+  transform: translateY(-1px);
+  outline: none;
 }
 
 .restock-source-note {
@@ -6966,6 +7000,11 @@ button:disabled,
 .restock-source-note.is-fallback {
   background: rgba(255, 246, 237, 0.72);
   border-color: rgba(200, 107, 50, 0.22);
+}
+
+.restock-source-note--history {
+  background: rgba(250, 247, 241, 0.78);
+  border-color: rgba(17, 17, 17, 0.08);
 }
 
 .restock-summary-cards {
@@ -7933,6 +7972,7 @@ button:disabled,
   letter-spacing: -0.025em;
 }
 
+.restock-history-notes,
 .restock-learning-notes,
 .restock-review-warnings {
   padding: 14px;
@@ -7941,6 +7981,7 @@ button:disabled,
   border-radius: 18px;
 }
 
+.restock-history-notes p,
 .restock-learning-notes p,
 .restock-review-warnings p {
   display: grid;
@@ -7952,6 +7993,7 @@ button:disabled,
   line-height: 1.45;
 }
 
+.restock-history-notes strong,
 .restock-learning-notes strong,
 .restock-review-warnings strong {
   color: #111;
@@ -9101,6 +9143,10 @@ button:disabled,
     display: grid;
   }
 
+  .restock-results-actions {
+    justify-content: flex-start;
+  }
+
   .restock-file-state button {
     justify-self: start;
   }
@@ -9180,6 +9226,7 @@ button:disabled,
     gap: 3px;
   }
 
+  .restock-history-notes p,
   .restock-learning-notes p,
   .restock-review-warnings p {
     grid-template-columns: 1fr;

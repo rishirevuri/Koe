@@ -5,7 +5,7 @@ from app.auth import ensure_count_belongs_to_restaurant, get_current_restaurant
 from app.database import get_db
 from app.models import CountSession, Restaurant
 from app.schemas import RestockPlanResponse
-from app.services.restock_planner_service import RestockPlannerError, build_restock_plan
+from app.services.restock_planner_service import RestockPlannerError, build_restock_plan, select_previous_counts_for_restock
 
 
 router = APIRouter(prefix="/restock", tags=["restock"])
@@ -38,7 +38,9 @@ async def create_restock_plan(
 
     previous_counts: list[CountSession] = []
     seen_previous_ids: set[int] = set()
-    for previous_count_id in previous_count_ids or []:
+    manual_previous_ids = [previous_count_id for previous_count_id in previous_count_ids or [] if previous_count_id]
+    history_selection = "manual" if manual_previous_ids else "none"
+    for previous_count_id in manual_previous_ids:
         if previous_count_id == selected_count_id or previous_count_id in seen_previous_ids:
             continue
         previous_count = db.get(CountSession, previous_count_id)
@@ -48,12 +50,28 @@ async def create_restock_plan(
         previous_counts.append(previous_count)
         seen_previous_ids.add(previous_count_id)
 
+    if not manual_previous_ids:
+        previous_counts = select_previous_counts_for_restock(
+            db,
+            restaurant_id=current_restaurant.id,
+            current_count=count,
+            limit=2,
+        )
+        history_selection = "auto" if previous_counts else "none"
+
     _validate_csv_upload(sales_file, "Sales data")
     _validate_csv_upload(recipe_file, "Recipe data")
 
     try:
         sales_bytes = await sales_file.read()
         recipe_bytes = await recipe_file.read()
-        return build_restock_plan(count, sales_bytes, recipe_bytes, previous_counts, use_claude=True)
+        return build_restock_plan(
+            count,
+            sales_bytes,
+            recipe_bytes,
+            previous_counts,
+            use_claude=True,
+            history_selection=history_selection,
+        )
     except RestockPlannerError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

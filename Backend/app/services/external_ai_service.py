@@ -323,6 +323,11 @@ Rules:
 - If stock is unknown, mark Stock Unknown.
 - If current stock is qualitative or unclear, mark Needs Review.
 - If previous counts are missing or unusable, use recipe/menu evidence but mark Limited History.
+- Do not overstate adaptive confidence when previous count history is missing.
+- Use lower confidence when count intervals are too short, too long, unknown, or inconsistent.
+- Prefer stronger confidence only when there are multiple weekly-ish usable count intervals.
+- Explain when a recommendation is recipe-only versus history-adjusted.
+- Use the provided history_selection and history_interval_notes to describe whether history was auto-selected, manually selected, or unavailable.
 - Consider perishability, waste risk, and stockout risk.
 - Consider whether the item is a direct recipe ingredient or a supply item.
 - Supplies and packaging may not map perfectly to menu-item sales; use count history and stockout risk when available.
@@ -1133,6 +1138,9 @@ def generate_restock_plan_with_claude(evidence_packet: dict) -> dict:
     if not settings.is_claude_configured:
         raise RuntimeError("Claude is not configured")
 
+    ingredient_count = len(evidence_packet.get("ingredients", [])) if isinstance(evidence_packet, dict) else 0
+    logger.info("restock_claude_attempt_started ingredient_count=%s", ingredient_count)
+    logger.info("restock_claude_model model=%s", settings.anthropic_model)
     response = httpx.post(
         "https://api.anthropic.com/v1/messages",
         headers={
@@ -1171,14 +1179,21 @@ def generate_restock_plan_with_claude(evidence_packet: dict) -> dict:
 
     payload = response.json()
     content = payload.get("content") or []
+    content_types = [part.get("type") for part in content if isinstance(part, dict)]
+    logger.info("restock_claude_response_received content_types=%s", content_types)
     text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
     raw_text = "\n".join(text_parts)
     parsed = _extract_json_object(raw_text)
+    logger.info(
+        "restock_claude_json_parsed ingredient_count=%s plan_count=%s",
+        ingredient_count,
+        len(parsed.get("purchase_plan", [])) if isinstance(parsed.get("purchase_plan"), list) else 0,
+    )
     _log_parse_debug(
         settings,
         "restock_claude_json",
         model=settings.anthropic_model,
-        ingredient_count=len(evidence_packet.get("ingredients", [])) if isinstance(evidence_packet, dict) else 0,
+        ingredient_count=ingredient_count,
         plan_count=len(parsed.get("purchase_plan", [])) if isinstance(parsed.get("purchase_plan"), list) else 0,
     )
     return parsed

@@ -1,7 +1,10 @@
 import csv
 import io
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+
+from sqlalchemy.orm import Session
 
 from app.models import CountEntry, CountSession
 from app.services.external_ai_service import generate_restock_plan_with_claude, normalize_sales_report_with_claude
@@ -9,6 +12,7 @@ from app.utils.text import normalize_text, simple_singular
 from app.utils.units import normalize_unit
 
 
+logger = logging.getLogger(__name__)
 SAFETY_BUFFER_PERCENT = 10
 MAX_CSV_BYTES = 2 * 1024 * 1024
 RESTOCK_REVIEW_STATUSES = {"Needs Review", "Unit Mismatch", "Stock Unknown"}
@@ -148,6 +152,14 @@ class HistoryAdjustment:
     notes: list[str] = field(default_factory=list)
     has_problem: bool = False
     is_extreme: bool = False
+
+
+@dataclass
+class HistoryIntervalNote:
+    previous_count_id: int
+    days_between: int | None
+    quality: str
+    note: str
 
 
 COUNT_UNIT_ALIASES = {
@@ -602,6 +614,131 @@ def _count_timestamp(count: CountSession):
     return count.completed_at or count.started_at or datetime.min.replace(tzinfo=timezone.utc)
 
 
+def _is_completed_count(count: CountSession) -> bool:
+    return count.completed_at is not None or str(count.status or "").lower() in {"completed", "approved"}
+
+
+def _history_interval_note(current_count: CountSession, previous_count: CountSession) -> HistoryIntervalNote:
+    current_timestamp = _count_timestamp(current_count)
+    previous_timestamp = _count_timestamp(previous_count)
+    if current_timestamp == datetime.min.replace(tzinfo=timezone.utc) or previous_timestamp == datetime.min.replace(tzinfo=timezone.utc):
+        return HistoryIntervalNote(
+            previous_count_id=previous_count.id,
+            days_between=None,
+            quality="unknown",
+            note="Koe could not determine the spacing between this count and the current count.",
+        )
+
+    days_between = max(0, round((current_timestamp - previous_timestamp).total_seconds() / 86400))
+    if 5 <= days_between <= 10:
+        quality = "ideal"
+        note = "Previous count is about one week before current count."
+    elif 3 <= days_between <= 14:
+        quality = "usable"
+        note = "Previous count is close enough to support adaptive forecasting."
+    elif days_between < 3:
+        quality = "weak_short"
+        note = "This count is very close to the current count, so history confidence is limited."
+    elif days_between > 21:
+        quality = "weak_long"
+        note = "This count is far from the current count, so history confidence is limited."
+    else:
+        quality = "weak_long"
+        note = "This count interval is not ideal, so history confidence is limited."
+    return HistoryIntervalNote(
+        previous_count_id=previous_count.id,
+        days_between=days_between,
+        quality=quality,
+        note=note,
+    )
+
+
+def _history_interval_notes(current_count: CountSession, previous_counts: list[CountSession]) -> list[HistoryIntervalNote]:
+    return [
+        _history_interval_note(current_count, previous_count)
+        for previous_count in sorted(previous_counts, key=_count_timestamp, reverse=True)[:3]
+    ]
+
+
+def _history_quality(interval_notes: list[HistoryIntervalNote], history_counts_used: set[int]) -> str:
+    if not interval_notes:
+        return "none"
+    usable_ids = {
+        note.previous_count_id
+        for note in interval_notes
+        if note.quality in {"ideal", "usable"} and note.previous_count_id in history_counts_used
+    }
+    if len(usable_ids) >= 2:
+        return "strong"
+    if len(usable_ids) == 1:
+        return "basic"
+    return "weak"
+
+
+def _history_interval_notes_response(interval_notes: list[HistoryIntervalNote]) -> list[dict]:
+    return [
+        {
+            "previous_count_id": note.previous_count_id,
+            "days_between": note.days_between,
+            "quality": note.quality,
+            "note": note.note,
+        }
+        for note in interval_notes
+    ]
+
+
+def _history_selection_score(note: HistoryIntervalNote, *, target_days: int) -> tuple[int, int, int]:
+    quality_rank = {
+        "ideal": 0,
+        "usable": 1,
+        "weak_short": 2,
+        "weak_long": 2,
+        "unknown": 3,
+    }.get(note.quality, 3)
+    days_between = note.days_between if note.days_between is not None else 9999
+    return (quality_rank, abs(days_between - target_days), -int(note.previous_count_id or 0))
+
+
+def select_previous_counts_for_restock(
+    db: Session,
+    *,
+    restaurant_id: int,
+    current_count: CountSession,
+    limit: int = 2,
+) -> list[CountSession]:
+    current_timestamp = _count_timestamp(current_count)
+    if current_timestamp == datetime.min.replace(tzinfo=timezone.utc):
+        return []
+
+    candidates = (
+        db.query(CountSession)
+        .filter(CountSession.restaurant_id == restaurant_id)
+        .filter(CountSession.id != current_count.id)
+        .all()
+    )
+    eligible: list[tuple[CountSession, HistoryIntervalNote]] = []
+    for candidate in candidates:
+        if not _is_completed_count(candidate):
+            continue
+        if _count_timestamp(candidate) >= current_timestamp:
+            continue
+        eligible.append((candidate, _history_interval_note(current_count, candidate)))
+
+    if not eligible:
+        return []
+
+    selected: list[tuple[CountSession, HistoryIntervalNote]] = []
+    remaining = eligible[:]
+    for target_days in (7, 14):
+        if not remaining or len(selected) >= limit:
+            break
+        best = min(remaining, key=lambda item: _history_selection_score(item[1], target_days=target_days))
+        selected.append(best)
+        remaining = [item for item in remaining if item[0].id != best[0].id]
+
+    return [count for count, _note in selected[:limit]]
+
+
 def _count_weight(index: int) -> float:
     return max(0.7, 1 - (index * 0.15))
 
@@ -821,8 +958,19 @@ def _fallback_reason(error: Exception) -> str:
     if message == "Text AI provider is not Claude":
         return "text_ai_provider_not_claude"
     if message == "Claude is not configured":
-        return "claude_not_configured"
-    prefix = "claude_validation_failed" if isinstance(error, ClaudeRestockValidationError) else f"claude_error:{type(error).__name__}"
+        return "anthropic_api_key_missing"
+    if isinstance(error, ClaudeRestockValidationError):
+        if "no usable purchase rows" in message:
+            return "claude_empty_purchase_plan"
+        prefix = "claude_validation_failed"
+    elif isinstance(error, ValueError):
+        prefix = "claude_json_parse_failed"
+    elif isinstance(error, (TimeoutError, ConnectionError)):
+        prefix = f"claude_call_failed:{type(error).__name__}"
+    elif isinstance(error, RuntimeError):
+        prefix = f"claude_call_failed:{type(error).__name__}"
+    else:
+        prefix = f"claude_call_failed:{type(error).__name__}"
     safe_message = " ".join(message.split())[:180]
     return f"{prefix}:{safe_message}" if safe_message else prefix
 
@@ -908,11 +1056,20 @@ def _build_deterministic_plan_context(
     previous_counts: list[CountSession] | None = None,
     *,
     use_claude: bool = False,
+    history_selection: str = "none",
 ) -> dict:
     sales_normalization = normalize_sales_csv(sales_csv, use_claude=use_claude)
     sales_rows = sales_normalization.rows
     recipe_rows = parse_recipe_csv(recipe_csv)
     previous_counts = previous_counts or []
+    resolved_history_selection = (
+        history_selection
+        if history_selection in {"auto", "manual"} and previous_counts
+        else "manual"
+        if previous_counts
+        else "none"
+    )
+    interval_notes = _history_interval_notes(count, previous_counts)
     stock_index = _stock_index(count)
     demands = _build_ingredient_demands(sales_rows, recipe_rows)
     rows = []
@@ -993,6 +1150,8 @@ def _build_deterministic_plan_context(
             )
         )
 
+    history_quality = _history_quality(interval_notes, history_counts_used)
+    history_interval_notes = _history_interval_notes_response(interval_notes)
     forecast_mode = "deterministic_adaptive" if history_counts_used else "deterministic_recipe_only"
     summary = {
         "items_forecasted": len(rows),
@@ -1000,6 +1159,9 @@ def _build_deterministic_plan_context(
         "needs_review": sum(1 for row in rows if row["status"] in {"Needs Review", "Unit Mismatch", "Stock Unknown"}),
         "safety_buffer_percent": SAFETY_BUFFER_PERCENT,
         "history_counts_used": len(history_counts_used),
+        "history_selection": resolved_history_selection,
+        "history_quality": history_quality,
+        "history_interval_notes": history_interval_notes,
         "forecast_mode": forecast_mode,
         "planner_source": "deterministic_fallback",
         "fallback_reason": None,
@@ -1010,6 +1172,10 @@ def _build_deterministic_plan_context(
         "current_count_id": count.id,
         "current_count_date": _count_timestamp(count).isoformat(),
         "previous_count_ids": [previous_count.id for previous_count in previous_counts],
+        "history_selection": resolved_history_selection,
+        "previous_counts_selected": len(previous_counts),
+        "history_quality": history_quality,
+        "history_interval_notes": history_interval_notes,
         "sales_normalization": sales_normalization.to_response(),
         "ingredients": evidence_rows,
     }
@@ -1024,6 +1190,8 @@ def _build_deterministic_plan_context(
         "evidence_packet": evidence_packet,
         "sales_normalization": sales_normalization,
         "history_counts_used": history_counts_used,
+        "history_quality": history_quality,
+        "history_interval_notes": history_interval_notes,
     }
 
 
@@ -1126,11 +1294,8 @@ def _validate_claude_plan(claude_payload: dict, deterministic_context: dict) -> 
         raise ClaudeRestockValidationError("Claude returned no usable purchase rows")
 
     raw_summary = claude_payload.get("summary") if isinstance(claude_payload.get("summary"), dict) else {}
-    raw_forecast_mode = str(raw_summary.get("forecast_mode") or "").strip()
     history_counts_used = len(deterministic_context["history_counts_used"])
-    forecast_mode = raw_forecast_mode if raw_forecast_mode in {"claude_adaptive", "claude_recipe_only"} else ""
-    if not forecast_mode:
-        forecast_mode = "claude_adaptive" if history_counts_used else "claude_recipe_only"
+    forecast_mode = "claude_adaptive" if history_counts_used else "claude_recipe_only"
 
     review_warnings = _sanitize_claude_notes(claude_payload.get("review_warnings"), evidence_keys, field_name="warning")
     review_warnings.extend(warnings)
@@ -1140,6 +1305,9 @@ def _validate_claude_plan(claude_payload: dict, deterministic_context: dict) -> 
         "needs_review": sum(1 for row in rows if row["status"] in RESTOCK_REVIEW_STATUSES or row["action"] == "review"),
         "safety_buffer_percent": SAFETY_BUFFER_PERCENT,
         "history_counts_used": history_counts_used,
+        "history_selection": deterministic_context["plan"]["summary"].get("history_selection") or "none",
+        "history_quality": deterministic_context["history_quality"],
+        "history_interval_notes": deterministic_context["history_interval_notes"],
         "forecast_mode": forecast_mode,
         "planner_source": "claude",
         "fallback_reason": None,
@@ -1161,16 +1329,37 @@ def build_restock_plan(
     previous_counts: list[CountSession] | None = None,
     *,
     use_claude: bool = False,
+    history_selection: str = "none",
 ) -> dict:
-    context = _build_deterministic_plan_context(count, sales_csv, recipe_csv, previous_counts, use_claude=use_claude)
+    context = _build_deterministic_plan_context(
+        count,
+        sales_csv,
+        recipe_csv,
+        previous_counts,
+        use_claude=use_claude,
+        history_selection=history_selection,
+    )
     deterministic_plan = context["plan"]
     if not use_claude:
         return deterministic_plan
 
     try:
         claude_payload = generate_restock_plan_with_claude(context["evidence_packet"])
-        return _validate_claude_plan(claude_payload, context)
+        plan = _validate_claude_plan(claude_payload, context)
+        logger.info(
+            "restock_claude_validation_passed plan_count=%s",
+            len(plan.get("purchase_plan", [])) if isinstance(plan.get("purchase_plan"), list) else 0,
+        )
+        logger.info("restock_final_planner_source planner_source=claude")
+        return plan
     except Exception as exc:
-        deterministic_plan["summary"]["fallback_reason"] = _fallback_reason(exc)
+        fallback_reason = _fallback_reason(exc)
+        deterministic_plan["summary"]["fallback_reason"] = fallback_reason
         deterministic_plan["summary"]["planner_source"] = "deterministic_fallback"
+        logger.warning(
+            "restock_claude_fallback_reason reason=%s error_type=%s",
+            fallback_reason,
+            type(exc).__name__,
+        )
+        logger.info("restock_final_planner_source planner_source=deterministic_fallback")
         return deterministic_plan

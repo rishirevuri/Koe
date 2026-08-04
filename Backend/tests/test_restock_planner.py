@@ -62,6 +62,8 @@ def test_basic_sales_to_weekly_purchase_plan() -> None:
     assert result["summary"]["needs_review"] == 0
     assert result["summary"]["safety_buffer_percent"] == 10
     assert result["summary"]["history_counts_used"] == 0
+    assert result["summary"]["history_quality"] == "none"
+    assert result["summary"]["history_interval_notes"] == []
     assert result["summary"]["forecast_mode"] == "deterministic_recipe_only"
     assert result["summary"]["planner_source"] == "deterministic_fallback"
     row = result["purchase_plan"][0]
@@ -345,6 +347,9 @@ def test_previous_count_depletion_creates_adaptive_multiplier() -> None:
     row = result["purchase_plan"][0]
     assert result["summary"]["forecast_mode"] == "deterministic_adaptive"
     assert result["summary"]["history_counts_used"] == 1
+    assert result["summary"]["history_quality"] == "basic"
+    assert result["summary"]["history_interval_notes"][0]["quality"] == "ideal"
+    assert result["summary"]["history_interval_notes"][0]["days_between"] == 5
     assert row["projected_need"] == 25
     assert row["usage_multiplier"] == 1.2
     assert row["adjusted_need"] == 30
@@ -392,6 +397,94 @@ def test_negative_depletion_is_ignored_and_flagged_for_review() -> None:
     assert row["usage_multiplier"] is None
     assert row["status"] == "Needs Review"
     assert "ignored that interval" in result["learning_notes"][0]["note"]
+
+
+def test_previous_count_less_than_three_days_old_marks_weak_history() -> None:
+    current_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=2,
+        completed_at=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+    previous_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=130,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=1,
+        completed_at=datetime(2026, 7, 19, tzinfo=timezone.utc),
+    )
+
+    result = build_restock_plan(
+        current_count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        [previous_count],
+    )
+
+    assert result["summary"]["forecast_mode"] == "deterministic_adaptive"
+    assert result["summary"]["history_quality"] == "weak"
+    assert result["summary"]["history_interval_notes"] == [
+        {
+            "previous_count_id": 1,
+            "days_between": 1,
+            "quality": "weak_short",
+            "note": "This count is very close to the current count, so history confidence is limited.",
+        }
+    ]
+
+
+def test_previous_count_more_than_twenty_one_days_old_marks_weak_history() -> None:
+    current_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=2,
+        completed_at=datetime(2026, 7, 20, tzinfo=timezone.utc),
+    )
+    previous_count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=130,
+                unit="pounds",
+                status="Clean",
+            )
+        ],
+        count_id=1,
+        completed_at=datetime(2026, 6, 20, tzinfo=timezone.utc),
+    )
+
+    result = build_restock_plan(
+        current_count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        [previous_count],
+    )
+
+    assert result["summary"]["forecast_mode"] == "deterministic_adaptive"
+    assert result["summary"]["history_quality"] == "weak"
+    assert result["summary"]["history_interval_notes"][0]["days_between"] == 30
+    assert result["summary"]["history_interval_notes"][0]["quality"] == "weak_long"
 
 
 def test_usage_multiplier_is_clamped_for_extreme_history() -> None:
@@ -459,7 +552,7 @@ def test_multiple_previous_counts_use_weighted_average_multiplier() -> None:
             )
         ],
         count_id=2,
-        completed_at=datetime(2026, 7, 18, tzinfo=timezone.utc),
+        completed_at=datetime(2026, 7, 15, tzinfo=timezone.utc),
     )
     older_previous = _count_with_entries(
         [
@@ -487,6 +580,7 @@ def test_multiple_previous_counts_use_weighted_average_multiplier() -> None:
     assert row["adjusted_need"] == 36.49
     assert row["status"] == "Ready"
     assert result["summary"]["history_counts_used"] == 2
+    assert result["summary"]["history_quality"] == "strong"
 
 
 def test_qualitative_current_stock_is_not_used_in_math() -> None:
@@ -581,6 +675,7 @@ def test_claude_planner_success_uses_evidence_and_returns_adaptive_plan(monkeypa
     assert result["summary"]["planner_source"] == "claude"
     assert result["summary"]["forecast_mode"] == "claude_adaptive"
     assert result["summary"]["history_counts_used"] == 1
+    assert result["summary"]["history_quality"] == "weak"
     assert result["summary"]["overall_note"] == "History was useful."
     assert result["purchase_plan"][0]["action"] == "buy"
     assert result["purchase_plan"][0]["confidence"] == "High"
@@ -589,6 +684,8 @@ def test_claude_planner_success_uses_evidence_and_returns_adaptive_plan(monkeypa
     assert evidence["ingredient_name"] == "Chicken Breast"
     assert evidence["previous_counts"][0]["quantity"] == 130
     assert evidence["deterministic_signals"]["has_usable_history"] is True
+    assert captured["evidence_packet"]["history_quality"] == "weak"
+    assert captured["evidence_packet"]["history_interval_notes"][0]["quality"] == "weak_short"
 
 
 def test_claude_recipe_only_mode_without_previous_counts(monkeypatch) -> None:
@@ -640,6 +737,7 @@ def test_claude_recipe_only_mode_without_previous_counts(monkeypatch) -> None:
 
     assert result["summary"]["planner_source"] == "claude"
     assert result["summary"]["forecast_mode"] == "claude_recipe_only"
+    assert result["summary"]["history_quality"] == "none"
     assert result["purchase_plan"][0]["status"] == "Limited History"
 
 
@@ -669,7 +767,7 @@ def test_claude_failure_falls_back_to_deterministic_plan(monkeypatch) -> None:
     )
 
     assert result["summary"]["planner_source"] == "deterministic_fallback"
-    assert result["summary"]["fallback_reason"].startswith("claude_error:TimeoutError:mock Claude timeout")
+    assert result["summary"]["fallback_reason"].startswith("claude_call_failed:TimeoutError:mock Claude timeout")
     assert result["purchase_plan"][0]["suggested_purchase"] == 17.5
 
 
@@ -697,6 +795,35 @@ def test_malformed_claude_payload_falls_back(monkeypatch) -> None:
 
     assert result["summary"]["planner_source"] == "deterministic_fallback"
     assert result["summary"]["fallback_reason"].startswith("claude_validation_failed")
+
+
+def test_malformed_claude_json_falls_back_with_specific_reason(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        raise ValueError("Claude response did not contain JSON")
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "deterministic_fallback"
+    assert result["summary"]["fallback_reason"].startswith("claude_json_parse_failed")
 
 
 def test_claude_unknown_ingredient_is_dropped_and_negative_purchase_is_repaired(monkeypatch) -> None:
