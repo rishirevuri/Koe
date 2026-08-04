@@ -960,8 +960,6 @@ def _fallback_reason(error: Exception) -> str:
     if message == "Claude is not configured":
         return "anthropic_api_key_missing"
     if isinstance(error, ClaudeRestockValidationError):
-        if "no usable purchase rows" in message:
-            return "claude_empty_purchase_plan"
         prefix = "claude_validation_failed"
     elif isinstance(error, ValueError):
         prefix = "claude_json_parse_failed"
@@ -1212,16 +1210,63 @@ def _sanitize_claude_notes(raw_notes: object, evidence_keys: set[str], *, field_
     return sanitized
 
 
-def _validate_claude_plan(claude_payload: dict, deterministic_context: dict) -> dict:
+def _is_purchase_row_list(value: object) -> bool:
+    return isinstance(value, list) and all(isinstance(row, dict) for row in value)
+
+
+def _json_type_name(value: object) -> str:
+    if isinstance(value, dict):
+        return "object"
+    if isinstance(value, list):
+        return "list"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int | float):
+        return "number"
+    if value is None:
+        return "null"
+    return type(value).__name__
+
+
+def _normalize_claude_plan_shape(claude_payload: object) -> dict:
+    if isinstance(claude_payload, list):
+        if _is_purchase_row_list(claude_payload):
+            return {"purchase_plan": claude_payload}
+        raise ClaudeRestockValidationError("purchase_plan_unrecoverable_type_list")
+
+    if not isinstance(claude_payload, dict):
+        raise ClaudeRestockValidationError(f"purchase_plan_unrecoverable_type_{_json_type_name(claude_payload)}")
+
+    raw_rows = claude_payload.get("purchase_plan")
+    if _is_purchase_row_list(raw_rows):
+        return claude_payload
+
+    if isinstance(raw_rows, dict):
+        for nested_key in ("items", "rows"):
+            nested_rows = raw_rows.get(nested_key)
+            if _is_purchase_row_list(nested_rows):
+                return {**claude_payload, "purchase_plan": nested_rows}
+        raise ClaudeRestockValidationError("purchase_plan_unrecoverable_type_object")
+
+    if raw_rows is not None:
+        raise ClaudeRestockValidationError(f"purchase_plan_unrecoverable_type_{_json_type_name(raw_rows)}")
+
+    top_level_items = claude_payload.get("items")
+    if _is_purchase_row_list(top_level_items):
+        return {**claude_payload, "purchase_plan": top_level_items}
+
+    raise ClaudeRestockValidationError("purchase_plan_missing")
+
+
+def _validate_claude_plan(claude_payload: object, deterministic_context: dict) -> dict:
     evidence_packet = deterministic_context["evidence_packet"]
     ingredients = evidence_packet.get("ingredients") or []
     evidence_by_key = {_canonical_name(ingredient["ingredient_name"]): ingredient for ingredient in ingredients}
     evidence_keys = set(evidence_by_key)
-    if not isinstance(claude_payload, dict):
-        raise ClaudeRestockValidationError("Claude response must be a JSON object")
+    claude_payload = _normalize_claude_plan_shape(claude_payload)
     raw_rows = claude_payload.get("purchase_plan")
-    if not isinstance(raw_rows, list):
-        raise ClaudeRestockValidationError("Claude purchase_plan must be a list")
 
     rows: list[dict] = []
     warnings: list[dict[str, str]] = []
@@ -1291,7 +1336,7 @@ def _validate_claude_plan(claude_payload: dict, deterministic_context: dict) -> 
         seen.add(ingredient_key)
 
     if ingredients and not rows:
-        raise ClaudeRestockValidationError("Claude returned no usable purchase rows")
+        raise ClaudeRestockValidationError("no_valid_purchase_rows")
 
     raw_summary = claude_payload.get("summary") if isinstance(claude_payload.get("summary"), dict) else {}
     history_counts_used = len(deterministic_context["history_counts_used"])

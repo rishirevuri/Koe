@@ -336,8 +336,13 @@ Rules:
 - Dry goods and packaging can tolerate a practical buffer more safely than fragile produce.
 - Qualitative or unclear current stock should lower confidence and require manager review.
 - Explain each reason in plain English.
-- Output strict JSON only.
+- Return strict JSON only.
+- purchase_plan must be a JSON array.
+- Do not wrap purchase_plan inside an object.
+- Do not use {"items": [...]}.
+- Do not use {"rows": [...]}.
 - Do not return markdown.
+- Do not return commentary.
 - Do not write commentary outside the JSON.
 
 Allowed action values:

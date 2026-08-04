@@ -610,6 +610,24 @@ def test_qualitative_current_stock_is_not_used_in_math() -> None:
     assert "qualitative quantity" in row["reason"]
 
 
+def _claude_chicken_row() -> dict:
+    return {
+        "ingredient": "Chicken Breast",
+        "suggested_purchase": 30,
+        "unit": "pounds",
+        "action": "buy",
+        "status": "Ready",
+        "confidence": "High",
+        "projected_need": 25,
+        "adjusted_need": 33,
+        "current_stock": 10,
+        "usage_signal": "high",
+        "history_signal": "limited_history",
+        "risk_signal": "stockout_risk",
+        "reason": "Current stock is low against menu demand.",
+    }
+
+
 def test_claude_planner_success_uses_evidence_and_returns_adaptive_plan(monkeypatch) -> None:
     current_count = _count_with_entries(
         [
@@ -741,6 +759,42 @@ def test_claude_recipe_only_mode_without_previous_counts(monkeypatch) -> None:
     assert result["purchase_plan"][0]["status"] == "Limited History"
 
 
+@pytest.mark.parametrize(
+    "claude_payload",
+    [
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "purchase_plan": {"items": [_claude_chicken_row()]}},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "purchase_plan": {"rows": [_claude_chicken_row()]}},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "items": [_claude_chicken_row()]},
+        [_claude_chicken_row()],
+    ],
+)
+def test_claude_purchase_plan_recoverable_shapes_are_repaired(monkeypatch, claude_payload) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", lambda evidence_packet: claude_payload)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    assert result["purchase_plan"][0]["ingredient"] == "Chicken Breast"
+    assert result["purchase_plan"][0]["suggested_purchase"] == 30
+
+
 def test_claude_failure_falls_back_to_deterministic_plan(monkeypatch) -> None:
     count = _count_with_entries(
         [
@@ -794,7 +848,37 @@ def test_malformed_claude_payload_falls_back(monkeypatch) -> None:
     )
 
     assert result["summary"]["planner_source"] == "deterministic_fallback"
-    assert result["summary"]["fallback_reason"].startswith("claude_validation_failed")
+    assert result["summary"]["fallback_reason"] == "claude_validation_failed:purchase_plan_unrecoverable_type_string"
+
+
+def test_unrecoverable_claude_purchase_plan_object_falls_back_with_specific_reason(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {"purchase_plan": {"unexpected": [_claude_chicken_row()]}},
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "deterministic_fallback"
+    assert result["summary"]["fallback_reason"] == "claude_validation_failed:purchase_plan_unrecoverable_type_object"
 
 
 def test_malformed_claude_json_falls_back_with_specific_reason(monkeypatch) -> None:
