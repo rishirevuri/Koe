@@ -421,6 +421,54 @@ Return this exact JSON shape:
 """
 
 
+RESTOCK_PLANNER_REFORMAT_PROMPT = """
+You returned a Restock Planner response that Koe could not parse.
+Convert it into Koe's required JSON schema without changing the business meaning.
+
+Return JSON only.
+The required top-level key is purchase_plan and it must be an array of item rows.
+Do not return markdown.
+Do not return commentary.
+
+Required schema:
+{
+  "summary": {
+    "forecast_mode": "claude_adaptive",
+    "overall_note": "string"
+  },
+  "purchase_plan": [
+    {
+      "ingredient": "string",
+      "suggested_purchase": number or null,
+      "unit": "string or null",
+      "action": "buy" or "hold" or "review",
+      "status": "Ready" or "Limited History" or "Stock Unknown" or "Unit Mismatch" or "Needs Review",
+      "confidence": "High" or "Medium" or "Low",
+      "projected_need": number or null,
+      "adjusted_need": number or null,
+      "current_stock": number/string/null,
+      "usage_signal": "low" or "medium" or "high" or "unknown",
+      "history_signal": "stable" or "depletes_faster_than_expected" or "depletes_slower_than_expected" or "inconsistent" or "limited_history" or "unknown",
+      "risk_signal": "stockout_risk" or "waste_risk" or "balanced" or "needs_review",
+      "reason": "string"
+    }
+  ],
+  "learning_notes": [
+    {
+      "ingredient": "string",
+      "note": "string"
+    }
+  ],
+  "review_warnings": [
+    {
+      "ingredient": "string",
+      "warning": "string"
+    }
+  ]
+}
+"""
+
+
 SALES_NORMALIZATION_SYSTEM_PROMPT = """
 You are Koe's sales data normalization engine for restaurant POS exports.
 
@@ -1200,6 +1248,64 @@ def generate_restock_plan_with_claude(evidence_packet: dict) -> dict:
         model=settings.anthropic_model,
         ingredient_count=ingredient_count,
         plan_count=len(parsed.get("purchase_plan", [])) if isinstance(parsed.get("purchase_plan"), list) else 0,
+    )
+    return parsed
+
+
+def reformat_restock_plan_with_claude(raw_response: object) -> dict:
+    settings = get_settings()
+    if not settings.enable_external_ai:
+        raise RuntimeError("External AI integrations are disabled")
+    if (settings.text_ai_provider or "claude").lower() != "claude":
+        raise RuntimeError("Text AI provider is not Claude")
+    if not settings.is_claude_configured:
+        raise RuntimeError("Claude is not configured")
+
+    logger.info("restock_claude_repair_attempt_started")
+    response = httpx.post(
+        "https://api.anthropic.com/v1/messages",
+        headers={
+            "x-api-key": settings.anthropic_api_key or "",
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+        json={
+            "model": settings.anthropic_model,
+            "max_tokens": 5000,
+            "temperature": 0,
+            "system": RESTOCK_PLANNER_REFORMAT_PROMPT,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": (
+                        "Reformat this Restock Planner response into Koe's required schema:\n\n"
+                        f"{json.dumps(raw_response, ensure_ascii=True, default=str)}"
+                    ),
+                }
+            ],
+        },
+        timeout=35,
+    )
+    if response.status_code >= 400:
+        message = f"Claude repair request failed with status {response.status_code}"
+        try:
+            error_body = response.json()
+            provider_message = error_body.get("error", {}).get("message")
+            if provider_message:
+                message = provider_message
+        except ValueError:
+            pass
+        raise RuntimeError(message)
+
+    payload = response.json()
+    content = payload.get("content") or []
+    content_types = [part.get("type") for part in content if isinstance(part, dict)]
+    logger.info("restock_claude_repair_response_received content_types=%s", content_types)
+    text_parts = [part.get("text", "") for part in content if isinstance(part, dict) and part.get("type") == "text"]
+    parsed = _extract_json_object("\n".join(text_parts))
+    logger.info(
+        "restock_claude_repair_json_parsed plan_count=%s",
+        len(parsed.get("purchase_plan", [])) if isinstance(parsed.get("purchase_plan"), list) else 0,
     )
     return parsed
 

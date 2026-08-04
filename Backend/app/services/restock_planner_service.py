@@ -7,7 +7,11 @@ from datetime import datetime, timezone
 from sqlalchemy.orm import Session
 
 from app.models import CountEntry, CountSession
-from app.services.external_ai_service import generate_restock_plan_with_claude, normalize_sales_report_with_claude
+from app.services.external_ai_service import (
+    generate_restock_plan_with_claude,
+    normalize_sales_report_with_claude,
+    reformat_restock_plan_with_claude,
+)
 from app.utils.text import normalize_text, simple_singular
 from app.utils.units import normalize_unit
 
@@ -29,6 +33,41 @@ ALLOWED_HISTORY_SIGNALS = {
     "unknown",
 }
 ALLOWED_RISK_SIGNALS = {"stockout_risk", "waste_risk", "balanced", "needs_review"}
+PLAN_LIST_KEYS = (
+    "purchase_plan",
+    "recommendations",
+    "restock_plan",
+    "purchase_recommendations",
+    "suggested_purchases",
+    "draft_purchase_plan",
+    "plan",
+    "rows",
+    "data",
+    "items",
+)
+NESTED_PLAN_LIST_KEYS = ("items", "rows", "recommendations", "purchase_plan", "suggested_purchases")
+SECTION_PLAN_KEYS = ("buy", "hold", "review")
+ROW_FIELD_ALIASES = {
+    "ingredient": ("ingredient", "ingredient_name", "item", "item_name", "name", "product", "product_name"),
+    "suggested_purchase": (
+        "suggested_purchase",
+        "purchase_quantity",
+        "quantity_to_purchase",
+        "recommended_quantity",
+        "recommended_purchase",
+        "order_quantity",
+        "buy_quantity",
+        "qty_to_buy",
+    ),
+    "unit": ("unit", "purchase_unit", "order_unit"),
+    "reason": ("reason", "rationale", "explanation", "note"),
+    "action": ("action", "recommendation", "decision"),
+    "status": ("status", "review_status"),
+    "confidence": ("confidence", "confidence_level"),
+    "projected_need": ("projected_need", "projected", "recipe_projected_need"),
+    "adjusted_need": ("adjusted_need", "adjusted", "adjusted_projected_need"),
+    "current_stock": ("current_stock", "stock_on_hand", "current_quantity", "on_hand"),
+}
 SALES_NORMALIZATION_ERROR = "Koe could not read sales quantities from this file. Try another export or paste the report text."
 SALES_CONFIDENCE_ORDER = {"Low": 0, "Medium": 1, "High": 2}
 SALES_ITEM_COLUMN_ALIASES = {
@@ -929,6 +968,16 @@ def _evidence_for_ingredient(
 def _safe_float_or_none(value: object) -> float | None:
     if value is None or value == "":
         return None
+    if isinstance(value, str) and value.strip().lower() in {"review", "unknown", "tbd", "n/a", "na", "none", "null"}:
+        return None
+    if isinstance(value, str):
+        cleaned = value.strip().replace(",", "")
+        first_token = cleaned.split()[0] if cleaned.split() else ""
+        if first_token and first_token != cleaned:
+            try:
+                return _round_quantity(float(first_token))
+            except ValueError:
+                pass
     try:
         parsed = float(value)
     except (TypeError, ValueError) as exc:
@@ -953,6 +1002,8 @@ def _safe_choice(value: object, allowed: set[str], *, field_name: str) -> str:
 
 def _fallback_reason(error: Exception) -> str:
     message = str(error)
+    if message.startswith(("claude_validation_failed:", "claude_repair_retry_failed:")):
+        return message
     if message == "External AI integrations are disabled":
         return "external_ai_disabled"
     if message == "Text AI provider is not Claude":
@@ -1230,34 +1281,200 @@ def _json_type_name(value: object) -> str:
     return type(value).__name__
 
 
-def _normalize_claude_plan_shape(claude_payload: object) -> dict:
+def _top_level_keys(value: object) -> list[str]:
+    return list(value.keys()) if isinstance(value, dict) else []
+
+
+def _candidate_plan_keys_found(value: object) -> list[str]:
+    if isinstance(value, list):
+        return ["<raw_list>"] if _is_purchase_row_list(value) else []
+    if not isinstance(value, dict):
+        return []
+    found = [key for key in PLAN_LIST_KEYS if key in value]
+    found.extend(key for key in SECTION_PLAN_KEYS if key in value)
+    return found
+
+
+def _rows_from_nested_candidate(value: object) -> tuple[list[dict] | None, str | None]:
+    if _is_purchase_row_list(value):
+        return value, None
+    if not isinstance(value, dict):
+        return None, None
+    for nested_key in NESTED_PLAN_LIST_KEYS:
+        nested_rows = value.get(nested_key)
+        if _is_purchase_row_list(nested_rows):
+            return nested_rows, nested_key
+    return None, None
+
+
+def _sectioned_rows(value: object) -> tuple[list[dict], list[str]]:
+    if not isinstance(value, dict):
+        return [], []
+    combined: list[dict] = []
+    found_sections: list[str] = []
+    for section_key in SECTION_PLAN_KEYS:
+        section_rows = value.get(section_key)
+        if not _is_purchase_row_list(section_rows):
+            continue
+        found_sections.append(section_key)
+        for row in section_rows:
+            combined.append({**row, "_section_action": section_key})
+    return combined, found_sections
+
+
+def _extract_claude_plan_rows(claude_payload: object) -> tuple[list[dict], list[str]]:
     if isinstance(claude_payload, list):
+        logger.info("restock_claude_raw_top_level_keys keys=%s", ["<raw_list>"])
+        logger.info("restock_claude_candidate_plan_keys_found keys=%s", ["<raw_list>"] if _is_purchase_row_list(claude_payload) else [])
+        logger.info("restock_claude_extracted_plan_type type=%s", _json_type_name(claude_payload))
         if _is_purchase_row_list(claude_payload):
-            return {"purchase_plan": claude_payload}
+            logger.info("restock_claude_extracted_plan_count count=%s", len(claude_payload))
+            return claude_payload, ["<raw_list>"]
+        logger.info("restock_claude_validation_error error=%s", "purchase_plan_unrecoverable_type_list")
         raise ClaudeRestockValidationError("purchase_plan_unrecoverable_type_list")
 
     if not isinstance(claude_payload, dict):
-        raise ClaudeRestockValidationError(f"purchase_plan_unrecoverable_type_{_json_type_name(claude_payload)}")
+        error = f"purchase_plan_unrecoverable_type_{_json_type_name(claude_payload)}"
+        logger.info("restock_claude_raw_top_level_keys keys=%s", [])
+        logger.info("restock_claude_candidate_plan_keys_found keys=%s", [])
+        logger.info("restock_claude_extracted_plan_type type=%s", _json_type_name(claude_payload))
+        logger.info("restock_claude_validation_error error=%s", error)
+        raise ClaudeRestockValidationError(error)
 
-    raw_rows = claude_payload.get("purchase_plan")
-    if _is_purchase_row_list(raw_rows):
-        return claude_payload
+    top_keys = _top_level_keys(claude_payload)
+    candidate_keys = _candidate_plan_keys_found(claude_payload)
+    logger.info("restock_claude_raw_top_level_keys keys=%s", top_keys)
+    logger.info("restock_claude_candidate_plan_keys_found keys=%s", candidate_keys)
 
-    if isinstance(raw_rows, dict):
-        for nested_key in ("items", "rows"):
-            nested_rows = raw_rows.get(nested_key)
-            if _is_purchase_row_list(nested_rows):
-                return {**claude_payload, "purchase_plan": nested_rows}
-        raise ClaudeRestockValidationError("purchase_plan_unrecoverable_type_object")
+    for key in PLAN_LIST_KEYS:
+        if key not in claude_payload:
+            continue
+        rows, nested_key = _rows_from_nested_candidate(claude_payload.get(key))
+        if rows is not None:
+            extracted_key = f"{key}.{nested_key}" if nested_key else key
+            logger.info("restock_claude_extracted_plan_type type=%s key=%s", _json_type_name(claude_payload.get(key)), extracted_key)
+            logger.info("restock_claude_extracted_plan_count count=%s", len(rows))
+            return rows, [extracted_key]
 
-    if raw_rows is not None:
-        raise ClaudeRestockValidationError(f"purchase_plan_unrecoverable_type_{_json_type_name(raw_rows)}")
+    combined, sections = _sectioned_rows(claude_payload)
+    if combined:
+        logger.info("restock_claude_extracted_plan_type type=sectioned keys=%s", sections)
+        logger.info("restock_claude_extracted_plan_count count=%s", len(combined))
+        return combined, sections
 
-    top_level_items = claude_payload.get("items")
-    if _is_purchase_row_list(top_level_items):
-        return {**claude_payload, "purchase_plan": top_level_items}
+    if "purchase_plan" in claude_payload:
+        raw_rows = claude_payload.get("purchase_plan")
+        error = f"purchase_plan_unrecoverable_type_{_json_type_name(raw_rows)}"
+    else:
+        error = "no_candidate_plan_list_found"
+    logger.info("restock_claude_extracted_plan_type type=%s", "none")
+    logger.info("restock_claude_extracted_plan_count count=%s", 0)
+    logger.info("restock_claude_validation_error error=%s", error)
+    raise ClaudeRestockValidationError(error)
 
-    raise ClaudeRestockValidationError("purchase_plan_missing")
+
+def _first_row_value(row: dict, field_name: str) -> object:
+    for alias in ROW_FIELD_ALIASES[field_name]:
+        value = row.get(alias)
+        if value is not None and value != "":
+            return value
+    return None
+
+
+def _normalize_choice_token(value: object) -> str:
+    return str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _normalize_action_value(value: object, *, section_action: str | None = None) -> str:
+    if section_action in ALLOWED_ACTIONS:
+        return section_action
+    token = _normalize_choice_token(value)
+    if token in ALLOWED_ACTIONS:
+        return token
+    if token in {"purchase", "order", "restock", "buy_more", "recommended", "recommend_buy"} or token.startswith(("buy_", "order_", "purchase_", "restock_")):
+        return "buy"
+    if token in {"no_purchase", "no_buy", "do_not_buy", "covered"} or token.startswith(("hold_", "do_not_buy_")):
+        return "hold"
+    if token in {"needs_review", "manager_review", "review_required", "unit_mismatch", "stock_unknown"} or "review" in token:
+        return "review"
+    return "review"
+
+
+def _normalize_status_value(value: object, *, action: str) -> str:
+    text = str(value or "").strip()
+    if text in ALLOWED_RESTOCK_STATUSES:
+        return text
+    token = _normalize_choice_token(value)
+    mapping = {
+        "ready": "Ready",
+        "clean": "Ready",
+        "limited_history": "Limited History",
+        "recipe_only": "Limited History",
+        "stock_unknown": "Stock Unknown",
+        "unknown_stock": "Stock Unknown",
+        "unit_mismatch": "Unit Mismatch",
+        "mismatch": "Unit Mismatch",
+        "needs_review": "Needs Review",
+        "review": "Needs Review",
+        "review_required": "Needs Review",
+    }
+    if token in mapping:
+        return mapping[token]
+    if "unit" in token and "mismatch" in token:
+        return "Unit Mismatch"
+    if "stock" in token and "unknown" in token:
+        return "Stock Unknown"
+    if "limited" in token and "history" in token:
+        return "Limited History"
+    if "review" in token:
+        return "Needs Review"
+    return "Needs Review" if action == "review" else "Ready"
+
+
+def _normalize_confidence_value(value: object, *, status: str, action: str) -> str:
+    text = str(value or "").strip()
+    if text in ALLOWED_CONFIDENCE:
+        return text
+    token = _normalize_choice_token(value)
+    mapping = {"high": "High", "medium": "Medium", "med": "Medium", "low": "Low"}
+    if token in mapping:
+        return mapping[token]
+    return "Low" if status in RESTOCK_REVIEW_STATUSES or action == "review" else "Medium"
+
+
+def _normalize_signal_value(value: object, allowed: set[str], default: str) -> str:
+    token = _normalize_choice_token(value)
+    return token if token in allowed else default
+
+
+def _normalize_claude_plan_row(raw_row: dict) -> dict:
+    section_action = raw_row.get("_section_action") if raw_row.get("_section_action") in ALLOWED_ACTIONS else None
+    action = _normalize_action_value(_first_row_value(raw_row, "action"), section_action=section_action)
+    status = _normalize_status_value(_first_row_value(raw_row, "status"), action=action)
+    confidence = _normalize_confidence_value(_first_row_value(raw_row, "confidence"), status=status, action=action)
+    return {
+        "ingredient": _first_row_value(raw_row, "ingredient"),
+        "suggested_purchase": _first_row_value(raw_row, "suggested_purchase"),
+        "unit": _first_row_value(raw_row, "unit"),
+        "action": action,
+        "status": status,
+        "confidence": confidence,
+        "projected_need": _first_row_value(raw_row, "projected_need"),
+        "adjusted_need": _first_row_value(raw_row, "adjusted_need"),
+        "current_stock": _first_row_value(raw_row, "current_stock"),
+        "usage_signal": _normalize_signal_value(raw_row.get("usage_signal"), ALLOWED_USAGE_SIGNALS, "unknown"),
+        "history_signal": _normalize_signal_value(raw_row.get("history_signal"), ALLOWED_HISTORY_SIGNALS, "unknown"),
+        "risk_signal": _normalize_signal_value(raw_row.get("risk_signal"), ALLOWED_RISK_SIGNALS, "needs_review"),
+        "reason": str(_first_row_value(raw_row, "reason") or "Koe flagged this row for manager review.").strip(),
+    }
+
+
+def _normalize_claude_plan_shape(claude_payload: object) -> dict:
+    rows, _ = _extract_claude_plan_rows(claude_payload)
+    normalized_rows = [_normalize_claude_plan_row(row) for row in rows if isinstance(row, dict)]
+    if isinstance(claude_payload, dict):
+        return {**claude_payload, "purchase_plan": normalized_rows}
+    return {"purchase_plan": normalized_rows}
 
 
 def _validate_claude_plan(claude_payload: object, deterministic_context: dict) -> dict:
@@ -1307,11 +1524,13 @@ def _validate_claude_plan(claude_payload: object, deterministic_context: dict) -
             suggested_purchase = 0 if suggested_purchase is not None else None
         if status == "Stock Unknown":
             confidence = "Low"
-        if status == "Unit Mismatch" and suggested_purchase is not None and "estimate" not in reason.lower():
-            suggested_purchase = None
+            action = "review"
+        if status == "Unit Mismatch":
             action = "review"
             confidence = "Low"
-            warnings.append({"ingredient": ingredient, "warning": "Units did not match, so Koe removed the purchase quantity for manager review."})
+            if suggested_purchase is not None and "estimate" not in reason.lower():
+                suggested_purchase = None
+                warnings.append({"ingredient": ingredient, "warning": "Units did not match, so Koe removed the purchase quantity for manager review."})
 
         evidence = evidence_by_key[ingredient_key]
         rows.append(
@@ -1367,6 +1586,22 @@ def _validate_claude_plan(claude_payload: object, deterministic_context: dict) -
     }
 
 
+def _should_repair_claude_plan(error: Exception) -> bool:
+    if not isinstance(error, ClaudeRestockValidationError):
+        return False
+    message = str(error)
+    return message == "no_candidate_plan_list_found" or message.startswith("purchase_plan_unrecoverable_type_")
+
+
+def _repair_retry_failure_reason(error: Exception) -> str:
+    if isinstance(error, ClaudeRestockValidationError) and str(error) == "no_candidate_plan_list_found":
+        return "claude_validation_failed:repair_retry_no_candidate_plan_list"
+    if isinstance(error, ClaudeRestockValidationError):
+        return _fallback_reason(error)
+    safe_message = " ".join(str(error).split())[:180]
+    return f"claude_repair_retry_failed:{type(error).__name__}{':' + safe_message if safe_message else ''}"
+
+
 def build_restock_plan(
     count: CountSession,
     sales_csv: bytes,
@@ -1390,7 +1625,21 @@ def build_restock_plan(
 
     try:
         claude_payload = generate_restock_plan_with_claude(context["evidence_packet"])
-        plan = _validate_claude_plan(claude_payload, context)
+        try:
+            plan = _validate_claude_plan(claude_payload, context)
+        except Exception as validation_error:
+            logger.info(
+                "restock_claude_validation_error error=%s error_type=%s",
+                str(validation_error),
+                type(validation_error).__name__,
+            )
+            if not _should_repair_claude_plan(validation_error):
+                raise
+            try:
+                repair_payload = reformat_restock_plan_with_claude(claude_payload)
+                plan = _validate_claude_plan(repair_payload, context)
+            except Exception as repair_error:
+                raise ClaudeRestockValidationError(_repair_retry_failure_reason(repair_error)) from repair_error
         logger.info(
             "restock_claude_validation_passed plan_count=%s",
             len(plan.get("purchase_plan", [])) if isinstance(plan.get("purchase_plan"), list) else 0,

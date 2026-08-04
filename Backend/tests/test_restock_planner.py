@@ -766,6 +766,16 @@ def test_claude_recipe_only_mode_without_previous_counts(monkeypatch) -> None:
         {"summary": {"forecast_mode": "claude_recipe_only"}, "purchase_plan": {"rows": [_claude_chicken_row()]}},
         {"summary": {"forecast_mode": "claude_recipe_only"}, "items": [_claude_chicken_row()]},
         [_claude_chicken_row()],
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "recommendations": [_claude_chicken_row()]},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "restock_plan": [_claude_chicken_row()]},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "purchase_recommendations": [_claude_chicken_row()]},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "suggested_purchases": [_claude_chicken_row()]},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "draft_purchase_plan": [_claude_chicken_row()]},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "plan": [_claude_chicken_row()]},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "plan": {"items": [_claude_chicken_row()]}},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "draft_purchase_plan": {"recommendations": [_claude_chicken_row()]}},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "rows": [_claude_chicken_row()]},
+        {"summary": {"forecast_mode": "claude_recipe_only"}, "data": [_claude_chicken_row()]},
     ],
 )
 def test_claude_purchase_plan_recoverable_shapes_are_repaired(monkeypatch, claude_payload) -> None:
@@ -793,6 +803,177 @@ def test_claude_purchase_plan_recoverable_shapes_are_repaired(monkeypatch, claud
     assert result["summary"]["planner_source"] == "claude"
     assert result["purchase_plan"][0]["ingredient"] == "Chicken Breast"
     assert result["purchase_plan"][0]["suggested_purchase"] == 30
+
+
+def test_claude_sectioned_buy_hold_review_shape_is_combined(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            ),
+            CountEntry(
+                item_name="Tomatoes",
+                normalized_item_name="tomatoes",
+                quantity=20,
+                unit="count",
+                status="Clean",
+            ),
+        ]
+    )
+
+    hold_row = {
+        **_claude_chicken_row(),
+        "ingredient": "Tomatoes",
+        "suggested_purchase": 0,
+        "unit": "count",
+        "status": "Ready",
+        "confidence": "Medium",
+        "reason": "Current stock covers the projected need.",
+    }
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {"buy": [_claude_chicken_row()], "hold": [hold_row], "review": []},
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400\nSalad,20"),
+        _csv(
+            """
+            menu_item,ingredient_name,quantity_per_item,unit
+            Chicken Sandwich,Chicken Breast,0.25,pounds
+            Salad,Tomatoes,0.25,count
+            """
+        ),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    rows = {row["ingredient"]: row for row in result["purchase_plan"]}
+    assert rows["Chicken Breast"]["action"] == "buy"
+    assert rows["Tomatoes"]["action"] == "hold"
+
+
+def test_claude_row_field_aliases_are_normalized(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {
+            "recommendations": [
+                {
+                    "item_name": "Chicken Breast",
+                    "recommended_quantity": "30 pounds",
+                    "purchase_unit": "pounds",
+                    "recommendation": "buy",
+                    "review_status": "Ready",
+                    "confidence_level": "High",
+                    "projected": 25,
+                    "adjusted": 33,
+                    "stock_on_hand": 10,
+                    "rationale": "Demand and current stock support a purchase.",
+                }
+            ]
+        },
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    row = result["purchase_plan"][0]
+    assert result["summary"]["planner_source"] == "claude"
+    assert row["ingredient"] == "Chicken Breast"
+    assert row["suggested_purchase"] == 30
+    assert row["reason"] == "Demand and current stock support a purchase."
+    assert row["projected_need"] == 25
+    assert row["adjusted_need"] == 33
+
+
+def test_claude_missing_plan_key_uses_repair_retry(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+    initial_payload = {"summary": {"forecast_mode": "claude_recipe_only"}, "manager_output": {"foo": "bar"}}
+    calls: list[object] = []
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", lambda evidence_packet: initial_payload)
+
+    def mock_reformat(raw_response: object) -> dict:
+        calls.append(raw_response)
+        return {"purchase_plan": [_claude_chicken_row()], "learning_notes": [], "review_warnings": []}
+
+    monkeypatch.setattr(restock_planner_service, "reformat_restock_plan_with_claude", mock_reformat)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert calls == [initial_payload]
+    assert result["summary"]["planner_source"] == "claude"
+    assert result["purchase_plan"][0]["ingredient"] == "Chicken Breast"
+
+
+def test_claude_missing_plan_key_and_repair_failure_falls_back(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken Breast",
+                normalized_item_name="chicken breast",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {"summary": {"forecast_mode": "claude_recipe_only"}, "manager_output": {"foo": "bar"}},
+    )
+    monkeypatch.setattr(restock_planner_service, "reformat_restock_plan_with_claude", lambda raw_response: {"still_bad": []})
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken Breast,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "deterministic_fallback"
+    assert result["summary"]["fallback_reason"] == "claude_validation_failed:repair_retry_no_candidate_plan_list"
 
 
 def test_claude_failure_falls_back_to_deterministic_plan(monkeypatch) -> None:
@@ -839,6 +1020,7 @@ def test_malformed_claude_payload_falls_back(monkeypatch) -> None:
     )
 
     monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", lambda evidence_packet: {"purchase_plan": "bad"})
+    monkeypatch.setattr(restock_planner_service, "reformat_restock_plan_with_claude", lambda raw_response: {"purchase_plan": "bad"})
 
     result = build_restock_plan(
         count,
@@ -868,6 +1050,11 @@ def test_unrecoverable_claude_purchase_plan_object_falls_back_with_specific_reas
         restock_planner_service,
         "generate_restock_plan_with_claude",
         lambda evidence_packet: {"purchase_plan": {"unexpected": [_claude_chicken_row()]}},
+    )
+    monkeypatch.setattr(
+        restock_planner_service,
+        "reformat_restock_plan_with_claude",
+        lambda raw_response: {"purchase_plan": {"unexpected": [_claude_chicken_row()]}},
     )
 
     result = build_restock_plan(
