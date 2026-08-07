@@ -315,6 +315,11 @@ You are not placing orders. You must be practical, cautious, and clear.
 
 Rules:
 - Use only the provided evidence.
+- Every ingredient evidence row includes ingredient_key, ingredient_name, and display_name.
+- For every purchase_plan row, return the exact ingredient_key from the evidence packet.
+- Do not invent new ingredient keys or ingredient names.
+- Use ingredient_name/display_name only for readable display.
+- If unsure which ingredient is closest, use the closest ingredient_key, set action review, and explain the uncertainty.
 - Do not invent ingredients.
 - Do not invent vendors.
 - Do not claim exact certainty.
@@ -390,6 +395,7 @@ Return this exact JSON shape:
   },
   "purchase_plan": [
     {
+      "ingredient_key": "string",
       "ingredient": "string",
       "suggested_purchase": number | null,
       "unit": "string | null",
@@ -438,6 +444,7 @@ Required schema:
   },
   "purchase_plan": [
     {
+      "ingredient_key": "string",
       "ingredient": "string",
       "suggested_purchase": number or null,
       "unit": "string or null",

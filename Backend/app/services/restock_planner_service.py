@@ -1,4 +1,5 @@
 import csv
+import difflib
 import io
 import logging
 from dataclasses import dataclass, field
@@ -48,6 +49,7 @@ PLAN_LIST_KEYS = (
 NESTED_PLAN_LIST_KEYS = ("items", "rows", "recommendations", "purchase_plan", "suggested_purchases")
 SECTION_PLAN_KEYS = ("buy", "hold", "review")
 ROW_FIELD_ALIASES = {
+    "ingredient_key": ("ingredient_key", "key", "ingredient_id"),
     "ingredient": ("ingredient", "ingredient_name", "item", "item_name", "name", "product", "product_name"),
     "suggested_purchase": (
         "suggested_purchase",
@@ -233,6 +235,10 @@ def _round_quantity(value: float) -> float:
 def _canonical_name(value: str | None) -> str:
     normalized = normalize_text(value or "")
     return " ".join(simple_singular(token) for token in normalized.split())
+
+
+def _ingredient_key(value: str | None) -> str:
+    return "_".join(normalize_text(value or "").split())
 
 
 def _canonical_unit(value: str | None) -> str:
@@ -935,8 +941,11 @@ def _evidence_for_ingredient(
     deterministic_adjusted_need: float,
     deterministic_suggested_purchase: float,
 ) -> dict:
+    display_name = _display_name(demand.ingredient)
     return {
-        "ingredient_name": demand.ingredient,
+        "ingredient_key": _ingredient_key(display_name),
+        "ingredient_name": display_name,
+        "display_name": display_name,
         "recipe_unit": demand.unit,
         "menu_usage": [
             {
@@ -1447,12 +1456,18 @@ def _normalize_signal_value(value: object, allowed: set[str], default: str) -> s
     return token if token in allowed else default
 
 
+def _normalize_returned_ingredient_key(value: object) -> str:
+    text = str(value or "").strip().replace("_", " ")
+    return _ingredient_key(text)
+
+
 def _normalize_claude_plan_row(raw_row: dict) -> dict:
     section_action = raw_row.get("_section_action") if raw_row.get("_section_action") in ALLOWED_ACTIONS else None
     action = _normalize_action_value(_first_row_value(raw_row, "action"), section_action=section_action)
     status = _normalize_status_value(_first_row_value(raw_row, "status"), action=action)
     confidence = _normalize_confidence_value(_first_row_value(raw_row, "confidence"), status=status, action=action)
     return {
+        "ingredient_key": _first_row_value(raw_row, "ingredient_key"),
         "ingredient": _first_row_value(raw_row, "ingredient"),
         "suggested_purchase": _first_row_value(raw_row, "suggested_purchase"),
         "unit": _first_row_value(raw_row, "unit"),
@@ -1477,37 +1492,148 @@ def _normalize_claude_plan_shape(claude_payload: object) -> dict:
     return {"purchase_plan": normalized_rows}
 
 
+def _evidence_display_name(ingredient: dict) -> str:
+    return _display_name(str(ingredient.get("display_name") or ingredient.get("ingredient_name") or ""))
+
+
+def _build_evidence_indexes(ingredients: list[dict]) -> tuple[dict[str, dict], dict[str, str]]:
+    evidence_by_key: dict[str, dict] = {}
+    name_to_key: dict[str, str] = {}
+    for ingredient in ingredients:
+        display_name = _evidence_display_name(ingredient)
+        ingredient_key = _normalize_returned_ingredient_key(ingredient.get("ingredient_key")) or _ingredient_key(display_name)
+        if not ingredient_key:
+            continue
+        ingredient["ingredient_key"] = ingredient_key
+        ingredient["display_name"] = display_name
+        evidence_by_key[ingredient_key] = ingredient
+        for name in {display_name, str(ingredient.get("ingredient_name") or ""), ingredient_key.replace("_", " ")}:
+            canonical = _canonical_name(name)
+            if canonical:
+                name_to_key[canonical] = ingredient_key
+    return evidence_by_key, name_to_key
+
+
+def _fuzzy_evidence_key(row_name: str, evidence_by_key: dict[str, dict]) -> str | None:
+    candidate = _canonical_name(row_name)
+    if not candidate:
+        return None
+    candidate_tokens = set(candidate.split())
+    best_key = None
+    best_score = 0.0
+    for evidence_key, ingredient in evidence_by_key.items():
+        evidence_name = _canonical_name(_evidence_display_name(ingredient))
+        if not evidence_name:
+            continue
+        evidence_tokens = set(evidence_name.split())
+        overlap = len(candidate_tokens & evidence_tokens) / max(len(candidate_tokens | evidence_tokens), 1)
+        ratio = difflib.SequenceMatcher(None, candidate, evidence_name).ratio()
+        score = max(ratio, overlap)
+        if score > best_score:
+            best_score = score
+            best_key = evidence_key
+    return best_key if best_score >= 0.86 else None
+
+
+def _resolve_claude_row_ingredient(
+    raw_row: dict,
+    evidence_by_key: dict[str, dict],
+    name_to_key: dict[str, str],
+) -> tuple[str | None, dict | None, str]:
+    returned_key = _normalize_returned_ingredient_key(raw_row.get("ingredient_key"))
+    if returned_key and returned_key in evidence_by_key:
+        return returned_key, evidence_by_key[returned_key], "key"
+
+    raw_name = str(raw_row.get("ingredient") or "").strip()
+    row_name = _display_name(raw_name) if raw_name else ""
+    canonical_name = _canonical_name(row_name)
+    if canonical_name and canonical_name in name_to_key:
+        matched_key = name_to_key[canonical_name]
+        return matched_key, evidence_by_key[matched_key], "name"
+
+    fuzzy_key = _fuzzy_evidence_key(row_name, evidence_by_key)
+    if fuzzy_key:
+        return fuzzy_key, evidence_by_key[fuzzy_key], "fuzzy"
+
+    return None, None, "unmatched"
+
+
+def _safe_plan_float(value: object, *, warnings: list[dict[str, str]], ingredient: str, field_name: str) -> float | None:
+    try:
+        return _safe_float_or_none(value)
+    except ClaudeRestockValidationError:
+        warnings.append({"ingredient": ingredient, "warning": f"Claude returned an invalid {field_name}. Koe cleared it for manager review."})
+        return None
+
+
 def _validate_claude_plan(claude_payload: object, deterministic_context: dict) -> dict:
     evidence_packet = deterministic_context["evidence_packet"]
     ingredients = evidence_packet.get("ingredients") or []
-    evidence_by_key = {_canonical_name(ingredient["ingredient_name"]): ingredient for ingredient in ingredients}
-    evidence_keys = set(evidence_by_key)
+    evidence_by_key, evidence_name_to_key = _build_evidence_indexes(ingredients)
+    evidence_keys = set(evidence_by_key) | set(evidence_name_to_key)
     claude_payload = _normalize_claude_plan_shape(claude_payload)
     raw_rows = claude_payload.get("purchase_plan")
 
     rows: list[dict] = []
     warnings: list[dict[str, str]] = []
     seen: set[str] = set()
+    match_counts = {"key": 0, "name": 0, "fuzzy": 0, "unmatched": 0, "dropped_empty": 0}
+    logger.info("restock_claude_rows_before_validation count=%s", len(raw_rows) if isinstance(raw_rows, list) else 0)
     for raw_row in raw_rows:
         if not isinstance(raw_row, dict):
+            match_counts["dropped_empty"] += 1
             continue
-        ingredient = _display_name(str(raw_row.get("ingredient") or ""))
-        ingredient_key = _canonical_name(ingredient)
-        if ingredient_key not in evidence_by_key:
-            warnings.append(
+        raw_ingredient = str(raw_row.get("ingredient") or "").strip()
+        ingredient = _display_name(raw_ingredient) if raw_ingredient else ""
+        returned_key = _normalize_returned_ingredient_key(raw_row.get("ingredient_key"))
+        if not ingredient and returned_key:
+            ingredient = _display_name(returned_key.replace("_", " ").title())
+        if not ingredient and not returned_key:
+            match_counts["dropped_empty"] += 1
+            continue
+        matched_key, evidence, match_method = _resolve_claude_row_ingredient(raw_row, evidence_by_key, evidence_name_to_key)
+        match_counts[match_method] += 1
+        row_identity = matched_key or f"unmatched:{_canonical_name(ingredient) or returned_key}"
+        if row_identity in seen:
+            warnings.append({"ingredient": ingredient, "warning": "Claude returned a duplicate row for this ingredient. Koe kept the first one."})
+            continue
+        if evidence is None:
+            reason = "Koe could not confidently match this Claude recommendation to a known ingredient, so it needs manager review."
+            warnings.append({"ingredient": ingredient, "warning": reason})
+            rows.append(
                 {
-                    "ingredient": "Inventory",
-                    "warning": f"Claude returned an ingredient outside the evidence packet: {ingredient or 'unnamed item'}. Koe dropped it.",
+                    "ingredient_key": returned_key or None,
+                    "ingredient": ingredient,
+                    "projected_need": _safe_plan_float(raw_row.get("projected_need"), warnings=warnings, ingredient=ingredient, field_name="projected_need"),
+                    "adjusted_need": _safe_plan_float(raw_row.get("adjusted_need"), warnings=warnings, ingredient=ingredient, field_name="adjusted_need"),
+                    "current_stock": _safe_current_stock(raw_row.get("current_stock")),
+                    "current_stock_unit": None,
+                    "suggested_purchase": None,
+                    "unit": raw_row.get("unit"),
+                    "usage_multiplier": None,
+                    "action": "review",
+                    "status": "Needs Review",
+                    "confidence": "Low",
+                    "usage_signal": raw_row.get("usage_signal", "unknown"),
+                    "history_signal": raw_row.get("history_signal", "unknown"),
+                    "risk_signal": "needs_review",
+                    "reason": reason,
                 }
             )
+            seen.add(row_identity)
             continue
-        if ingredient_key in seen:
-            warnings.append({"ingredient": ingredient, "warning": "Claude returned a duplicate row for this ingredient. Koe kept the first one."})
+        if matched_key in seen:
+            warnings.append(
+                {
+                    "ingredient": ingredient,
+                    "warning": "Claude returned a duplicate row for this ingredient. Koe kept the first one.",
+                }
+            )
             continue
 
         reason = str(raw_row.get("reason") or "").strip()
         if not reason:
-            raise ClaudeRestockValidationError("Claude row is missing a reason")
+            reason = "Koe flagged this row for manager review."
 
         status = _safe_choice(raw_row.get("status"), ALLOWED_RESTOCK_STATUSES, field_name="status")
         action = _safe_choice(raw_row.get("action"), ALLOWED_ACTIONS, field_name="action")
@@ -1516,7 +1642,7 @@ def _validate_claude_plan(claude_payload: object, deterministic_context: dict) -
         history_signal = _safe_choice(raw_row.get("history_signal", "unknown"), ALLOWED_HISTORY_SIGNALS, field_name="history_signal")
         risk_signal = _safe_choice(raw_row.get("risk_signal", "needs_review"), ALLOWED_RISK_SIGNALS, field_name="risk_signal")
 
-        suggested_purchase = _safe_float_or_none(raw_row.get("suggested_purchase"))
+        suggested_purchase = _safe_plan_float(raw_row.get("suggested_purchase"), warnings=warnings, ingredient=ingredient, field_name="suggested_purchase")
         if suggested_purchase is not None and suggested_purchase < 0:
             suggested_purchase = 0
             warnings.append({"ingredient": ingredient, "warning": "Claude returned a negative purchase quantity. Koe repaired it to zero."})
@@ -1531,13 +1657,12 @@ def _validate_claude_plan(claude_payload: object, deterministic_context: dict) -
             if suggested_purchase is not None and "estimate" not in reason.lower():
                 suggested_purchase = None
                 warnings.append({"ingredient": ingredient, "warning": "Units did not match, so Koe removed the purchase quantity for manager review."})
-
-        evidence = evidence_by_key[ingredient_key]
         rows.append(
             {
-                "ingredient": evidence["ingredient_name"],
-                "projected_need": _safe_float_or_none(raw_row.get("projected_need")),
-                "adjusted_need": _safe_float_or_none(raw_row.get("adjusted_need")),
+                "ingredient_key": matched_key,
+                "ingredient": _evidence_display_name(evidence),
+                "projected_need": _safe_plan_float(raw_row.get("projected_need"), warnings=warnings, ingredient=ingredient, field_name="projected_need"),
+                "adjusted_need": _safe_plan_float(raw_row.get("adjusted_need"), warnings=warnings, ingredient=ingredient, field_name="adjusted_need"),
                 "current_stock": _safe_current_stock(raw_row.get("current_stock")),
                 "current_stock_unit": evidence.get("current_stock", {}).get("unit"),
                 "suggested_purchase": suggested_purchase,
@@ -1552,8 +1677,14 @@ def _validate_claude_plan(claude_payload: object, deterministic_context: dict) -
                 "reason": reason,
             }
         )
-        seen.add(ingredient_key)
+        seen.add(matched_key)
 
+    logger.info("restock_claude_rows_after_validation count=%s", len(rows))
+    logger.info("restock_claude_rows_matched_by_key count=%s", match_counts["key"])
+    logger.info("restock_claude_rows_matched_by_name count=%s", match_counts["name"])
+    logger.info("restock_claude_rows_matched_by_fuzzy count=%s", match_counts["fuzzy"])
+    logger.info("restock_claude_rows_kept_as_review_unmatched count=%s", match_counts["unmatched"])
+    logger.info("restock_claude_rows_dropped_empty count=%s", match_counts["dropped_empty"])
     if ingredients and not rows:
         raise ClaudeRestockValidationError("no_valid_purchase_rows")
 

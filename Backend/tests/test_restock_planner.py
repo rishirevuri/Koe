@@ -628,6 +628,52 @@ def _claude_chicken_row() -> dict:
     }
 
 
+def test_claude_row_with_exact_ingredient_key_matches(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Ground Beef",
+                normalized_item_name="ground beef",
+                quantity=5,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+    captured: dict = {}
+
+    def mock_generate(evidence_packet: dict) -> dict:
+        captured["ingredient_key"] = evidence_packet["ingredients"][0]["ingredient_key"]
+        return {
+            "purchase_plan": [
+                {
+                    "ingredient_key": "ground_beef",
+                    "ingredient": "Ground Beef",
+                    "suggested_purchase": 12,
+                    "unit": "pounds",
+                    "action": "buy",
+                    "status": "Ready",
+                    "confidence": "Medium",
+                    "reason": "Ground beef needs replenishment.",
+                }
+            ]
+        }
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", mock_generate)
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nBurger,200"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nBurger,Ground Beef,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert captured["ingredient_key"] == "ground_beef"
+    assert result["summary"]["planner_source"] == "claude"
+    assert result["purchase_plan"][0]["ingredient_key"] == "ground_beef"
+    assert result["purchase_plan"][0]["ingredient"] == "Ground Beef"
+
+
 def test_claude_planner_success_uses_evidence_and_returns_adaptive_plan(monkeypatch) -> None:
     current_count = _count_with_entries(
         [
@@ -910,6 +956,257 @@ def test_claude_row_field_aliases_are_normalized(monkeypatch) -> None:
     assert row["adjusted_need"] == 33
 
 
+def test_claude_singular_plural_name_mismatch_matches(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Chicken breasts",
+                normalized_item_name="chicken breasts",
+                quantity=10,
+                unit="pounds",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {
+            "purchase_plan": [
+                {
+                    **_claude_chicken_row(),
+                    "ingredient": "Chicken Breast",
+                }
+            ]
+        },
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nChicken Sandwich,400"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nChicken Sandwich,Chicken breasts,0.25,pounds"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    assert result["purchase_plan"][0]["ingredient"] == "Chicken breasts"
+    assert result["purchase_plan"][0]["ingredient_key"] == "chicken_breasts"
+
+
+def test_claude_minor_name_variation_matches(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Paper Cup",
+                normalized_item_name="paper cup",
+                quantity=100,
+                unit="cups",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {
+            "purchase_plan": [
+                {
+                    "ingredient": "Paper Cups",
+                    "suggested_purchase": 500,
+                    "unit": "cups",
+                    "action": "buy",
+                    "status": "Ready",
+                    "confidence": "Medium",
+                    "reason": "Cup usage is above current stock.",
+                }
+            ]
+        },
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nIced Tea,300"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nIced Tea,Paper Cup,1,cups"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    assert result["purchase_plan"][0]["ingredient"] == "Paper Cup"
+    assert result["purchase_plan"][0]["suggested_purchase"] == 500
+
+
+def test_claude_unknown_ingredient_is_kept_as_review(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Tomatoes",
+                normalized_item_name="tomatoes",
+                quantity=2,
+                unit="boxes",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {
+            "purchase_plan": [
+                {
+                    "ingredient": "Fake Vendor Item",
+                    "suggested_purchase": 10,
+                    "unit": "cases",
+                    "action": "buy",
+                    "status": "Ready",
+                    "confidence": "High",
+                    "reason": "This row should need review.",
+                }
+            ]
+        },
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nSalad,40"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nSalad,Tomatoes,0.1,boxes"),
+        use_claude=True,
+    )
+
+    row = result["purchase_plan"][0]
+    assert result["summary"]["planner_source"] == "claude"
+    assert row["ingredient"] == "Fake Vendor Item"
+    assert row["suggested_purchase"] is None
+    assert row["action"] == "review"
+    assert row["status"] == "Needs Review"
+    assert row["confidence"] == "Low"
+    assert "could not confidently match" in row["reason"]
+
+
+def test_claude_mixed_matched_and_unknown_rows_remain_claude(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Tomatoes",
+                normalized_item_name="tomatoes",
+                quantity=2,
+                unit="boxes",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {
+            "purchase_plan": [
+                {
+                    "ingredient_key": "tomatoes",
+                    "ingredient": "Tomatoes",
+                    "suggested_purchase": 3,
+                    "unit": "boxes",
+                    "action": "buy",
+                    "status": "Ready",
+                    "confidence": "Medium",
+                    "reason": "Tomatoes are low.",
+                },
+                {
+                    "ingredient": "Fake Vendor Item",
+                    "suggested_purchase": 10,
+                    "unit": "cases",
+                    "action": "buy",
+                    "status": "Ready",
+                    "confidence": "High",
+                    "reason": "Unknown but row-like.",
+                },
+            ]
+        },
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nSalad,40"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nSalad,Tomatoes,0.1,boxes"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    assert [row["ingredient"] for row in result["purchase_plan"]] == ["Tomatoes", "Fake Vendor Item"]
+    assert result["purchase_plan"][1]["status"] == "Needs Review"
+
+
+def test_claude_only_unknown_row_like_rows_do_not_fallback(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Tomatoes",
+                normalized_item_name="tomatoes",
+                quantity=2,
+                unit="boxes",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(
+        restock_planner_service,
+        "generate_restock_plan_with_claude",
+        lambda evidence_packet: {
+            "purchase_plan": [
+                {
+                    "ingredient": "Manager Special Sauce",
+                    "suggested_purchase": 1,
+                    "unit": "case",
+                    "action": "buy",
+                    "status": "Ready",
+                    "confidence": "High",
+                    "reason": "Claude returned a row-like recommendation.",
+                }
+            ]
+        },
+    )
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nSalad,40"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nSalad,Tomatoes,0.1,boxes"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "claude"
+    assert result["purchase_plan"][0]["ingredient"] == "Manager Special Sauce"
+    assert result["purchase_plan"][0]["status"] == "Needs Review"
+
+
+def test_claude_empty_rows_fall_back_with_no_valid_purchase_rows(monkeypatch) -> None:
+    count = _count_with_entries(
+        [
+            CountEntry(
+                item_name="Tomatoes",
+                normalized_item_name="tomatoes",
+                quantity=2,
+                unit="boxes",
+                status="Clean",
+            )
+        ]
+    )
+
+    monkeypatch.setattr(restock_planner_service, "generate_restock_plan_with_claude", lambda evidence_packet: {"purchase_plan": [{}]})
+
+    result = build_restock_plan(
+        count,
+        _csv("item_name,quantity_sold\nSalad,40"),
+        _csv("menu_item,ingredient_name,quantity_per_item,unit\nSalad,Tomatoes,0.1,boxes"),
+        use_claude=True,
+    )
+
+    assert result["summary"]["planner_source"] == "deterministic_fallback"
+    assert result["summary"]["fallback_reason"] == "claude_validation_failed:no_valid_purchase_rows"
+
+
 def test_claude_missing_plan_key_uses_repair_retry(monkeypatch) -> None:
     count = _count_with_entries(
         [
@@ -1097,7 +1394,7 @@ def test_malformed_claude_json_falls_back_with_specific_reason(monkeypatch) -> N
     assert result["summary"]["fallback_reason"].startswith("claude_json_parse_failed")
 
 
-def test_claude_unknown_ingredient_is_dropped_and_negative_purchase_is_repaired(monkeypatch) -> None:
+def test_claude_unknown_ingredient_is_kept_and_negative_purchase_is_repaired(monkeypatch) -> None:
     count = _count_with_entries(
         [
             CountEntry(
@@ -1159,10 +1456,12 @@ def test_claude_unknown_ingredient_is_dropped_and_negative_purchase_is_repaired(
     )
 
     assert result["summary"]["planner_source"] == "claude"
-    assert len(result["purchase_plan"]) == 1
-    assert result["purchase_plan"][0]["ingredient"] == "Tomatoes"
-    assert result["purchase_plan"][0]["suggested_purchase"] == 0
-    assert any("outside the evidence packet" in warning["warning"] for warning in result["review_warnings"])
+    assert len(result["purchase_plan"]) == 2
+    rows = {row["ingredient"]: row for row in result["purchase_plan"]}
+    assert rows["Tomatoes"]["suggested_purchase"] == 0
+    assert rows["Fake Vendor Item"]["suggested_purchase"] is None
+    assert rows["Fake Vendor Item"]["status"] == "Needs Review"
+    assert any("could not confidently match" in warning["warning"] for warning in result["review_warnings"])
 
 
 def test_claude_stock_unknown_forces_low_confidence(monkeypatch) -> None:
